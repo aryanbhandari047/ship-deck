@@ -123,9 +123,14 @@
         <ol class="thread" id="thread" aria-live="polite" aria-label="Conversation with the first mate"></ol>
         <button class="jump" id="thread-jump" type="button" hidden>New messages ↓</button>
         <form class="composer" id="chat-form">
+          <ul class="att-tray" id="att-tray" aria-label="Attachments to send" hidden></ul>
           <label class="sr-only" for="chat-text">Message to the first mate</label>
-          <textarea id="chat-text" rows="2" maxlength="4000" placeholder="Message the first mate…" spellcheck="true"></textarea>
+          <textarea id="chat-text" rows="2" maxlength="4000" placeholder="Message the first mate… (paste or drop screenshots and recordings)" spellcheck="true"></textarea>
           <div class="composer-foot">
+            <button class="act-btn attach-btn" id="attach-btn" type="button" title="Attach screenshots or screen recordings (or paste / drop them)" aria-label="Attach images or videos">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <input id="attach-input" type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm,.png,.jpg,.jpeg,.gif,.webp,.mp4,.mov,.webm" hidden>
             <span class="hint" id="chat-hint">Enter to send · Shift+Enter for a new line</span>
             <button class="act-btn primary" id="chat-send" type="submit">Send</button>
           </div>
@@ -245,6 +250,12 @@
       <button class="act-btn primary" id="confirm-yes" type="button">Queue order</button>
     </div>
   </section>
+
+  <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Attachment" hidden>
+    <button class="lightbox-close" id="lightbox-close" type="button" aria-label="Close">×</button>
+    <img id="lightbox-img" alt="">
+    <p class="lightbox-cap" id="lightbox-cap"></p>
+  </div>
 
   <div class="toasts" id="toasts" aria-live="polite"></div>
 

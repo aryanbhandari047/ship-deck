@@ -13,6 +13,8 @@ anything there. The captain's actions are deliberately narrow:
 - **Bridge chat**: free-text messages to the first mate, queued as `chat`
   orders; the first mate's replies come back through `bin/orders.js reply` and
   render in the same thread (safe markdown, PR links open in a new tab).
+  Screenshots and screen recordings can be pasted, dropped or attached
+  ([Attachments](#attachments), below).
 - **Orders to the first mate**: decisions, clean up, merge, status, new jobs,
   backlog starts and answers, bulk clean up, config changes. All are *queued*
   as JSON lines in `~/.ship-deck/orders.jsonl`; Ship Deck never acts on them.
@@ -27,12 +29,14 @@ Those fm-send calls (plus `tmux capture-pane` and `tmux list-windows`) are the
 only commands it runs, always via `execFile` with a fixed argv. The client only
 sends crew ids, library keys and allow-listed values; the tmux window always
 comes from `state/<id>.meta`. The only files it writes are in `~/.ship-deck/`
-(dir 0700, files 0600). It reads `~/.claude/` (transcripts, skills) but never
+(dir 0700, files 0600), attachments included. It reads `~/.claude/` (transcripts, skills) but never
 writes there.
 
 ![Ship Deck with the Bridge chat, on the sample fixture fleet](docs/screenshot.png)
 
 ![A decision drawer: lettered options become buttons](docs/decision.png)
+
+![Bridge attachments: a pasted screenshot and a recording with extracted stills, and a reply carrying an image](docs/attachments.png)
 
 *(Screenshots use the fabricated fixture home in `test/fixtures/home`.)*
 
@@ -98,7 +102,7 @@ Three append-only JSON-lines logs in `~/.ship-deck/` (or `$SHIP_DECK_ORDERS_DIR`
 | --- | --- | --- |
 | `orders.jsonl` | Ship Deck | `{id, ts, kind, target, text, status:"pending", ...payload}` |
 | `orders-ack.jsonl` | first mate (`ack`) | `{id, ts, status, note}`, status `acknowledged`, `done` or `declined` |
-| `replies.jsonl` | first mate (`reply`) | `{id, ts, kind:"reply", inReplyTo, text}` |
+| `replies.jsonl` | first mate (`reply`) | `{id, ts, kind:"reply", inReplyTo, text, attachments?}` |
 
 Order ids look like `o-20261012T160000123Z-ab12` and reply ids `r-...`; both
 sort by time. An order's lifecycle is its acks: pending (no ack) ->
@@ -108,7 +112,7 @@ acknowledged -> done or declined; the UI shows every step with its note.
 
 | kind | target | payload | meaning |
 | --- | --- | --- | --- |
-| `chat` | - | `text` (multi-line, max 4000) | Free-text message from the Bridge. Answer with `reply`. |
+| `chat` | - | `text` (multi-line, max 4000; may be empty when there are attachments), optional `attachments` | Free-text message from the Bridge. Answer with `reply`. |
 | `decision` | crew id | `option` (`A`-`H` or `null`), `text` | Answer to a needs-decision/blocked worker; `text` is `(B) <option text>` plus any note, or a free answer. |
 | `answer` | crew id | `text` | Legacy free-text answer (older UI). |
 | `status` | crew id | - | Ask the worker for a status update. |
@@ -131,6 +135,7 @@ node bin/orders.js ack <id> <acknowledged|done|declined> [note...]
 node bin/orders.js reply <order-id> [--ack done] "text"   # reply in the Bridge (optionally ack too)
 node bin/orders.js reply - "text"                  # unprompted message from the first mate
 node bin/orders.js reply <order-id|-> --file report.md    # long markdown (--file - reads stdin)
+node bin/orders.js reply <order-id|-> --attach shot.png [--attach demo.mp4] "text"   # with images/videos
 node bin/orders.js thread [--limit 30] [--json]    # the conversation as the captain sees it
 node bin/orders.js sessions [--json]               # recorded resume commands
 sh bin/orders-check.sh    # prints "ship-deck: N new captain order(s)" or nothing
@@ -147,6 +152,59 @@ firstmate's watcher as a custom wake check. It counts every new order of any
 kind, chat included (replies never wake it), and remembers the newest order id
 it has reported in `~/.ship-deck/orders-check.cursor`. All three scripts honour
 `SHIP_DECK_ORDERS_DIR`.
+
+## Attachments
+
+The Bridge composer takes images and videos three ways: paste (Cmd+V of a
+screenshot), drag and drop onto the Bridge, or the paperclip button. Each one
+shows as a thumbnail with a remove (×) button; up to 10 per message. A message
+may be attachments only.
+
+| kind | accepted (by magic bytes, server-side) | max each |
+| --- | --- | --- |
+| image | png, jpeg, gif, webp | 20 MB |
+| video | mp4, mov (QuickTime), webm | 200 MB |
+
+Anything else (pdf, svg, mkv, a text file renamed `.png`...) is refused with a
+clear message. The client's MIME type and file name are never trusted: the
+stored name gets the extension of the sniffed type.
+
+**Protocol.** Each file is uploaded as soon as it is added:
+
+1. `POST /api/attachments?name=<file name>` with the raw file as the body
+   (`X-Ship-Deck: 1`, any non-form `Content-Type`, from 127.0.0.1 only) ->
+   `{ok, attachment: {id, kind, name, mime, size}}`. `id` is a UUID.
+2. For a video, the browser draws stills with `<video>` + `<canvas>` (one
+   every 2 s, at most 40 spread over the whole video, JPEG up to 1280 px wide)
+   and uploads each as `POST /api/attachments?parent=<id>&name=frame-0001.jpg`,
+   then `name=index.json` (`{duration, width, height, frames: [{file, t}]}`;
+   the server rewrites it from known fields and adds the video path). The
+   chip shows "extracting frames N/M" and Send stays disabled until it ends.
+   Claude can read images but not video, so the stills are what the first mate
+   looks at. If the browser cannot decode the video, it is sent without
+   stills and the chip says so.
+3. `POST /api/orders {kind:"chat", text, attachments:[id, ...]}`: the server
+   checks every id and records `attachments: [{id, kind, name, path, size,
+   mime}]` on the order, where `path` is the absolute local file the first mate
+   reads; videos also carry `frames` (the stills dir, or `null`) and
+   `frameCount`.
+
+**Where files live:** `~/.ship-deck/attachments/<uuid>/<safe-name>` (plus
+`.meta.json`, and `frames/frame-NNNN.jpg` + `frames/index.json` for videos);
+dirs 0700, files 0600. `node bin/orders.js list --pending` prints each path
+(and the frames dir) under the message. Uploads removed before sending stay on
+disk until deleted by hand; any `attachments/<uuid>` dir no order or reply
+names is safe to delete.
+
+**Viewing:** the thread shows images as thumbnails (click to enlarge, Esc
+closes) and videos as inline players, served by `GET /api/attachments/<id>`
+with `Range` support (206/416). It only serves the regular file recorded in
+that attachment's `.meta.json`, addressed by UUID; symlinks and any other path
+are refused. Responses carry `nosniff` and a sandbox CSP.
+
+**First mate replies:** `reply --attach <path>` (repeatable) checks each file
+the same way before writing anything, copies it into the attachments dir and
+renders it in the thread (videos from replies get no stills).
 
 ## Per-worker configuration
 
@@ -189,6 +247,10 @@ show "resume id unknown (<harness>)".
 - `POST /api/send`, `POST /api/orders` and `POST /api/config` also require `X-Ship-Deck: 1`,
   `Content-Type: application/json`, a same-origin `Origin` when one is sent, and
   no cross-site `Sec-Fetch-Site`. Bodies are capped at 16 KB.
+- `POST /api/attachments` has the same header, Origin and Sec-Fetch-Site checks,
+  refuses form content types and non-loopback peers, and streams the raw body
+  to disk with the per-type cap applied as bytes arrive. Attachment ids must be
+  UUIDs; frame names must be `frame-NNNN.jpg` or `index.json`.
 - Action ids must match `^[a-z0-9][a-z0-9-]*$` and have a `state/<id>.meta`;
   the window recorded there must look like `session:window`.
 - File views only serve regular files directly under `data/<id>/` (symlinks out
@@ -212,6 +274,10 @@ wake check on chat orders, decision option parsing, Captain's Call against the
 real backlog format (`test/fixtures/backlog/real-format.md`), session discovery
 and `sessions.json`, skills, the markdown renderer, the config allow-list and
 the exact fm-send argv, and `bin/start.sh`.
+`test/attachments.test.js` covers magic-byte validation, safe names and path
+traversal (ids, frame names, tampered metadata, symlinks), size limits, the
+upload guards, Range serving, video stills, chat orders with attachments,
+`reply --attach` and the `list` output, with fabricated bytes only.
 `test/parsers.test.js` covers the parsers against the fabricated fixtures.
 `test/snapshot.test.js` builds a snapshot from a temp copy of the fixture home,
 checks missing files and an empty home, proves no file under the home changes
@@ -275,9 +341,10 @@ All paths are relative to the fleet home. Missing files are fine.
   Configuration, order buttons, the live terminal peek and the message box.
 - **Ship's Library** (header button): the first mate's permanent context files
   and the skills (name + description), rendered as safe markdown.
-- **Keyboard**: Enter sends a chat message, Shift+Enter adds a line; `/`
-  focuses the search box (or the library filter); `Esc` closes the confirm
-  dialog, the file view, the library or the drawer, or clears the filter.
+- **Keyboard**: Enter sends a chat message, Shift+Enter adds a line, Cmd+V
+  pastes a screenshot as an attachment; `/`
+  focuses the search box (or the library filter); `Esc` closes the image
+  lightbox, the confirm dialog, the file view, the library or the drawer, or clears the filter.
 
 Follows the OS light/dark theme and respects reduced motion.
 
@@ -288,6 +355,7 @@ server.js          HTTP server: static files, /api/*, POST guards
 lib/fleet.js       Parsers and the read-only snapshot builder
 lib/actions.js     Window lookup, pane peek, fm-send, data files (the only exec)
 lib/orders.js      Orders queue in ~/.ship-deck
+lib/attachments.js Bridge attachments: magic bytes, storage, stills, Range serving
 lib/library.js     Ship's Library allow-list (home files, memory, skills)
 lib/sessions.js    Claude session discovery and ~/.ship-deck/sessions.json
 lib/config.js      Per-harness model/effort allow-list and slash commands

@@ -25,7 +25,9 @@
     panes: { bridge: $('pane-bridge'), command: $('pane-command'), sessions: $('pane-sessions') },
     unread: $('unread-count'), needsTab: $('needs-tab-count'),
     thread: $('thread'), threadJump: $('thread-jump'), chatForm: $('chat-form'), chatText: $('chat-text'), chatSend: $('chat-send'),
-    notifyBtn: $('notify-btn'), bridgeSub: $('bridge-sub'),
+    notifyBtn: $('notify-btn'), bridgeSub: $('bridge-sub'), chatHint: $('chat-hint'),
+    attTray: $('att-tray'), attachBtn: $('attach-btn'), attachInput: $('attach-input'),
+    lightbox: $('lightbox'), lightboxImg: $('lightbox-img'), lightboxCap: $('lightbox-cap'), lightboxClose: $('lightbox-close'),
     watch: $('watch-card'), counts: $('counts'),
     needsCount: $('needs-count'), needsList: $('needs-list'),
     callsCount: $('calls-count'), callsList: $('calls-list'),
@@ -1156,9 +1158,12 @@
   }
 
   function nearBottom() { const el = ui.thread; return el.scrollHeight - el.scrollTop - el.clientHeight < 60; }
+  let pinned = true; // the thread was at the bottom before late-loading media grew it
   function scrollThread(force) {
-    if (force || nearBottom()) { ui.thread.scrollTop = ui.thread.scrollHeight; ui.threadJump.hidden = true; }
+    if (force || nearBottom()) { ui.thread.scrollTop = ui.thread.scrollHeight; ui.threadJump.hidden = true; pinned = true; }
   }
+  function mediaLoaded() { if (pinned) ui.thread.scrollTop = ui.thread.scrollHeight; }
+  if (window.ResizeObserver) new ResizeObserver(mediaLoaded).observe(ui.thread); // the tray or a taller draft shrinks it
   function dayLabel(ms) {
     const d = new Date(ms);
     const today = new Date();
@@ -1182,7 +1187,7 @@
       const unread = !seenId || x.id > seenId;
       return h('li', { class: 'msg mate' + (unread && seenId !== null ? ' unread' : ''), 'data-id': x.id },
         h('span', { class: 'fm-avatar small', 'aria-hidden': 'true' }, sailorSvg()),
-        h('div', { class: 'msg-col' }, h('div', { class: 'msg-meta' }, h('strong', { text: 'First mate' }), stampEl), quote, body));
+        h('div', { class: 'msg-col' }, h('div', { class: 'msg-meta' }, h('strong', { text: 'First mate' }), stampEl), quote, x.text ? body : null, attachmentsBlock(x.attachments)));
     }
     const isChat = x.kind === 'chat';
     const head = isChat ? null : h('div', { class: 'order-head' }, h('span', { class: 'o-kind', text: KIND_LABEL[x.kind] || x.kind }), x.target ? h('span', { class: 'mono', text: x.target }) : null,
@@ -1190,7 +1195,7 @@
     return h('li', { class: 'msg captain' + (isChat ? '' : ' action'), 'data-id': x.id },
       h('div', { class: 'msg-col' },
         h('div', { class: 'msg-meta' }, stampEl, chip(x.status)),
-        h('div', { class: 'bubble' }, head, h('div', { class: 'bubble-text', text: x.text })),
+        h('div', { class: 'bubble' + (x.text || head ? '' : ' bare') }, head, x.text ? h('div', { class: 'bubble-text', text: x.text }) : null, attachmentsBlock(x.attachments)),
         x.history && x.history.length ? lifecycle(x) : null));
   }
   function sailorSvg() {
@@ -1234,7 +1239,7 @@
     markSeen();
   }
   ui.threadJump.addEventListener('click', () => { scrollThread(true); markSeen(); });
-  ui.thread.addEventListener('scroll', () => { if (nearBottom()) { ui.threadJump.hidden = true; markSeen(); } });
+  ui.thread.addEventListener('scroll', () => { pinned = nearBottom(); if (pinned) { ui.threadJump.hidden = true; markSeen(); } });
 
   // Unread replies: newer than the last reply seen with the Bridge tab open.
   let seenId = store.get('seenReply');
@@ -1253,12 +1258,16 @@
 
   async function sendChat() {
     const text = ui.chatText.value.trim();
-    if (!text) { ui.chatText.focus(); return; }
+    if (attBusy()) { toast('Wait for the attachments to finish uploading', 'err'); return; }
+    if (outgoing.some((a) => a.state === 'error')) { toast('Remove the attachments that failed before sending', 'err'); return; }
+    const ids = outgoing.map((a) => a.id);
+    if (!text && !ids.length) { ui.chatText.focus(); return; }
     ui.chatSend.disabled = true;
-    const r = await post('/api/orders', { kind: 'chat', text });
+    const r = await post('/api/orders', ids.length ? { kind: 'chat', text, attachments: ids } : { kind: 'chat', text });
     ui.chatSend.disabled = false;
     if (r.ok) {
       clearDraft(ui.chatText);
+      clearOutgoing();
       thread.push({ type: 'order', ...r.order, history: [], pending: true });
       renderThread();
       scrollThread(true);
@@ -1266,8 +1275,250 @@
     } else {
       toast(`Message not sent: ${r.error}`, 'err');
     }
+    updateSendState();
     ui.chatText.focus();
   }
+
+  // ---------- attachments ----------
+  // Uploaded raw to POST /api/attachments as soon as they are added; a video also
+  // gets JPEG stills (one per ~2 s, max 40, 1280px wide) so the first mate can see it.
+  const ATT_MIME = {
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+    mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm',
+  };
+  const ATT_MAX = { image: 20 * 1024 * 1024, video: 200 * 1024 * 1024 };
+  const FRAME_EVERY = 2;
+  const MAX_FRAMES = 40;
+  const FRAME_WIDTH = 1280;
+  const MAX_ATTACH = 10;
+  let outgoing = []; // { key, file, name, kind, url, state: uploading|frames|ready|error, note, id }
+  let attSeq = 0;
+
+  function attKind(file) {
+    const ext = (/\.([a-z0-9]+)$/i.exec(file.name || '') || [])[1];
+    const mime = Object.values(ATT_MIME).includes(file.type) ? file.type : ATT_MIME[(ext || '').toLowerCase()];
+    return mime ? mime.split('/')[0] : null;
+  }
+  function sizeText(n) { return n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toFixed(1)} MB`; }
+  const attBusy = () => outgoing.some((a) => a.state === 'uploading' || a.state === 'frames');
+
+  function addFiles(list, pasted) {
+    for (const file of list) {
+      if (outgoing.length >= MAX_ATTACH) { toast(`At most ${MAX_ATTACH} attachments per message`, 'err'); break; }
+      const kind = attKind(file);
+      if (!kind) { toast(`${file.name || 'That file'}: only png, jpeg, gif, webp images and mp4, mov, webm videos`, 'err'); continue; }
+      if (file.size > ATT_MAX[kind]) { toast(`${file.name}: ${kind}s are limited to ${ATT_MAX[kind] / 1048576} MB`, 'err'); continue; }
+      const d = new Date();
+      const stamp = [d.getFullYear(), d.getMonth() + 1, d.getDate()].map((n) => String(n).padStart(2, '0')).join('') + '-' + [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join('');
+      const name = pasted && /^image\.\w+$/.test(file.name) ? `screenshot-${stamp}.${file.name.split('.').pop()}` : file.name;
+      const a = { key: ++attSeq, file, name, kind, url: URL.createObjectURL(file), state: 'uploading', note: 'uploading…', id: null };
+      outgoing.push(a);
+      uploadAttachment(a);
+    }
+    renderTray();
+  }
+  function removeAttachment(a) {
+    a.removed = true;
+    if (a.xhr) a.xhr.abort();
+    URL.revokeObjectURL(a.url);
+    outgoing = outgoing.filter((x) => x !== a);
+    renderTray();
+  }
+  function clearOutgoing() {
+    for (const a of outgoing) URL.revokeObjectURL(a.url);
+    outgoing = [];
+    renderTray();
+  }
+
+  // Raw POST with upload progress; resolves with the JSON body or rejects with its error.
+  function uploadRaw(url, blob, a, onProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      a.xhr = xhr;
+      xhr.open('POST', url);
+      xhr.setRequestHeader('X-Ship-Deck', '1');
+      xhr.setRequestHeader('Content-Type', blob.type || 'application/octet-stream');
+      if (onProgress) xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+      xhr.onload = () => {
+        a.xhr = null;
+        let body = {};
+        try { body = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
+        if (xhr.status === 200 && body.ok) resolve(body);
+        else reject(new Error(body.error || 'HTTP ' + xhr.status));
+      };
+      xhr.onerror = () => { a.xhr = null; reject(new Error('cannot reach the server')); };
+      xhr.onabort = () => { a.xhr = null; reject(new Error('cancelled')); };
+      xhr.send(blob);
+    });
+  }
+
+  async function uploadAttachment(a) {
+    const set = (state, note) => { if (a.removed) return; a.state = state; a.note = note; renderTray(); };
+    try {
+      const r = await uploadRaw('/api/attachments?name=' + encodeURIComponent(a.name), a.file, a,
+        (p) => { if (!a.removed) { a.note = `uploading ${Math.round(p * 100)}%`; renderTray(); } });
+      if (a.removed) return;
+      a.id = r.attachment.id;
+      if (a.kind !== 'video') return set('ready', sizeText(a.file.size));
+      set('frames', 'extracting frames…');
+      let n = 0;
+      try {
+        n = await extractFrames(a);
+      } catch (e) {
+        if (a.removed) return;
+        return set('ready', `no stills (${e.message}): the first mate cannot watch this video`);
+      }
+      set('ready', `${sizeText(a.file.size)} · ${n} still${n === 1 ? '' : 's'} for the first mate`);
+    } catch (e) {
+      set('error', e.message);
+    }
+  }
+
+  function once(el, ok, ms = 8000) {
+    return new Promise((resolve, reject) => {
+      const done = (fn, v) => { clearTimeout(timer); el.removeEventListener(ok, onOk); el.removeEventListener('error', onErr); fn(v); };
+      const onOk = () => done(resolve);
+      const onErr = () => done(reject, new Error('the browser cannot decode it'));
+      const timer = setTimeout(() => done(reject, new Error('timed out reading the video')), ms);
+      el.addEventListener(ok, onOk);
+      el.addEventListener('error', onErr);
+    });
+  }
+  async function seek(v, t) {
+    const p = once(v, 'seeked');
+    v.currentTime = t;
+    await p;
+  }
+
+  // Draws stills with <video> + <canvas> and uploads them next to the video,
+  // then frames/index.json with each still's timestamp. Returns the still count.
+  async function extractFrames(a) {
+    const v = document.createElement('video');
+    v.muted = true;
+    v.playsInline = true;
+    v.preload = 'auto';
+    const meta = once(v, 'loadedmetadata');
+    v.src = a.url;
+    await meta;
+    let dur = v.duration;
+    if (!Number.isFinite(dur)) { // MediaRecorder webm has no duration until the end is seeked
+      await seek(v, 1e7);
+      dur = Number.isFinite(v.duration) ? v.duration : v.currentTime;
+    }
+    if (!v.videoWidth || !(dur >= 0)) throw new Error('no video track');
+    const step = Math.max(FRAME_EVERY, dur / MAX_FRAMES);
+    const count = Math.min(MAX_FRAMES, Math.floor(dur / step) + 1);
+    const scale = Math.min(1, FRAME_WIDTH / v.videoWidth);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(v.videoWidth * scale);
+    canvas.height = Math.round(v.videoHeight * scale);
+    const ctx = canvas.getContext('2d');
+    const frames = [];
+    for (let i = 0; i < count; i++) {
+      if (a.removed) throw new Error('cancelled');
+      a.note = `extracting frames ${i + 1}/${count}`;
+      renderTray();
+      const t = Math.min(i * step, Math.max(0, dur - 0.05));
+      await seek(v, t);
+      ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.82));
+      if (!blob) throw new Error('could not encode a still');
+      const file = `frame-${String(i + 1).padStart(4, '0')}.jpg`;
+      await uploadRaw(`/api/attachments?parent=${a.id}&name=${file}`, blob, a);
+      frames.push({ file, t: Math.round(t * 1000) / 1000 });
+    }
+    const index = { duration: dur, width: canvas.width, height: canvas.height, frames };
+    await uploadRaw(`/api/attachments?parent=${a.id}&name=index.json`, new Blob([JSON.stringify(index)], { type: 'application/json' }), a);
+    v.removeAttribute('src');
+    v.load();
+    return frames.length;
+  }
+
+  // Each chip is built once and then only its note and state change (no thumbnail reloads).
+  function renderTray() {
+    ui.attTray.hidden = !outgoing.length;
+    for (const a of outgoing) {
+      if (!a.el) {
+        const thumb = a.kind === 'image'
+          ? h('img', { src: a.url, alt: '' })
+          : h('video', { src: a.url, muted: true, preload: 'metadata', 'aria-hidden': 'true' });
+        a.noteEl = h('span', { class: 'att-note' });
+        a.el = h('li', { title: a.name },
+          h('span', { class: 'att-thumb' + (a.kind === 'video' ? ' is-video' : '') }, thumb),
+          h('span', { class: 'att-info' }, h('span', { class: 'att-name', text: a.name }), a.noteEl),
+          h('button', { class: 'att-x', type: 'button', 'aria-label': `Remove ${a.name}`, title: 'Remove', text: '×', onclick: () => removeAttachment(a) }));
+      }
+      a.el.className = `att-chip ${a.state}`;
+      a.noteEl.textContent = a.note;
+    }
+    const els = outgoing.map((a) => a.el);
+    if (els.length !== ui.attTray.children.length || els.some((el, i) => ui.attTray.children[i] !== el)) ui.attTray.replaceChildren(...els);
+    updateSendState();
+  }
+  function updateSendState() {
+    const busy = attBusy();
+    ui.chatSend.disabled = busy;
+    ui.chatHint.textContent = busy ? 'Waiting for attachments…' : 'Enter to send · Shift+Enter for a new line';
+  }
+
+  // Attachments in the thread, served by GET /api/attachments/<id>. Elements are
+  // reused across re-renders so a playing video survives a thread refresh.
+  const mediaEls = new Map();
+  function attachmentEl(a) {
+    const src = '/api/attachments/' + encodeURIComponent(a.id);
+    if (a.kind === 'video') {
+      const stills = a.frames ? `${a.frameCount} stills for the first mate` : 'no stills';
+      return h('figure', { class: 'att-video' },
+        h('video', { src, controls: true, preload: 'metadata', playsinline: true, onloadedmetadata: mediaLoaded }),
+        h('figcaption', { title: a.path || '' }, a.name, ' · ', stills));
+    }
+    return h('button', { class: 'att-img', type: 'button', title: `${a.name} (click to enlarge)`, onclick: () => openLightbox(src, a.name) },
+      h('img', { src, alt: a.name, loading: 'lazy', onload: mediaLoaded }));
+  }
+  function attachmentsBlock(list) {
+    if (!list || !list.length) return null;
+    return h('div', { class: 'atts' }, list.map((a) => {
+      if (!mediaEls.has(a.id)) mediaEls.set(a.id, attachmentEl(a));
+      return mediaEls.get(a.id);
+    }));
+  }
+  let lightboxBack = null;
+  function openLightbox(src, name) {
+    lightboxBack = document.activeElement;
+    ui.lightboxImg.src = src;
+    ui.lightboxImg.alt = name;
+    ui.lightboxCap.textContent = name;
+    ui.lightbox.hidden = false;
+    ui.lightboxClose.focus();
+  }
+  function closeLightbox() {
+    ui.lightbox.hidden = true;
+    ui.lightboxImg.removeAttribute('src');
+    if (lightboxBack && lightboxBack.isConnected) lightboxBack.focus({ preventScroll: true });
+  }
+  ui.lightbox.addEventListener('click', (e) => { if (e.target !== ui.lightboxImg) closeLightbox(); });
+
+  ui.attachBtn.addEventListener('click', () => ui.attachInput.click());
+  ui.attachInput.addEventListener('change', () => { addFiles([...ui.attachInput.files]); ui.attachInput.value = ''; });
+  ui.chatText.addEventListener('paste', (e) => {
+    const files = [...((e.clipboardData && e.clipboardData.files) || [])];
+    if (!files.length) return;
+    e.preventDefault();
+    addFiles(files, true);
+  });
+  const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+  let dragDepth = 0;
+  ui.panes.bridge.addEventListener('dragenter', (e) => { if (hasFiles(e)) { dragDepth++; ui.panes.bridge.classList.add('dropping'); } });
+  ui.panes.bridge.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; ui.panes.bridge.classList.remove('dropping'); } });
+  ui.panes.bridge.addEventListener('dragover', (e) => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+  ui.panes.bridge.addEventListener('drop', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth = 0;
+    ui.panes.bridge.classList.remove('dropping');
+    addFiles([...e.dataTransfer.files]);
+  });
+
   persist(ui.chatText, 'chat');
   ui.chatForm.addEventListener('submit', (e) => { e.preventDefault(); sendChat(); });
   ui.chatText.addEventListener('keydown', (e) => {
@@ -1430,7 +1681,8 @@
       e.preventDefault();
       if (!ui.library.hidden) { ui.libraryFilter.focus(); ui.libraryFilter.select(); } else { ui.search.focus(); ui.search.select(); }
     } else if (e.key === 'Escape') {
-      if (confirmResolve) confirmResolve(false);
+      if (!ui.lightbox.hidden) closeLightbox();
+      else if (confirmResolve) confirmResolve(false);
       else if (!ui.library.hidden) closeLibrary();
       else if (selected && closeDataFile()) { /* back to the crew details */ }
       else if (selected) closeDrawer();

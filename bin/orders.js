@@ -3,7 +3,7 @@
 // Captain's orders queue and Bridge chat, for the first mate.
 //   node bin/orders.js list [--pending] [--json]
 //   node bin/orders.js ack <id> <acknowledged|done|declined> [note...]
-//   node bin/orders.js reply <order-id|-> [--ack <status>] [--file <path|->] [text...]
+//   node bin/orders.js reply <order-id|-> [--ack <status>] [--file <path|->] [--attach <path>]... [text...]
 //   node bin/orders.js thread [--json] [--limit N]
 //   node bin/orders.js sessions [--json]
 // Reads/writes ~/.ship-deck/ (SHIP_DECK_ORDERS_DIR overrides the directory).
@@ -11,11 +11,12 @@
 const fs = require('node:fs');
 const orders = require('../lib/orders');
 const sessions = require('../lib/sessions');
+const attachments = require('../lib/attachments');
 
 const USAGE = [
   'usage: node bin/orders.js list [--pending] [--json]',
   '       node bin/orders.js ack <id> <' + orders.ACK_STATUSES.join('|') + '> [note...]',
-  '       node bin/orders.js reply <order-id|-> [--ack <status>] [--file <path|->] [text...]',
+  '       node bin/orders.js reply <order-id|-> [--ack <status>] [--file <path|->] [--attach <path>]... [text...]',
   '       node bin/orders.js thread [--json] [--limit N]',
   '       node bin/orders.js sessions [--json]',
 ].join('\n');
@@ -34,6 +35,20 @@ function payloadLine(o) {
   return parts.join(' ');
 }
 
+// One line per attachment (absolute path to open), plus the frames dir of a video.
+function attachmentLines(o) {
+  const lines = [];
+  for (const a of o.attachments || []) {
+    lines.push(`    attachment: ${a.kind} ${a.name} (${attachments.humanSize(a.size || 0)}) ${a.path}`);
+    if (a.kind === 'video') {
+      lines.push(a.frames
+        ? `      frames: ${a.frames} (${a.frameCount} stills, index.json has timestamps)`
+        : '      frames: none extracted (watch the video in Ship Deck)');
+    }
+  }
+  return lines;
+}
+
 function main(argv, dir = orders.defaultDir(), out = console.log, err = console.error, readFile = (p) => fs.readFileSync(p === '-' ? 0 : p, 'utf8')) {
   const [cmd, ...rest] = argv;
   if (cmd === 'list') {
@@ -46,7 +61,8 @@ function main(argv, dir = orders.defaultDir(), out = console.log, err = console.
       out(`${o.id}  ${o.status.padEnd(12)} ${o.kind}${o.target ? ' ' + o.target : ''}  (${o.ts})`);
       const p = payloadLine(o);
       if (p) out(`    ${p}`);
-      out(indent(o.text));
+      if (o.text) out(indent(o.text));
+      for (const l of attachmentLines(o)) out(l);
       if (o.note) out(`    note: ${o.note}`);
     }
     return 0;
@@ -68,10 +84,12 @@ function main(argv, dir = orders.defaultDir(), out = console.log, err = console.
     if (!to) { err(USAGE); return 2; }
     let file = null;
     let ack = null;
+    const attach = [];
     const words = [];
     for (let i = 0; i < args.length; i++) {
       if (args[i] === '--file' && i + 1 < args.length) file = args[++i];
       else if (args[i] === '--ack' && i + 1 < args.length) ack = args[++i];
+      else if (args[i] === '--attach' && i + 1 < args.length) attach.push(args[++i]);
       else words.push(args[i]);
     }
     if (ack && !orders.ACK_STATUSES.includes(ack)) { err(`error: --ack must be one of: ${orders.ACK_STATUSES.join(', ')}`); return 2; }
@@ -79,9 +97,10 @@ function main(argv, dir = orders.defaultDir(), out = console.log, err = console.
     try {
       let text = words.join(' ');
       if (file !== null) text = readFile(file) + (text ? '\n\n' + text : '');
-      const r = orders.createReply(dir, to, text);
+      const r = orders.createReply(dir, to, text, { attach });
       if (ack) orders.ackOrder(dir, to, ack, '');
       out(`${r.id} reply${r.inReplyTo ? ' to ' + r.inReplyTo : ''}${ack ? ' (' + ack + ')' : ''}`);
+      for (const l of attachmentLines(r)) out(l);
       return 0;
     } catch (e) {
       err('error: ' + e.message);
@@ -99,7 +118,8 @@ function main(argv, dir = orders.defaultDir(), out = console.log, err = console.
     for (const x of items) {
       if (x.type === 'reply') out(`${x.ts}  first mate${x.inReplyTo ? ' (re ' + x.inReplyTo + ')' : ''}  ${x.id}`);
       else out(`${x.ts}  captain ${x.kind}${x.target ? ' ' + x.target : ''} [${x.status}]  ${x.id}`);
-      out(indent(x.text));
+      if (x.text) out(indent(x.text));
+      for (const l of attachmentLines(x)) out(l);
     }
     return 0;
   }

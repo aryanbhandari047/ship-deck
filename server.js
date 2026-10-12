@@ -16,6 +16,7 @@ const actions = require('./lib/actions');
 const library = require('./lib/library');
 const sessions = require('./lib/sessions');
 const config = require('./lib/config');
+const attachments = require('./lib/attachments');
 
 const DEFAULT_HOME = '/Users/aryanbhandari/Desktop/AI/firstmate';
 const MAX_BODY = 16 * 1024;
@@ -97,7 +98,9 @@ function allowedHosts(port) {
 function hostOk(req) {
   return allowedHosts(req.socket.localPort).has(String(req.headers.host || '').toLowerCase());
 }
-function postGuard(req) {
+// Raw uploads (POST /api/attachments) may not use the content types a plain HTML form can send.
+const FORM_TYPES = /^(application\/x-www-form-urlencoded|multipart\/form-data|text\/plain)\b/i;
+function postGuard(req, { raw = false } = {}) {
   if (req.headers['x-ship-deck'] !== '1') return 'missing X-Ship-Deck header';
   const origin = req.headers.origin;
   if (origin !== undefined) {
@@ -107,8 +110,13 @@ function postGuard(req) {
   }
   const site = req.headers['sec-fetch-site'];
   if (site && site !== 'same-origin' && site !== 'none') return 'cross-site request refused';
-  if (!/^application\/json\b/i.test(String(req.headers['content-type'] || ''))) return 'expected application/json';
+  const type = String(req.headers['content-type'] || '');
+  if (raw) return FORM_TYPES.test(type) ? 'form uploads refused; send the raw file' : null;
+  if (!/^application\/json\b/i.test(type)) return 'expected application/json';
   return null;
+}
+function loopback(req) {
+  return ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
 }
 
 function readBody(req) {
@@ -163,6 +171,25 @@ function createServer(opts) {
   const libOpts = { captainSkills: path.join(claudeDir, 'skills') };
   const tracker = sessions.createTracker({ home: opts.home, claudeDir, ordersDir });
 
+  // POST /api/attachments?name=<file name>: raw body, stored after a magic-byte check.
+  // POST /api/attachments?parent=<id>&name=frame-0001.jpg|index.json: a video's extracted stills.
+  async function handleUpload(req, res, url) {
+    const why = !loopback(req) ? 'uploads only from 127.0.0.1' : postGuard(req, { raw: true });
+    if (why) { req.resume(); return json(res, 403, { ok: false, error: why }); }
+    const name = url.searchParams.get('name') || '';
+    const parent = url.searchParams.get('parent');
+    try {
+      if (parent !== null) return json(res, 200, { ok: true, frame: await attachments.storeFrame(ordersDir, parent, name, req) });
+      const declaredSize = req.headers['content-length'] !== undefined ? Number(req.headers['content-length']) : undefined;
+      const a = await attachments.storeStream(ordersDir, req, { name, declaredSize });
+      return json(res, 200, { ok: true, attachment: { id: a.id, kind: a.kind, name: a.name, mime: a.mime, size: a.size } });
+    } catch (e) {
+      req.resume();
+      if (e instanceof attachments.AttachmentError) return json(res, e.status, { ok: false, error: e.message });
+      throw e;
+    }
+  }
+
   async function handlePost(req, res, url) {
     const why = postGuard(req);
     if (why) return json(res, 403, { ok: false, error: why });
@@ -209,6 +236,7 @@ function createServer(opts) {
     if (!hostOk(req)) return send(res, 421, 'misdirected request', 'text/plain');
     const url = new URL(req.url, 'http://127.0.0.1');
     try {
+      if (req.method === 'POST' && url.pathname === '/api/attachments') return await handleUpload(req, res, url);
       if (req.method === 'POST' && POST_ROUTES.has(url.pathname)) return await handlePost(req, res, url);
       if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'method not allowed', 'text/plain');
       if (url.pathname === '/api/fleet') {
@@ -242,6 +270,13 @@ function createServer(opts) {
         const id = decodeURIComponent(pm[1]);
         if (!knownIds(opts.home).has(id)) return json(res, 404, { error: 'unknown crew id' });
         return json(res, 200, await actions.peekPane(opts.home, id, exec));
+      }
+      const am = /^\/api\/attachments\/([^/]+)$/.exec(url.pathname);
+      if (am) {
+        try { return attachments.serve(ordersDir, decodeURIComponent(am[1]), req, res); } catch (e) {
+          if (e instanceof attachments.AttachmentError) return json(res, e.status, { ok: false, error: e.message });
+          throw e;
+        }
       }
       const fm = /^\/api\/file\/([^/]+)\/([^/]+)$/.exec(url.pathname);
       if (fm) return json(res, 200, actions.readDataFile(opts.home, decodeURIComponent(fm[1]), decodeURIComponent(fm[2])));
