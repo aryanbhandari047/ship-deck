@@ -651,12 +651,6 @@ a { color: var(--s-done); }
 .list .r-note { grid-column: 2 / -1; font-size: 11.5px; color: var(--ink-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .list.compact .r-note { -webkit-line-clamp: 1; }
 .list .empty { padding: 6px 2px; color: var(--ink-3); font-size: 12px; font-style: italic; }
-.calls { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
-.calls summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--ink-2); display: flex; align-items: center; gap: 8px; }
-.calls summary::-webkit-details-marker { display: none; }
-.calls summary::before { content: "▸"; color: var(--ink-3); transition: transform 0.2s; }
-.calls[open] summary::before { transform: rotate(90deg); }
-.calls .list { max-height: 320px; overflow-y: auto; margin-top: 6px; }
 
 /* ---------- drawer ---------- */
 .drawer-scrim { position: fixed; inset: 0; z-index: 40; background: rgba(8, 18, 30, 0.25); }
@@ -721,16 +715,10 @@ a { color: var(--s-done); }
 }
 .peek.peek-err { color: #f3a08a; white-space: pre-wrap; height: auto; min-height: 3em; }
 .msg-form { display: flex; gap: 6px; }
-.msg-form input, .order-form textarea, .answer-row textarea {
+.msg-form input {
   flex: 1; min-width: 0; padding: 6px 9px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); font: 12.5px var(--font-sans);
 }
-.order-form textarea, .answer-row textarea { width: 100%; resize: vertical; box-sizing: border-box; }
-:is(.msg-form input, .order-form textarea, .answer-row textarea):focus { outline: 0; border-color: var(--brass); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brass) 22%, transparent); }
-.confirm-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--s-blocked) 12%, var(--panel)); border: 1px solid var(--s-blocked); font-weight: 600; font-size: 12.5px; }
-.confirm-row span { flex: 1; }
-.answer-row { margin-top: 8px; display: grid; gap: 6px; }
-.order-form { display: grid; gap: 6px; margin-bottom: 8px; }
-.order-form .act-btn { justify-self: end; }
+.msg-form input:focus { outline: 0; border-color: var(--brass); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brass) 22%, transparent); }
 .list.orders .row { cursor: default; }
 .list.orders button.row { cursor: pointer; }
 .list.orders .row.pending .o-status { color: var(--s-needs-decision); font-weight: 700; }
@@ -832,3 +820,14 @@ a { color: var(--s-done); }
 }
 .task-drawer > .decision-sec:not([hidden]) { margin-top: 0; padding: 10px 12px 12px; border: 1px solid color-mix(in srgb, var(--s-needs-decision) 50%, var(--line)); border-radius: 10px; background: color-mix(in srgb, var(--s-needs-decision) 5%, var(--panel)); margin-bottom: 16px; }
 .task-drawer > .decision-sec h3 { margin-top: 2px; }
+
+/* per-worker configuration */
+.cfg-row { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 5px 0; border-top: 1px solid var(--line); font-size: 12.5px; }
+.cfg-label { color: var(--ink-3); text-transform: capitalize; }
+.cfg-val { overflow-wrap: anywhere; }
+.cfg-row select, .job-config select { padding: 4px 6px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); font: 12px var(--font-sans); max-width: 190px; }
+.cfg-fixed { margin: 0; grid-column: 3 / -1; font-style: italic; }
+.job-config { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.job-config label { display: grid; gap: 4px; font-weight: 600; min-width: 0; }
+.job-config select { max-width: none; width: 100%; background: var(--panel-2); }
+.job-config select:disabled { opacity: 0.55; }

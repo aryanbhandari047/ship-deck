@@ -160,6 +160,11 @@
               <label><input type="radio" name="job-kind" value="ship" checked> <span><strong>Ship</strong> make the change</span></label>
               <label><input type="radio" name="job-kind" value="scout"> <span><strong>Scout</strong> diagnose and report only</span></label>
             </fieldset>
+            <div class="job-config">
+              <label>Harness <select id="job-harness"></select></label>
+              <label title="Default: the first mate's usual model">Model <select id="job-model"></select></label>
+              <label title="Auto: the first mate decides">Effort <select id="job-effort"></select></label>
+            </div>
             <label>What should the crew do?
               <textarea id="job-text" rows="4" maxlength="2000" placeholder="Describe the job: goal, links, constraints…"></textarea>
             </label>

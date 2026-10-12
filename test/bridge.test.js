@@ -475,3 +475,108 @@ test('start.sh starts nothing when the port is already served', (t) => {
     } catch (e) { reject(e); }
   }));
 });
+
+// ---------- per-worker configuration (addendum 1) ----------
+
+test('config allow-list per harness and the exact slash command', () => {
+  const config = require('../lib/config');
+  assert.deepEqual(config.allowed('claude', 'effort'), ['low', 'medium', 'high', 'xhigh', 'max']);
+  assert.deepEqual(config.allowed('claude', 'model'), ['claude-opus-5-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001', 'claude-fable-5-1']);
+  assert.deepEqual(config.allowed('codex', 'effort'), ['low', 'medium', 'high', 'xhigh']);
+  assert.equal(config.allowed('codex', 'model'), null, 'codex model: show current only');
+  assert.deepEqual(config.allowed('grok', 'effort'), ['low', 'medium', 'high']);
+  for (const h of ['pi', 'opencode']) for (const f of ['effort', 'model']) assert.equal(config.allowed(h, f), null, `${h} ${f}`);
+
+  assert.equal(config.slashCommand('claude', 'effort', 'xhigh'), '/effort xhigh');
+  assert.equal(config.slashCommand('claude', 'model', 'claude-sonnet-5'), '/model claude-sonnet-5');
+  assert.throws(() => config.slashCommand('claude', 'effort', 'turbo'), /effort must be one of/);
+  assert.throws(() => config.slashCommand('claude', 'model', 'claude-opus-5-5; rm -rf /'), /model must be one of/);
+  assert.throws(() => config.slashCommand('claude', 'permissions', 'bypass'), /field must be/);
+  assert.throws(() => config.slashCommand('codex', 'effort', 'high'), /cannot be changed live/);
+  assert.throws(() => config.checkConfig('codex', 'model', 'gpt-x'), /cannot be changed for codex/);
+  assert.throws(() => config.checkConfig('grok', 'effort', 'max'), /effort must be one of: low, medium, high/);
+  assert.throws(() => config.checkConfig('pi', 'effort', 'low'), /cannot be changed for pi/);
+  assert.throws(() => config.checkConfig('vim', 'effort', 'low'), /unknown harness/);
+  assert.throws(() => config.checkConfig('claude', 'effort', ['high']), /effort must be one of/);
+
+  assert.deepEqual(config.checkJobConfig({}), {});
+  assert.deepEqual(config.checkJobConfig({ harness: 'claude', model: '', effort: 'auto' }), { harness: 'claude', effort: 'auto' });
+  assert.deepEqual(config.checkJobConfig({ harness: 'claude', model: 'claude-fable-5-1', effort: 'max' }), { harness: 'claude', model: 'claude-fable-5-1', effort: 'max' });
+  assert.throws(() => config.checkJobConfig({ harness: 'codex', model: 'gpt-x' }), /cannot be changed/);
+  assert.throws(() => config.checkJobConfig({ harness: 'claude', effort: 'ludicrous' }), /effort must be one of/);
+
+  const task = { id: 'alpha-fix', harness: 'claude', model: 'default', effort: 'high' };
+  const cfg = (o) => ({ kind: 'config', target: 'alpha-fix', status: 'pending', ts: '2026-01-05T10:00:00Z', ...o });
+  const cur = config.currentConfig(task, [
+    cfg({ field: 'model', value: 'claude-sonnet-5', applied: false }),
+    cfg({ field: 'effort', value: 'max', applied: true }),
+    cfg({ field: 'effort', value: 'low', applied: true }),
+    cfg({ field: 'model', value: 'claude-haiku-4-5-20251001', applied: false, status: 'declined' }),
+  ]); // newest first
+  assert.equal(cur.effort, 'max', 'latest applied change wins over meta');
+  assert.equal(cur.model, 'default', 'unapplied change does not override meta');
+  assert.deepEqual(cur.pending, { model: 'claude-sonnet-5' });
+});
+
+test('HTTP config: claude applies live through fm-send with a fixed argv; others queue applied:false', async (t) => {
+  const home = tempHome(t);
+  const ordersDir = tempDir(t, 'ship-deck-orders-');
+  fs.writeFileSync(path.join(home, 'state', 'grok-lane.meta'), 'window=fleet:fm-grok-lane\nharness=grok\nkind=ship\n');
+  fs.writeFileSync(path.join(home, 'state', 'pi-lane.meta'), 'window=fleet:fm-pi-lane\nharness=pi\nkind=ship\n');
+  fs.writeFileSync(path.join(home, 'state', 'no-window.meta'), 'harness=claude\nkind=ship\n');
+  const calls = [];
+  const exec = async (file, args, o) => { calls.push({ file, args, o }); return { code: 0, stdout: '', stderr: '' }; };
+  const server = createServer({ home, tmux: false, staleDays: 7, ordersDir, memoryDir: null, claudeDir: tempDir(t, 'ship-deck-claude-'), exec });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const post = (p, body, headers = {}) => fetch(base + p, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Ship-Deck': '1', ...headers }, body: JSON.stringify(body) });
+
+  let r = await post('/api/config', { id: 'alpha-fix', field: 'effort', value: 'max', text: '/exit' });
+  assert.equal(r.status, 200);
+  let body = await r.json();
+  assert.equal(body.applied, true);
+  assert.equal(body.command, '/effort max');
+  assert.deepEqual(calls.map((c) => [c.file, c.args]), [[path.join(home, 'bin', 'fm-send.sh'), ['fleet:fm-alpha-fix', '/effort max']]], 'fixed argv, value from the allow-list');
+  assert.deepEqual(Object.keys(body.order), ['id', 'ts', 'kind', 'target', 'text', 'status', 'field', 'value', 'applied']);
+  assert.equal(body.order.kind, 'config');
+
+  r = await post('/api/config', { id: 'alpha-fix', field: 'model', value: 'claude-opus-5-5' });
+  assert.deepEqual(calls.at(-1).args, ['fleet:fm-alpha-fix', '/model claude-opus-5-5']);
+
+  const before = calls.length;
+  for (const [req, status] of [
+    [{ id: 'alpha-fix', field: 'effort', value: 'turbo' }, 400],
+    [{ id: 'alpha-fix', field: 'model', value: 'gpt-5' }, 400],
+    [{ id: 'alpha-fix', field: 'prompt', value: 'hi' }, 400],
+    [{ id: 'beta-scout', field: 'model', value: 'gpt-x' }, 400],
+    [{ id: 'grok-lane', field: 'effort', value: 'xhigh' }, 400],
+    [{ id: 'pi-lane', field: 'effort', value: 'low' }, 400],
+    [{ id: 'ghost', field: 'effort', value: 'low' }, 404],
+    [{ id: '../x', field: 'effort', value: 'low' }, 400],
+  ]) assert.equal((await post('/api/config', req)).status, status, JSON.stringify(req));
+  assert.equal((await post('/api/config', { id: 'alpha-fix', field: 'effort', value: 'low' }, { 'X-Ship-Deck': '0' })).status, 403, 'CSRF guard');
+  assert.equal(calls.length, before, 'rejected changes never execute');
+
+  for (const [id, value] of [['beta-scout', 'xhigh'], ['grok-lane', 'medium'], ['no-window', 'low']]) {
+    body = await (await post('/api/config', { id, field: 'effort', value })).json();
+    assert.equal(body.ok, true, id);
+    assert.equal(body.applied, false, `${id} is queued for relaunch`);
+    assert.equal(body.order.applied, false);
+  }
+  assert.equal(calls.length, before, 'queued changes run nothing');
+
+  assert.equal((await post('/api/orders', { kind: 'config', target: 'alpha-fix', harness: 'claude', field: 'effort', value: 'low', applied: true })).status, 400, 'clients cannot forge config orders');
+  r = await post('/api/orders', { kind: 'new-task', project: 'harbor-app', taskKind: 'ship', harness: 'claude', model: 'claude-sonnet-5', effort: 'auto', text: 'x' });
+  assert.equal(r.status, 200);
+  assert.deepEqual((({ harness, model, effort }) => ({ harness, model, effort }))((await r.json()).order), { harness: 'claude', model: 'claude-sonnet-5', effort: 'auto' });
+  assert.equal((await post('/api/orders', { kind: 'new-task', project: 'harbor-app', taskKind: 'ship', harness: 'claude', model: 'gpt-5', text: 'x' })).status, 400);
+
+  const s = await (await fetch(base + '/api/fleet')).json();
+  const a = s.tasks.find((x) => x.id === 'alpha-fix');
+  assert.equal(a.config.effort, 'max');
+  assert.equal(a.config.model, 'claude-opus-5-5');
+  assert.deepEqual(s.tasks.find((x) => x.id === 'beta-scout').config.pending, { effort: 'xhigh' });
+  assert.equal(s.configOptions.codex.model, null);
+  assert.match(run(ordersDir, 'list').out, /config alpha-fix .*\n {4}field=effort value=max applied=true/);
+});

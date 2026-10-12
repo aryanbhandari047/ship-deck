@@ -31,6 +31,7 @@
     callsCount: $('calls-count'), callsList: $('calls-list'),
     queuedCount: $('queued-count'), queuedList: $('queued-list'),
     jobForm: $('job-form'), jobProject: $('job-project'), jobText: $('job-text'), newJob: $('new-job'),
+    jobHarness: $('job-harness'), jobModel: $('job-model'), jobEffort: $('job-effort'),
     doneList: $('done-list'), cleanupDone: $('cleanup-done'), prList: $('pr-list'),
     ordersCount: $('orders-count'), ordersList: $('orders-list'),
     sessionsList: $('sessions-list'), sessionsFilter: $('sessions-filter'),
@@ -356,7 +357,7 @@
   // ---------- orders: posting, confirm dialog, lifecycle ----------
   const KIND_LABEL = {
     chat: 'Chat', cleanup: 'Clean up', merge: 'Merge PR', answer: 'Answer', decision: 'Decision', status: 'Status?',
-    'new-task': 'New job', 'cleanup-done': 'Clean up done', 'backlog-start': 'Start', 'backlog-answer': 'Answer call', order: 'Order',
+    'new-task': 'New job', 'cleanup-done': 'Clean up done', 'backlog-start': 'Start', 'backlog-answer': 'Answer call', config: 'Config', order: 'Order',
   };
   const IRREVERSIBLE = new Set(['merge', 'cleanup', 'cleanup-done']);
   const ORDER_COLOR = { pending: 'needs-decision', acknowledged: 'working', done: 'done', declined: 'failed' };
@@ -443,7 +444,8 @@
   function chip(status) { return h('span', { class: 'chip', style: `--c:${stateVar(ORDER_COLOR[status] || 'unknown')}`, text: status }); }
   function payloadText(o) {
     if (o.kind === 'cleanup-done' && o.targets) return `${o.targets.length} crew: ${o.targets.join(', ')}`;
-    if (o.kind === 'new-task') return `${o.taskKind || 'job'} in ${o.project}`;
+    if (o.kind === 'new-task') return `${o.taskKind || 'job'} in ${o.project}${o.harness ? ` · ${o.harness}${o.model ? ' ' + o.model : ''}${o.effort ? ' · effort ' + o.effort : ''}` : ''}`;
+    if (o.kind === 'config') return `${o.field} → ${o.value} · ${o.applied ? 'applied live' : 'on relaunch'}`;
     if (o.item) return o.item + (o.option ? ` · option ${o.option}` : '');
     if (o.option) return `option ${o.option}`;
     return '';
@@ -569,6 +571,7 @@
       : [emptyRow('No orders yet.')]));
 
     renderJobProjects();
+    renderJobConfig();
   }
 
   function needsCaptain() { return snap.tasks.filter((t) => ATTENTION.has(t.state) && !t.stale).sort(sortTasks); }
@@ -591,6 +594,24 @@
       ...names.map(([n, mode]) => h('option', { value: n, text: mode ? `${n}  ·  ${mode}` : n })));
     if (want && names.some(([n]) => n === want)) ui.jobProject.value = want;
   }
+  // Harness/model/effort pickers from the server's allow-list; '' model = first mate default.
+  function fillSelect(sel, items, want) {
+    sel.replaceChildren(...items.map(([v, label]) => h('option', { value: v, text: label })));
+    sel.value = items.some(([v]) => v === want) ? want : items[0][0];
+  }
+  function renderJobConfig() {
+    const o = snap.configOptions;
+    if (!o || unchanged('job-config', o, ui.jobHarness.value)) return;
+    if (!ui.jobHarness.options.length) fillSelect(ui.jobHarness, Object.keys(o).map((k) => [k, k]), store.get('draft.job.harness') || 'claude');
+    const spec = o[ui.jobHarness.value] || {};
+    fillSelect(ui.jobModel, [['', 'Default'], ...(spec.model || []).map((m) => [m, m])], store.get('draft.job.model') || '');
+    fillSelect(ui.jobEffort, [['auto', 'Auto'], ...(spec.effort || []).map((e) => [e, e])], store.get('draft.job.effort') || 'auto');
+    ui.jobModel.disabled = !spec.model;
+    ui.jobEffort.disabled = !spec.effort;
+  }
+  for (const [el, key] of [[ui.jobHarness, 'harness'], [ui.jobModel, 'model'], [ui.jobEffort, 'effort']]) {
+    el.addEventListener('change', () => { store.set('draft.job.' + key, el.value); if (key === 'harness') { store.set('draft.job.model', null); store.set('draft.job.effort', null); renderJobConfig(); } });
+  }
   persist(ui.jobProject, 'job.project');
   persist(ui.jobText, 'job.text');
   const savedKind = store.get('draft.job.kind');
@@ -606,8 +627,12 @@
     const text = ui.jobText.value.trim();
     if (!project) { ui.jobProject.focus(); return; }
     if (!text) { ui.jobText.focus(); return; }
-    const ok = await queueOrder({ kind: 'new-task', project, taskKind, text }, {
-      title: `Queue a new ${taskKind} job in ${project}?`, body: text,
+    const harness = ui.jobHarness.value || 'claude';
+    const model = ui.jobModel.disabled ? '' : ui.jobModel.value;
+    const effort = ui.jobEffort.disabled ? 'auto' : ui.jobEffort.value;
+    const setup = `${harness} · ${model || 'first mate default model'} · effort ${effort}`;
+    const ok = await queueOrder({ kind: 'new-task', project, taskKind, harness, model, effort, text }, {
+      title: `Queue a new ${taskKind} job in ${project}?`, body: `${text}\n\n(${setup})`,
     });
     if (ok) { clearDraft(ui.jobText); }
   });
@@ -688,6 +713,7 @@
     if (!unchanged('drawer-info', t, snap.tmux.available)) td.info.replaceChildren(...taskInfo(t));
     if (!unchanged('drawer-decision', t.id, t.state, lastNote(t), t.options)) renderDecision(t);
     if (!unchanged('drawer-resume', t.id, t.session)) td.resume.replaceChildren(h('h3', { text: 'Resume in terminal' }), resumeBlock(t.session));
+    if (!unchanged('drawer-config', t.id, t.config, t.window, snap.configOptions)) renderConfig(t);
     renderTaskOrders(t);
     td.peekWrap.hidden = !t.window;
     td.msgWrap.hidden = !t.window;
@@ -776,6 +802,45 @@
       }));
   }
 
+  // Current harness/model/effort with allow-listed pickers; claude workers apply live.
+  function renderConfig(t) {
+    const c = t.config || { harness: t.harness || 'claude', model: t.model, effort: t.effort, pending: {} };
+    const spec = (snap.configOptions || {})[c.harness] || {};
+    const live = !!spec.live && !!t.window;
+    const show = (field) => [c[field] || 'default', c.pending[field] ? ` → ${c.pending[field]} on relaunch` : ''].join('');
+    const rows = [];
+    for (const field of ['effort', 'model']) {
+      const list = spec[field];
+      if (!list) {
+        rows.push(h('div', { class: 'cfg-row' }, h('span', { class: 'cfg-label', text: field }), h('span', { class: 'cfg-val mono', text: show(field) }), h('span', { class: 'hint cfg-fixed', text: 'show current only' })));
+        continue;
+      }
+      const sel = h('select', { 'aria-label': `${field} for ${t.id}` }, ...list.map((v) => h('option', { value: v, text: v })));
+      sel.value = list.includes(c.pending[field] || c[field]) ? (c.pending[field] || c[field]) : list[0];
+      const btn = h('button', { class: 'act-btn', type: 'button', text: live ? 'Apply live' : 'Queue change', onclick: () => applyConfig(t, field, sel.value, live) });
+      rows.push(h('div', { class: 'cfg-row' }, h('span', { class: 'cfg-label', text: field }), h('span', { class: 'cfg-val mono', text: show(field) }), sel, btn));
+    }
+    td.config.replaceChildren(h('h3', { text: 'Configuration' }),
+      h('p', { class: 'hint', text: `Harness: ${c.harness}. ` + (live
+        ? 'Changes are sent as /effort or /model to its terminal via fm-send; Claude Code queues slash commands, so they apply from its next turn.'
+        : spec.live ? 'No tmux window recorded, so changes are queued for the first mate to apply on relaunch.'
+          : `${c.harness} workers cannot change live; changes are queued for the first mate to apply on relaunch.`) }),
+      ...rows);
+  }
+  async function applyConfig(t, field, value, live) {
+    const ok = await confirmDialog({
+      title: `Set ${field} of ${t.id} to ${value}?`,
+      body: live
+        ? `Sends “/${field} ${value}” into its terminal now (fm-send). It applies from the worker's next turn, and a config order is recorded for the first mate.`
+        : `Queues a config order; the first mate applies it when it next relaunches ${t.id}.`,
+      yes: live ? 'Apply now' : 'Queue change',
+    });
+    if (!ok) return;
+    const r = await post('/api/config', { id: t.id, field, value });
+    if (r.ok) { toast(r.applied ? `Sent ${r.command} to ${t.id}` : `Queued: ${t.id} ${field} → ${value} on relaunch`, 'ok'); poll(); }
+    else toast(`Config change failed: ${r.error}`, 'err');
+  }
+
   function buildTaskDrawer(t) {
     stopPeek();
     const id = t.id;
@@ -794,6 +859,7 @@
     d.info = h('div', { class: 'task-info' });
     d.decision = h('section', { class: 'drawer-sec decision-sec', hidden: true });
     d.resume = h('section', { class: 'drawer-sec' });
+    d.config = h('section', { class: 'drawer-sec config-sec' });
 
     // Orders to the first mate about this worker.
     d.mergeBtn = h('button', { class: 'act-btn', type: 'button', text: 'Merge its PR', onclick: () => queueOrder({ kind: 'merge', target: id }, { title: `Ask the first mate to merge ${id}'s PR?`, body: (td && td.task && td.task.pr) || null }) });
@@ -841,10 +907,10 @@
       h('div', { class: 'sec-head' }, h('h3', { text: 'Terminal' }), d.peekState, d.pauseBtn),
       d.peekText);
 
-    d.root = h('div', { class: 'task-drawer' }, d.file, d.decision, d.info, d.resume, ordersSec, d.peekWrap, d.msgWrap);
+    d.root = h('div', { class: 'task-drawer' }, d.file, d.decision, d.info, d.resume, d.config, ordersSec, d.peekWrap, d.msgWrap);
     ui.drawerBody.replaceChildren(d.root);
     ui.drawerBody.scrollTop = 0;
-    for (const k of ['drawer-info', 'drawer-orders', 'drawer-decision', 'drawer-resume']) sigs.delete(k);
+    for (const k of ['drawer-info', 'drawer-orders', 'drawer-decision', 'drawer-resume', 'drawer-config']) sigs.delete(k);
     td = d;
     if (t.window) startPeek();
   }

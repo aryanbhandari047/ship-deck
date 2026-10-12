@@ -5,26 +5,36 @@ in-flight task is a crew member at a deck station; the bridge shows the captain,
 the first mate at the helm and the watch lamp; queued backlog items sit in the
 cargo hold as crates. Inspired by [Munder Difflin](https://github.com/HarnessMD/munder-difflin).
 
-It is **read-only against the fleet home**: it never writes, renames or deletes
+It is the captain's control surface: everything day-to-day happens here, and
+every live Claude Code session stays resumable from a terminal. It is
+**read-only against the fleet home**: it never writes, renames or deletes
 anything there. The captain's actions are deliberately narrow:
 
+- **Bridge chat**: free-text messages to the first mate, queued as `chat`
+  orders; the first mate's replies come back through `bin/orders.js reply` and
+  render in the same thread (safe markdown, PR links open in a new tab).
+- **Orders to the first mate**: decisions, clean up, merge, status, new jobs,
+  backlog starts and answers, bulk clean up, config changes. All are *queued*
+  as JSON lines in `~/.ship-deck/orders.jsonl`; Ship Deck never acts on them.
 - **Terminal peek**: the crew drawer shows the last 80 lines of the worker's
-  tmux pane (`tmux capture-pane -p -t <window> -S -80`), refreshed every 2 s,
-  with a pause toggle.
-- **Message a worker**: a one-line message (max 2000 chars, confirmed in the UI)
-  sent with exactly `FM_HOME=<home> <home>/bin/fm-send.sh <window> <message>`.
-- **Orders to the first mate**: "Clean up this worker", "Merge its PR",
-  "Answer decision…", "Ask for status" and free-text orders are *queued* as JSON
-  lines in `~/.ship-deck/orders.jsonl`; Ship Deck never acts on them itself.
+  tmux pane (`tmux capture-pane -p -t <window> -S -80`), refreshed every 2 s.
+- **Message a worker**: one line (max 2000 chars, confirmed in the UI) sent with
+  exactly `FM_HOME=<home> <home>/bin/fm-send.sh <window> <message>`.
+- **Live config** (claude workers only): `/effort <level>` or `/model <model>`
+  through the same fm-send call, built server-side from an allow-list.
 
-Those three commands (plus `tmux list-windows`) are the only ones it runs, always
-via `execFile` with a fixed argv. The client only sends a crew id; the tmux
-window always comes from `state/<id>.meta`. The only files it writes are in
-`~/.ship-deck/` (dir 0700, files 0600).
+Those fm-send calls (plus `tmux capture-pane` and `tmux list-windows`) are the
+only commands it runs, always via `execFile` with a fixed argv. The client only
+sends crew ids, library keys and allow-listed values; the tmux window always
+comes from `state/<id>.meta`. The only files it writes are in `~/.ship-deck/`
+(dir 0700, files 0600). It reads `~/.claude/` (transcripts, skills) but never
+writes there.
 
-![Ship Deck rendering the sample fixture fleet](docs/screenshot.png)
+![Ship Deck with the Bridge chat, on the sample fixture fleet](docs/screenshot.png)
 
-*(Screenshot uses the fabricated fixture home in `test/fixtures/home`.)*
+![A decision drawer: lettered options become buttons](docs/decision.png)
+
+*(Screenshots use the fabricated fixture home in `test/fixtures/home`.)*
 
 ## Run
 
@@ -38,42 +48,145 @@ node server.js --no-tmux            # skip the tmux liveness probe
 node server.js --stale-days 14      # stale threshold, default 7 (or SHIP_DECK_STALE_DAYS)
 node server.js --orders-dir DIR     # orders queue, default ~/.ship-deck (or SHIP_DECK_ORDERS_DIR)
 node server.js --memory-dir DIR     # first mate memory shown in the Ship's Library
+node server.js --claude-dir DIR     # Claude Code data dir, default ~/.claude (transcripts, skills)
+sh bin/start.sh [server flags...]   # start in the background unless the port already answers
 ```
 
 Open <http://127.0.0.1:4747/>. The server binds to `127.0.0.1` only. The page
-polls `GET /api/fleet` every 3 s and animates changes in place (no reload).
+polls `GET /api/fleet` every 3 s and animates changes in place (no reload). If
+the server goes away the page shows a "reconnecting" banner and keeps retrying
+(backing off to 15 s); drafts are kept in `localStorage` per field.
 
 Try it on the sample fleet without touching the real one:
 
 ```sh
 cp -R test/fixtures/home /tmp/ship-deck-sample
-node server.js --home /tmp/ship-deck-sample --port 4748
+node server.js --home /tmp/ship-deck-sample --port 4748 --orders-dir /tmp/ship-deck-orders
 echo "done: sample finished" >> /tmp/ship-deck-sample/state/delta-block.status   # updates within ~3 s
 ```
 
-## Orders for the first mate
+### Start at login (macOS)
 
-Ship Deck appends `{id, ts, kind, target, text, status:"pending"}` to
-`~/.ship-deck/orders.jsonl`. The first mate acknowledges with the CLI, which
-appends `{id, ts, status, note}` to `~/.ship-deck/orders-ack.jsonl`; the deck
-shows each order's latest status and note on the next poll.
+`bin/start.sh` checks the port first, so it is safe to run repeatedly; it logs
+to `~/.ship-deck/server.log`. A LaunchAgent example (not installed by Ship Deck;
+save it as `~/Library/LaunchAgents/local.ship-deck.plist` and run
+`launchctl load ~/Library/LaunchAgents/local.ship-deck.plist`):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>local.ship-deck</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>/Users/aryanbhandari/Desktop/AI/firstmate/projects/ship-deck/bin/start.sh</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <key>RunAtLoad</key><true/>
+</dict>
+</plist>
+```
+
+## Orders and the Bridge: the first mate's contract
+
+Three append-only JSON-lines logs in `~/.ship-deck/` (or `$SHIP_DECK_ORDERS_DIR`):
+
+| File | Written by | Line |
+| --- | --- | --- |
+| `orders.jsonl` | Ship Deck | `{id, ts, kind, target, text, status:"pending", ...payload}` |
+| `orders-ack.jsonl` | first mate (`ack`) | `{id, ts, status, note}`, status `acknowledged`, `done` or `declined` |
+| `replies.jsonl` | first mate (`reply`) | `{id, ts, kind:"reply", inReplyTo, text}` |
+
+Order ids look like `o-20261012T160000123Z-ab12` and reply ids `r-...`; both
+sort by time. An order's lifecycle is its acks: pending (no ack) ->
+acknowledged -> done or declined; the UI shows every step with its note.
+`target` is a crew id (or `null`), `text` is what the captain wrote or a default.
+`sessions.json` (resume ids, below) lives in the same directory.
+
+| kind | target | payload | meaning |
+| --- | --- | --- | --- |
+| `chat` | - | `text` (multi-line, max 4000) | Free-text message from the Bridge. Answer with `reply`. |
+| `decision` | crew id | `option` (`A`-`H` or `null`), `text` | Answer to a needs-decision/blocked worker; `text` is `(B) <option text>` plus any note, or a free answer. |
+| `answer` | crew id | `text` | Legacy free-text answer (older UI). |
+| `status` | crew id | - | Ask the worker for a status update. |
+| `merge` | crew id | - | Merge its PR. Irreversible: confirm with the captain first. |
+| `cleanup` | crew id | - | Tear the worker down. Irreversible: confirm first. |
+| `cleanup-done` | - | `targets`: crew ids that were done when queued | Clean up all finished crew. Irreversible: confirm first. |
+| `new-task` | - | `project` (from `data/projects.md`), `taskKind` (`ship` or `scout`), optional `harness`, `model` (absent = first mate default), `effort` (`auto` = first mate decides), `text` | Dispatch a new job. |
+| `backlog-start` | - | `item` (backlog id), `text` | Start this queued backlog item. |
+| `backlog-answer` | - | `item` (backlog id), `option`, `text` | The captain's answer to a Captain's Call item. |
+| `config` | crew id | `field` (`effort` or `model`), `value`, `applied` | Record of a config change. `applied:true` = already sent live (`/effort`/`/model` via fm-send; takes effect from the worker's next turn); `applied:false` = apply it when relaunching the worker. Only created by `POST /api/config`. |
+| `order` | optional | `text` | Legacy free-text order. |
+
+The UI asks for confirmation before every order; for `merge`, `cleanup` and
+`cleanup-done` it says plainly that the first mate will still confirm before
+acting.
 
 ```sh
-node bin/orders.js list [--pending] [--json]       # pending = no ack yet
+node bin/orders.js list [--pending] [--json]       # pending = no ack yet; payload shown under each order
 node bin/orders.js ack <id> <acknowledged|done|declined> [note...]
+node bin/orders.js reply <order-id> [--ack done] "text"   # reply in the Bridge (optionally ack too)
+node bin/orders.js reply - "text"                  # unprompted message from the first mate
+node bin/orders.js reply <order-id|-> --file report.md    # long markdown (--file - reads stdin)
+node bin/orders.js thread [--limit 30] [--json]    # the conversation as the captain sees it
+node bin/orders.js sessions [--json]               # recorded resume commands
 sh bin/orders-check.sh    # prints "ship-deck: N new captain order(s)" or nothing
 ```
 
+Replies are markdown (max 64 KB): paragraphs, lists, **bold**, `code`, fenced
+code, tables and links. Ship Deck escapes all HTML and only links `http(s)`
+URLs (bare PR URLs autolink and open in a new tab). New replies raise an unread
+badge and, if the captain enabled alerts, a browser notification; so do new
+"needs the captain" items.
+
 `bin/orders-check.sh` is self-contained POSIX sh + awk, meant to be copied into
-firstmate's watcher as a custom wake check. It remembers the newest order id it
-has reported in `~/.ship-deck/orders-check.cursor` (ids are time-sortable).
-All three honour `SHIP_DECK_ORDERS_DIR`.
+firstmate's watcher as a custom wake check. It counts every new order of any
+kind, chat included (replies never wake it), and remembers the newest order id
+it has reported in `~/.ship-deck/orders-check.cursor`. All three scripts honour
+`SHIP_DECK_ORDERS_DIR`.
+
+## Per-worker configuration
+
+Each crew drawer shows the worker's harness, model and effort: the values in
+`state/<id>.meta`, overridden by the latest applied `config` order (unapplied
+ones show as "on relaunch"). The pickers are allow-listed server-side
+(`lib/config.js`); anything else is rejected:
+
+| harness | effort | model | live |
+| --- | --- | --- | --- |
+| claude | `low` `medium` `high` `xhigh` `max` | `claude-opus-5-5` `claude-sonnet-5` `claude-haiku-4-5-20251001` `claude-fable-5-1` | yes |
+| codex | `low` `medium` `high` `xhigh` | current only | no |
+| grok | `low` `medium` `high` | current only | no |
+| pi, opencode | current only | current only | no |
+
+`POST /api/config {id, field, value}`: for a claude worker with a window the
+server runs `fm-send.sh <window> "/effort <value>"` (or `/model`) and records a
+`config` order with `applied:true`; otherwise it only queues the order with
+`applied:false`. The New job form carries harness/model/effort in `new-task`.
+
+## Resumable sessions
+
+Claude Code keeps transcripts in `~/.claude/projects/<encoded-cwd>/<uuid>.jsonl`
+(cwd with `/` and `.` replaced by `-`). For each claude crew member Ship Deck
+lists the transcripts in its worktree, verifies the first lines' `cwd` and
+`sessionId`, and, because worktrees are reused, gives each transcript one owner:
+the crew member whose brief it names (`state/<id>.status`), else the task
+spawned (meta birth time) most recently before the session started. The first
+mate is the newest verified session in FM_HOME. Matches are merged into
+`~/.ship-deck/sessions.json` (0600) as `{id: {sessionId, cwd, harness,
+firstSeen, lastSeen}}` (the first mate under `_firstmate`) and kept after the
+crew member leaves. Drawers and the Sessions tab show
+`cd '<cwd>' && claude --resume <sessionId>` with a Copy button; other harnesses
+show "resume id unknown (<harness>)".
 
 ## Security
 
 - Binds `127.0.0.1` only; every request must carry `Host: 127.0.0.1:<port>` or
   `localhost:<port>` (blocks DNS rebinding).
-- `POST /api/send` and `POST /api/orders` also require `X-Ship-Deck: 1`,
+- `POST /api/send`, `POST /api/orders` and `POST /api/config` also require `X-Ship-Deck: 1`,
   `Content-Type: application/json`, a same-origin `Origin` when one is sent, and
   no cross-site `Sec-Fetch-Site`. Bodies are capped at 16 KB.
 - Action ids must match `^[a-z0-9][a-z0-9-]*$` and have a `state/<id>.meta`;
@@ -81,6 +194,9 @@ All three honour `SHIP_DECK_ORDERS_DIR`.
 - File views only serve regular files directly under `data/<id>/` (symlinks out
   are refused). The Ship's Library serves only a server-side allow-list (see
   below), addressed by key, never by path.
+- Order payloads are validated against the live home: crew ids need a meta,
+  `cleanup-done` targets must be done, projects come from `data/projects.md`,
+  backlog items must exist, config values come from the allow-list.
 
 ## Tests
 
@@ -91,6 +207,11 @@ npm test            # same as: node --test test/*.test.js
 `test/actions.test.js` covers the orders queue, CLI and wake check (temp
 `HOME`), window lookup, peek/send with an injected executor (fm-send is never
 run), data-file and library allow-lists, and the CSRF/Host guards.
+`test/bridge.test.js` covers replies and the thread, every order kind, the
+wake check on chat orders, decision option parsing, Captain's Call against the
+real backlog format (`test/fixtures/backlog/real-format.md`), session discovery
+and `sessions.json`, skills, the markdown renderer, the config allow-list and
+the exact fm-send argv, and `bin/start.sh`.
 `test/parsers.test.js` covers the parsers against the fabricated fixtures.
 `test/snapshot.test.js` builds a snapshot from a temp copy of the fixture home,
 checks missing files and an empty home, proves no file under the home changes
@@ -108,13 +229,16 @@ All paths are relative to the fleet home. Missing files are fine.
 | `state/<id>.turn-ended` and file mtimes | "Last activity" and "turn ended" times |
 | `state/.afk` | Present means the captain is ashore (away sign on the bridge) |
 | `state/.last-watcher-beat` mtime | Watch lamp: green under 2 min, amber otherwise |
-| `data/backlog.md` | Loose parse of Captain's Call / In flight / Queued / Done; unknown sections are tolerated. Queued items become crates. Items with `(kind: captain)` or `(hold-kind: captain)` count as Captain's Call. |
+| `data/backlog.md` | Loose parse of Captain's Call / In flight / Queued / Done; unknown sections are tolerated. Queued items become crates. Captain's Call = every open item in the Captain's Call section or tagged `(kind: captain)` / `(hold-kind: captain)` in any open section (the real file keeps them in Queued); options in its `(hold: ...)` become answer buttons. |
 | `data/projects.md` | Project display names and delivery modes for deck areas |
 | `data/secondmates.md` | Officers' cabins (registry entries without a live meta show as vacant) |
 | `data/<id>/brief.md` | First paragraph under `# Task`, one line |
 | `data/<id>/report.md` | Existence adds a "Scout report" link (served as plain text by `/api/report/<id>`) |
 | `data/<id>/*` | Listed in the drawer; click opens a read-only text view (`/api/file/<id>/<name>`) |
-| Ship's Library | `AGENTS.md`, `data/captain.md`, `data/captain-shared.md`, `data/learnings.md`, `data/projects.md`, `data/secondmates.md`, `data/backlog.md`, plus every `*.md` in `--memory-dir` (MEMORY.md first); missing files are shown as missing |
+| Ship's Library | `AGENTS.md`, `data/captain.md`, `data/captain-shared.md`, `data/learnings.md`, `data/projects.md`, `data/secondmates.md`, `data/backlog.md`, every `*.md` in `--memory-dir` (MEMORY.md first), and the skills; missing files are shown as missing |
+| `state/<id>.status` last line (needs-decision/blocked) | Lettered options `(A) ...`, `(B, recommended) ...`, `Options: A) ...`, `option A, ...` become decision buttons |
+| `~/.claude/projects/*/<uuid>.jsonl` (head only) | Session discovery for resume commands |
+| `~/.claude/skills/*/SKILL.md`, `<home>/.agents/skills/*/SKILL.md` | Skills in the Ship's Library (name and description from the frontmatter) |
 | `tmux list-windows -a` | Optional: marks whether a crew member's window is open. Skipped if tmux is missing. |
 
 ## The deck
@@ -136,19 +260,24 @@ All paths are relative to the fleet home. Missing files are fine.
   next poll.
 - **Officers' cabins**: secondmates, behind portholes.
 - **Cargo hold**: queued backlog crates; Captain's Call crates carry a red tag.
-- **Command Center**: watch status, counts by state plus Stale (click to
-  filter), "Needs the captain" (non-stale decision/blocked/failed crew plus the
-  Captain's Call backlog),
-  recently done, and PR links.
-- **Command Center orders**: a free-text "Order to first mate" box and the
-  Orders list (latest status and note, pending count badge).
-- **Detail drawer**: click any crew member or crate. `#task=<id>` deep-links.
-  Shows PR links (new tab), `data/<id>/` files (read-only viewer), the live
-  terminal peek, the message box and the order buttons.
-- **Ship's Library** (header button): the first mate's permanent context files,
-  rendered as escaped markdown with last-modified times and a filter box.
-- **Keyboard**: `/` focuses the search box (or the library filter); `Esc`
-  closes the file view, the library or the drawer, or clears the filter.
+- **Bridge tab**: the chat with the first mate (newest at the bottom, day
+  separators, lifecycle chips, unread badge, "Enable alerts" for browser
+  notifications; permission is only requested from that button).
+- **Command tab**: watch status, "Needs the captain", Captain's Call (Answer),
+  counts by state plus Stale (click to filter), New job form, queued backlog
+  (Start), recently done with "Clean up all finished", every order with its
+  lifecycle, and PR links.
+- **Sessions tab**: every recorded session with its resume command, including
+  departed crew.
+- **Detail drawer**: click any crew member, crate or the first mate.
+  `#task=<id>` deep-links. Decision buttons and a free answer at the top, then
+  PR links, `data/<id>/` files, facts, status timeline, "Resume in terminal",
+  Configuration, order buttons, the live terminal peek and the message box.
+- **Ship's Library** (header button): the first mate's permanent context files
+  and the skills (name + description), rendered as safe markdown.
+- **Keyboard**: Enter sends a chat message, Shift+Enter adds a line; `/`
+  focuses the search box (or the library filter); `Esc` closes the confirm
+  dialog, the file view, the library or the drawer, or clears the filter.
 
 Follows the OS light/dark theme and respects reduced motion.
 
@@ -159,9 +288,12 @@ server.js          HTTP server: static files, /api/*, POST guards
 lib/fleet.js       Parsers and the read-only snapshot builder
 lib/actions.js     Window lookup, pane peek, fm-send, data files (the only exec)
 lib/orders.js      Orders queue in ~/.ship-deck
-lib/library.js     Ship's Library allow-list
-bin/orders.js      Orders CLI for the first mate
+lib/library.js     Ship's Library allow-list (home files, memory, skills)
+lib/sessions.js    Claude session discovery and ~/.ship-deck/sessions.json
+lib/config.js      Per-harness model/effort allow-list and slash commands
+bin/orders.js      Orders, replies, thread and sessions CLI for the first mate
 bin/orders-check.sh  Watcher wake check (POSIX sh)
-public/            index.html, style.css, app.js (no build step)
+bin/start.sh       Start the server unless the port already answers
+public/            index.html, style.css, app.js, markdown.js (no build step)
 test/              node:test suites and fabricated fixtures
 ```

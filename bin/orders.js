@@ -28,6 +28,8 @@ function payloadLine(o) {
   if (o.item) parts.push(`item=${o.item}`);
   if (o.project) parts.push(`project=${o.project}`);
   if (o.taskKind) parts.push(`taskKind=${o.taskKind}`);
+  for (const k of ['harness', 'model', 'effort', 'field', 'value']) if (o[k]) parts.push(`${k}=${o[k]}`);
+  if (o.applied !== undefined) parts.push(`applied=${o.applied}`);
   if (o.targets) parts.push(`targets=${o.targets.join(',')}`);
   return parts.join(' ');
 }

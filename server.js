@@ -10,17 +10,18 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
-const { buildSnapshot, reportPath, readText, DEFAULT_STALE_DAYS } = require('./lib/fleet');
+const { buildSnapshot, reportPath, readText, parseMeta, DEFAULT_STALE_DAYS } = require('./lib/fleet');
 const orders = require('./lib/orders');
 const actions = require('./lib/actions');
 const library = require('./lib/library');
 const sessions = require('./lib/sessions');
+const config = require('./lib/config');
 
 const DEFAULT_HOME = '/Users/aryanbhandari/Desktop/AI/firstmate';
 const MAX_BODY = 16 * 1024;
 const ORDERS_IN_SNAPSHOT = 60;
 const THREAD_LIMIT = 300;
-const POST_ROUTES = new Set(['/api/send', '/api/orders']);
+const POST_ROUTES = new Set(['/api/send', '/api/orders', '/api/config']);
 
 function parseArgs(argv) {
   const opts = {
@@ -173,6 +174,27 @@ function createServer(opts) {
       const r = await actions.sendMessage(opts.home, id, body.message, exec);
       return json(res, r.ok ? 200 : 502, { ...r, error: r.ok ? null : r.output || `fm-send exited ${r.code}` });
     }
+    if (url.pathname === '/api/config') {
+      // { id, field, value }: claude workers get a live slash command via fm-send; others
+      // (or a worker with no window) get a queued order the first mate applies on relaunch.
+      const id = body.id;
+      if (!actions.validId(id)) return json(res, 400, { ok: false, error: 'invalid id' });
+      const known = knownIds(opts.home);
+      if (!known.has(id)) return json(res, 404, { ok: false, error: 'unknown crew id' });
+      const harness = parseMeta(readText(path.join(opts.home, 'state', id + '.meta'))).harness || 'claude';
+      let v;
+      try { v = config.checkConfig(harness, body.field, body.value); } catch (e) { return json(res, 400, { ok: false, error: e.message }); }
+      const live = config.canApplyLive(harness) && !!actions.lookupWindow(opts.home, id);
+      let command = null;
+      if (live) {
+        command = config.slashCommand(harness, v.field, v.value);
+        const r = await actions.sendMessage(opts.home, id, command, exec);
+        if (!r.ok) return json(res, 502, { ok: false, command, error: r.output || `fm-send exited ${r.code}` });
+      }
+      const text = live ? `Set ${v.field} to ${v.value} (sent ${command}; applies from its next turn)` : `Set ${v.field} to ${v.value} on next relaunch`;
+      const order = orders.createOrder(ordersDir, { kind: 'config', target: id, harness, field: v.field, value: v.value, applied: live, text }, { knownIds: known, internal: true });
+      return json(res, 200, { ok: true, applied: live, command, order });
+    }
     if (url.pathname === '/api/orders') {
       try {
         const order = orders.createOrder(ordersDir, body, await orderContext(opts.home));
@@ -196,7 +218,11 @@ function createServer(opts) {
         const replies = orders.readReplies(ordersDir);
         snap.thread = { sig: orders.threadSignature(ordersDir), replies: replies.length, lastReplyId: replies.length ? replies[replies.length - 1].id : null };
         const known = tracker.get(snap.tasks);
-        for (const t of snap.tasks) t.session = sessionView(known[t.id], t.harness);
+        for (const t of snap.tasks) {
+          t.session = sessionView(known[t.id], t.harness);
+          t.config = config.currentConfig(t, list);
+        }
+        snap.configOptions = config.options();
         snap.firstmate = { session: sessionView(known[sessions.FIRST_MATE_KEY], 'claude') };
         return json(res, 200, snap);
       }
