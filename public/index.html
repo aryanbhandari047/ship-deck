@@ -33,6 +33,10 @@
       <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M13 13l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       <input id="search" type="search" placeholder="Filter by id, project, state…  ( / )" autocomplete="off" spellcheck="false">
     </label>
+    <button class="head-btn" id="library-btn" type="button" title="The first mate's permanent context files (read-only)">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3.5h3.5v13H3zM7.5 3.5H11v13H7.5zM12.2 4.3l3.3-.9 3 12.4-3.3.9z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+      Ship's Library
+    </button>
     <div class="sync" id="sync" aria-live="polite"><span class="sync-dot"></span><span id="sync-text">Connecting…</span></div>
   </header>
 
@@ -97,6 +101,16 @@
 
       <div class="card watch-card" id="watch-card"></div>
 
+      <div class="card orders-card">
+        <h3>Orders to the first mate <span class="badge zero" id="orders-count" title="Pending orders">0</span></h3>
+        <form class="order-form" id="order-form">
+          <label class="sr-only" for="order-text">Order to first mate</label>
+          <textarea id="order-text" rows="2" maxlength="2000" placeholder="Order to first mate…" spellcheck="true"></textarea>
+          <button class="act-btn primary" type="submit">Queue order</button>
+        </form>
+        <ul class="list orders" id="orders-list"></ul>
+      </div>
+
       <div class="card">
         <h3>Crew by state</h3>
         <div class="counts" id="counts"></div>
@@ -136,6 +150,28 @@
     </header>
     <div class="drawer-body" id="drawer-body"></div>
   </aside>
+
+  <div class="library-scrim" id="library-scrim" hidden></div>
+  <section class="library" id="library" role="dialog" aria-modal="true" aria-labelledby="library-title" hidden tabindex="-1">
+    <header class="library-head">
+      <div>
+        <p class="drawer-kicker">Read-only · the first mate's permanent context</p>
+        <h2 id="library-title">Ship's Library</h2>
+      </div>
+      <button class="icon-btn" id="library-close" aria-label="Close library">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </header>
+    <div class="library-main">
+      <nav class="library-nav" aria-label="Library files">
+        <input id="library-filter" type="search" placeholder="Filter files…" autocomplete="off" spellcheck="false" aria-label="Filter library files">
+        <div id="library-list"></div>
+      </nav>
+      <article class="library-doc" id="library-doc" aria-live="polite"></article>
+    </div>
+  </section>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
 
   <script src="app.js"></script>
 </body>

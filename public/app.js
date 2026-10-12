@@ -24,6 +24,10 @@
     doneList: $('done-list'), prList: $('pr-list'),
     drawer: $('drawer'), scrim: $('scrim'), drawerKicker: $('drawer-kicker'), drawerTitle: $('drawer-title'),
     drawerBody: $('drawer-body'), drawerClose: $('drawer-close'),
+    ordersCount: $('orders-count'), ordersList: $('orders-list'), orderForm: $('order-form'), orderText: $('order-text'),
+    libraryBtn: $('library-btn'), library: $('library'), libraryScrim: $('library-scrim'), libraryClose: $('library-close'),
+    libraryFilter: $('library-filter'), libraryList: $('library-list'), libraryDoc: $('library-doc'),
+    toasts: $('toasts'),
   };
 
   let snap = null;
@@ -384,6 +388,30 @@
     if (!unchanged('prs', sigOf(prs).map((x, i) => [...x, prs[i].pr]))) ui.prList.replaceChildren(...(prs.length ? prs.map((t) => h('li', null,
       h('a', { class: 'row', href: t.pr, target: '_blank', rel: 'noopener noreferrer', style: `--c:${stateVar(bucket(t))}` },
         h('span', { class: 'dot' }), h('span', { class: 'r-id', text: t.id }), h('span', { class: 'r-age', text: prNumber(t.pr) })))) : [emptyRow('No PRs recorded in meta.')]));
+
+    const ord = snap.orders || { pending: 0, list: [] };
+    ui.ordersCount.textContent = ord.pending;
+    ui.ordersCount.classList.toggle('zero', !ord.pending);
+    if (!unchanged('orders', ord.list, ord.pending)) ui.ordersList.replaceChildren(...(ord.list.length
+      ? ord.list.slice(0, 12).map(orderRow)
+      : [emptyRow('No orders yet.')]));
+  }
+
+  const ORDER_COLOR = { pending: 'needs-decision', acknowledged: 'working', done: 'done', declined: 'failed' };
+  function orderRow(o) {
+    const when = o.ts ? Date.parse(o.ts) : null;
+    const inner = [
+      h('span', { class: 'dot' }),
+      h('span', { class: 'r-id' }, h('span', { class: 'o-kind', text: KIND_LABEL[o.kind] || o.kind }), o.target ? ' ' + o.target : ''),
+      h('span', { class: 'r-age' }, h('span', { class: 'o-status', text: o.status }), ' ', ago(when)),
+      h('span', { class: 'r-note', text: o.text }),
+      o.note ? h('span', { class: 'r-note o-note', text: `↳ ${o.note}` }) : null,
+    ];
+    const title = `${o.id}\n${o.status}${o.ackTs ? ' · ' + o.ackTs : ''}\nqueued ${o.ts}`;
+    const attrs = { class: 'row' + (o.pending ? ' pending' : ''), style: `--c:${stateVar(ORDER_COLOR[o.status] || 'unknown')}`, title };
+    return h('li', null, o.target && snap.tasks.some((t) => t.id === o.target)
+      ? h('button', { ...attrs, type: 'button', onclick: () => openDrawer({ type: 'task', id: o.target }) }, ...inner)
+      : h('div', attrs, ...inner));
   }
 
   // ---------- drawer ----------
@@ -395,13 +423,21 @@
   function renderDrawer() {
     if (!selected || !snap) return;
     if (selected.type === 'task') return renderTaskDrawer();
+    stopPeek();
+    td = null;
     if (selected.type === 'backlog') return renderBacklogDrawer();
     if (selected.type === 'secondmate') return renderSecondmateDrawer();
   }
 
+  // The task drawer keeps its interactive parts (pane peek, message box, order
+  // buttons, file viewer) across polls; only the facts are rebuilt each tick.
+  let td = null; // { id, root, info, orders, peek, file, ... }
+
   function renderTaskDrawer() {
     const t = snap.tasks.find((x) => x.id === selected.id);
     if (!t) {
+      stopPeek();
+      td = null;
       ui.drawerKicker.replaceChildren('Left the ship');
       ui.drawerTitle.textContent = selected.id;
       ui.drawerBody.replaceChildren(h('p', { text: 'This task no longer has a meta file in state/. It was probably torn down.' }));
@@ -410,11 +446,24 @@
     ui.drawerKicker.replaceChildren(...[h('span', { class: 'pill', style: `background:${stateVar(t.state)}`, text: STATE_LABEL[t.state] }),
       t.stale ? h('span', { class: 'pill', style: `background:${stateVar('stale')}`, text: 'stale' }) : null, t.kind].filter(Boolean));
     ui.drawerTitle.textContent = t.id;
+    if (!td || td.id !== t.id || !td.root.isConnected) buildTaskDrawer(t);
+    td.task = t;
+    if (!unchanged('drawer-info', t, snap.tmux.available)) td.info.replaceChildren(...taskInfo(t));
+    renderTaskOrders(t);
+    td.peekWrap.hidden = !t.window;
+    td.msgWrap.hidden = !t.window;
+    td.mergeBtn.hidden = !t.pr;
+  }
+
+  function taskInfo(t) {
     const kids = [];
     if (t.brief) kids.push(h('p', { class: 'brief', text: t.brief }));
     const links = h('div', { class: 'links' });
     if (t.pr) links.append(h('a', { class: 'link-btn', href: t.pr, target: '_blank', rel: 'noopener noreferrer', text: `Pull request ${prNumber(t.pr)} ↗` }));
-    if (t.hasReport) links.append(h('a', { class: 'link-btn', href: `/api/report/${encodeURIComponent(t.id)}`, target: '_blank', text: 'Scout report ↗' }));
+    for (const name of t.files || []) {
+      links.append(h('button', { class: 'link-btn', type: 'button', title: `data/${t.id}/${name} (read-only)`, onclick: () => openDataFile(t.id, name) },
+        h('span', { class: 'file-ico', 'aria-hidden': 'true', text: '¶' }), name));
+    }
     if (t.worktree) links.append(h('button', {
       class: 'link-btn copy', type: 'button', text: 'Copy worktree path',
       onclick: (e) => { navigator.clipboard && navigator.clipboard.writeText(t.worktree).then(() => { e.target.textContent = 'Copied'; setTimeout(() => { e.target.textContent = 'Copy worktree path'; }, 1200); }); },
@@ -445,7 +494,210 @@
           note);
       })));
     }
-    ui.drawerBody.replaceChildren(...kids);
+    return kids;
+  }
+
+  function buildTaskDrawer(t) {
+    stopPeek();
+    const id = t.id;
+    const d = { id };
+
+    // File viewer: replaces the drawer content while open.
+    d.fileTitle = h('span', { class: 'mono' });
+    d.fileMeta = h('span', { class: 'file-meta' });
+    d.fileText = h('pre', { class: 'file-text', tabindex: '0' });
+    d.file = h('section', { class: 'file-view', hidden: true },
+      h('div', { class: 'file-head' },
+        h('button', { class: 'act-btn', type: 'button', text: '← Back', onclick: () => closeDataFile() }),
+        d.fileTitle, d.fileMeta),
+      d.fileText);
+
+    d.info = h('div', { class: 'task-info' });
+
+    // Orders to the first mate about this worker.
+    const answerText = h('textarea', { rows: '2', maxlength: '2000', placeholder: 'Your answer to its decision…', 'aria-label': `Answer for ${id}` });
+    const answerRow = h('div', { class: 'answer-row', hidden: true }, answerText,
+      h('div', { class: 'btn-row' },
+        h('button', { class: 'act-btn primary', type: 'button', text: 'Queue answer', onclick: async () => {
+          if (!answerText.value.trim()) { answerText.focus(); return; }
+          if (await queueOrder({ kind: 'answer', target: id, text: answerText.value })) { answerText.value = ''; answerRow.hidden = true; }
+        } }),
+        h('button', { class: 'act-btn', type: 'button', text: 'Cancel', onclick: () => { answerRow.hidden = true; } })));
+    d.mergeBtn = h('button', { class: 'act-btn', type: 'button', text: 'Merge its PR', onclick: () => queueOrder({ kind: 'merge', target: id }) });
+    d.ordersList = h('ul', { class: 'list orders compact' });
+    const ordersSec = h('section', { class: 'drawer-sec' },
+      h('h3', { text: 'Orders to the first mate' }),
+      h('p', { class: 'hint', text: 'Queued for the first mate to act on; Ship Deck does not run them.' }),
+      h('div', { class: 'btn-row' },
+        h('button', { class: 'act-btn', type: 'button', text: 'Clean up this worker', onclick: () => queueOrder({ kind: 'cleanup', target: id }) }),
+        d.mergeBtn,
+        h('button', { class: 'act-btn', type: 'button', text: 'Answer decision…', onclick: () => { answerRow.hidden = false; answerText.focus(); } }),
+        h('button', { class: 'act-btn', type: 'button', text: 'Ask for status', onclick: () => queueOrder({ kind: 'status', target: id }) })),
+      answerRow,
+      d.ordersList);
+
+    // Message the worker directly (fm-send), with a confirmation step.
+    const msg = h('input', { type: 'text', maxlength: '2000', placeholder: 'Message to this worker (one line)…', 'aria-label': `Message to ${id}`, autocomplete: 'off' });
+    const sendBtn = h('button', { class: 'act-btn primary', type: 'submit', text: 'Send' });
+    const confirmText = h('span');
+    const confirmYes = h('button', { class: 'act-btn danger', type: 'button', text: 'Send now' });
+    const confirmNo = h('button', { class: 'act-btn', type: 'button', text: 'Cancel' });
+    const confirmRow = h('div', { class: 'confirm-row', hidden: true, role: 'alert' }, confirmText, confirmYes, confirmNo);
+    const form = h('form', { class: 'msg-form' }, msg, sendBtn);
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const text = msg.value.replace(/\s+/g, ' ').trim();
+      if (!text) { msg.focus(); return; }
+      confirmText.textContent = `Send to ${id}?`;
+      confirmRow.hidden = false;
+      confirmYes.focus();
+    });
+    confirmNo.addEventListener('click', () => { confirmRow.hidden = true; msg.focus(); });
+    confirmYes.addEventListener('click', async () => {
+      confirmRow.hidden = true;
+      sendBtn.disabled = true;
+      const text = msg.value.replace(/\s+/g, ' ').trim();
+      const r = await post('/api/send', { id, message: text });
+      sendBtn.disabled = false;
+      if (r.ok) { msg.value = ''; toast(`Sent to ${id}`, 'ok'); setTimeout(refreshPeek, 600); }
+      else toast(`Send to ${id} failed: ${r.error || 'unknown error'}`, 'err');
+    });
+    d.msgWrap = h('section', { class: 'drawer-sec' },
+      h('h3', { text: 'Message the worker' }),
+      h('p', { class: 'hint', text: 'Types one line into its tmux window via fm-send. Use sparingly: it bypasses the first mate.' }),
+      form, confirmRow);
+
+    // Live terminal peek.
+    d.peekText = h('pre', { class: 'peek', tabindex: '0', 'aria-label': `Terminal of ${id}` });
+    d.peekState = h('span', { class: 'peek-state' });
+    d.pauseBtn = h('button', { class: 'act-btn', type: 'button', 'aria-pressed': 'false', text: 'Pause refresh', onclick: () => {
+      d.paused = !d.paused;
+      d.pauseBtn.textContent = d.paused ? 'Resume refresh' : 'Pause refresh';
+      d.pauseBtn.setAttribute('aria-pressed', d.paused ? 'true' : 'false');
+      if (!d.paused) refreshPeek();
+      setPeekState();
+    } });
+    d.peekWrap = h('section', { class: 'drawer-sec' },
+      h('div', { class: 'sec-head' }, h('h3', { text: 'Terminal' }), d.peekState, d.pauseBtn),
+      d.peekText);
+
+    d.root = h('div', { class: 'task-drawer' }, d.file, d.info, d.peekWrap, d.msgWrap, ordersSec);
+    ui.drawerBody.replaceChildren(d.root);
+    ui.drawerBody.scrollTop = 0;
+    sigs.delete('drawer-info');
+    sigs.delete('drawer-orders');
+    td = d;
+    if (t.window) startPeek();
+  }
+
+  function renderTaskOrders(t) {
+    const mine = ((snap.orders && snap.orders.list) || []).filter((o) => o.target === t.id);
+    if (unchanged('drawer-orders', t.id, mine)) return;
+    td.ordersList.replaceChildren(...(mine.length ? mine.slice(0, 8).map(orderRow) : [emptyRow('No orders about this worker yet.')]));
+  }
+
+  // ---------- terminal peek ----------
+  const PEEK_MS = 2000;
+  let peekTimer = null;
+  let peekBusy = false;
+  function setPeekState(text) {
+    if (!td) return;
+    if (text !== undefined) td.peekNote = text;
+    td.peekState.textContent = td.paused ? 'paused' : (td.peekNote || '');
+  }
+  async function refreshPeek() {
+    if (!td || peekBusy || td.paused || document.hidden || !td.file.hidden) return;
+    const d = td;
+    peekBusy = true;
+    try {
+      const res = await fetch(`/api/peek/${encodeURIComponent(d.id)}`, { cache: 'no-store' });
+      const body = await res.json().catch(() => ({}));
+      if (td !== d) return;
+      const pre = d.peekText;
+      const atBottom = !d.peekLoaded || pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
+      if (res.ok) {
+        if (pre.textContent !== body.text) pre.textContent = body.text;
+        pre.classList.remove('peek-err');
+        setPeekState(`live · ${new Date().toLocaleTimeString()}`);
+      } else {
+        pre.textContent = body.error || `HTTP ${res.status}`;
+        pre.classList.add('peek-err');
+        setPeekState('unavailable');
+      }
+      if (atBottom) pre.scrollTop = pre.scrollHeight;
+      d.peekLoaded = true;
+    } catch {
+      setPeekState('offline');
+    } finally {
+      peekBusy = false;
+    }
+  }
+  function startPeek() {
+    stopPeek();
+    refreshPeek();
+    peekTimer = setInterval(refreshPeek, PEEK_MS);
+  }
+  function stopPeek() { clearInterval(peekTimer); peekTimer = null; }
+
+  // ---------- data files (read-only) ----------
+  async function openDataFile(id, name) {
+    if (!td || td.id !== id) return;
+    const d = td;
+    d.fileTitle.textContent = `data/${id}/${name}`;
+    d.fileMeta.textContent = 'loading…';
+    d.fileText.textContent = '';
+    d.file.hidden = false;
+    d.root.classList.add('viewing-file');
+    ui.drawerBody.scrollTop = 0;
+    try {
+      const res = await fetch(`/api/file/${encodeURIComponent(id)}/${encodeURIComponent(name)}`, { cache: 'no-store' });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'HTTP ' + res.status);
+      d.fileText.textContent = body.text;
+      d.fileMeta.textContent = `${(body.size / 1024).toFixed(1)} KB${body.truncated ? ' · truncated' : ''} · read-only`;
+    } catch (e) {
+      d.fileMeta.textContent = '';
+      d.fileText.textContent = `Could not open: ${e.message}`;
+    }
+    d.fileText.focus({ preventScroll: true });
+  }
+  function closeDataFile() {
+    if (!td || td.file.hidden) return false;
+    td.file.hidden = true;
+    td.root.classList.remove('viewing-file');
+    refreshPeek();
+    return true;
+  }
+
+  // ---------- actions ----------
+  async function post(url, body) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Ship-Deck': '1' },
+        body: JSON.stringify(body),
+      });
+      const out = await res.json().catch(() => ({}));
+      return { ...out, ok: res.ok && out.ok !== false, error: out.error || (res.ok ? null : 'HTTP ' + res.status) };
+    } catch (e) {
+      return { ok: false, error: 'cannot reach the server' };
+    }
+  }
+  const KIND_LABEL = { cleanup: 'Clean up', merge: 'Merge PR', answer: 'Answer', status: 'Status?', order: 'Order' };
+  async function queueOrder(req) {
+    const r = await post('/api/orders', req);
+    if (r.ok) {
+      toast(`Order queued for the first mate: ${KIND_LABEL[req.kind] || req.kind}${req.target ? ' · ' + req.target : ''}`, 'ok');
+      poll();
+      return true;
+    }
+    toast(`Order not queued: ${r.error}`, 'err');
+    return false;
+  }
+  function toast(text, kind) {
+    const el = h('div', { class: 'toast ' + (kind || ''), role: kind === 'err' ? 'alert' : 'status', text });
+    ui.toasts.append(el);
+    setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 400); }, kind === 'err' ? 7000 : 3500);
   }
 
   function backlogItem() {
@@ -484,6 +736,7 @@
   }
 
   function openDrawer(sel) {
+    if (!selected || selected.type !== sel.type || selected.id !== sel.id) { stopPeek(); td = null; }
     selected = sel;
     ui.drawer.classList.add('open');
     ui.drawer.setAttribute('aria-hidden', 'false');
@@ -495,6 +748,8 @@
     ui.drawer.focus({ preventScroll: true });
   }
   function closeDrawer() {
+    stopPeek();
+    td = null;
     selected = null;
     ui.drawer.classList.remove('open');
     ui.drawer.setAttribute('aria-hidden', 'true');
@@ -546,15 +801,161 @@
   if (firstHash) firstHash = decodeURIComponent(firstHash);
 
   ui.search.addEventListener('input', () => { query = ui.search.value.trim().toLowerCase(); renderAll(); });
+  const editable = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
   document.addEventListener('keydown', (e) => {
-    if (e.key === '/' && document.activeElement !== ui.search) { e.preventDefault(); ui.search.focus(); ui.search.select(); }
-    else if (e.key === 'Escape') {
-      if (selected) closeDrawer();
+    if (e.key === '/' && !editable(document.activeElement) && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      if (!ui.library.hidden) { ui.libraryFilter.focus(); ui.libraryFilter.select(); } else { ui.search.focus(); ui.search.select(); }
+    } else if (e.key === 'Escape') {
+      if (!ui.library.hidden) closeLibrary();
+      else if (selected && closeDataFile()) { /* back to the crew details */ }
+      else if (selected) closeDrawer();
       else if (document.activeElement === ui.search && ui.search.value) { ui.search.value = ''; query = ''; renderAll(); }
       else if (stateFilter) { stateFilter = null; renderAll(); }
     }
   });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { poll(); refreshPeek(); } });
+
+  ui.orderForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const text = ui.orderText.value.trim();
+    if (!text) { ui.orderText.focus(); return; }
+    if (await queueOrder({ kind: 'order', text })) ui.orderText.value = '';
+  });
+  ui.orderText.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); ui.orderForm.requestSubmit(); }
+  });
+
+  // ---------- ship's library (read-only) ----------
+  let libEntries = [];
+  let libKey = null;
+  function mdEscape(s) {
+    return s.replace(/\u0000/g, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  // Inline markdown on already-escaped text. Code spans and links are held out
+  // as placeholders so emphasis never lands inside them; links only for http(s).
+  function mdInline(s) {
+    const held = [];
+    const hold = (html) => { held.push(html); return `\u0000${held.length - 1}\u0000`; };
+    const link = (u, t) => hold(`<a href="${u}" target="_blank" rel="noopener noreferrer">${t}</a>`);
+    s = s.replace(/`([^`]+)`/g, (_, c) => hold(`<code>${c}</code>`));
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, t, u) => link(u, t));
+    s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (_, pre, u) => pre + link(u, u));
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/__([^_]+)__/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[^*\w])\*([^*\s][^*]*)\*(?!\w)/g, '$1<em>$2</em>');
+    for (let i = 0; i < 3 && s.includes('\u0000'); i++) s = s.replace(/\u0000(\d+)\u0000/g, (_, n) => held[n]);
+    return s;
+  }
+  // Small, safe markdown renderer: every source character is HTML-escaped first.
+  function renderMarkdown(src) {
+    const lines = mdEscape(String(src)).split(/\r?\n/);
+    const out = [];
+    let para = [];
+    let list = null; // 'ul' | 'ol'
+    const flushPara = () => { if (para.length) { out.push(`<p>${mdInline(para.join(' '))}</p>`); para = []; } };
+    const flushList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const fence = /^\s*(```|~~~)/.exec(line);
+      if (fence) {
+        flushPara(); flushList();
+        const body = [];
+        for (i++; i < lines.length && !lines[i].trim().startsWith(fence[1]); i++) body.push(lines[i]);
+        out.push(`<pre><code>${body.join('\n')}</code></pre>`);
+        continue;
+      }
+      if (!line.trim()) { flushPara(); flushList(); continue; }
+      let m;
+      if ((m = /^(#{1,6})\s+(.*)$/.exec(line))) { flushPara(); flushList(); const n = Math.min(6, m[1].length + 1); out.push(`<h${n}>${mdInline(m[2])}</h${n}>`); continue; }
+      if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) { flushPara(); flushList(); out.push('<hr>'); continue; }
+      if ((m = /^\s*&gt;\s?(.*)$/.exec(line))) { flushPara(); flushList(); out.push(`<blockquote>${mdInline(m[1])}</blockquote>`); continue; }
+      if ((m = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/.exec(line))) {
+        flushPara();
+        const kind = /\d/.test(m[2]) ? 'ol' : 'ul';
+        if (list !== kind) { flushList(); out.push(`<${kind}>`); list = kind; }
+        const indent = Math.min(4, Math.floor(m[1].length / 2));
+        let item = m[3];
+        const box = /^\[([ xX])\]\s+(.*)$/.exec(item);
+        if (box) item = `<span class="md-box">${box[1].trim() ? '☑' : '☐'}</span> ${box[2]}`;
+        out.push(`<li${indent ? ` style="margin-left:${indent * 1.2}em"` : ''}>${mdInline(item)}</li>`);
+        continue;
+      }
+      if (list && /^\s{2,}\S/.test(line)) { out[out.length - 1] = out[out.length - 1].replace(/<\/li>$/, ` ${mdInline(line.trim())}</li>`); continue; }
+      flushList();
+      para.push(line.trim());
+    }
+    flushPara(); flushList();
+    return out.join('\n');
+  }
+
+  function renderLibraryList() {
+    const q = ui.libraryFilter.value.trim().toLowerCase();
+    const shown = libEntries.filter((e) => !q || (e.group + ' ' + e.label).toLowerCase().includes(q));
+    const groups = [];
+    for (const e of shown) {
+      let g = groups.find((x) => x.name === e.group);
+      if (!g) { g = { name: e.group, items: [] }; groups.push(g); }
+      g.items.push(e);
+    }
+    ui.libraryList.replaceChildren(...(groups.length ? groups.map((g) => h('div', { class: 'lib-group' },
+      h('h3', { text: g.name }),
+      h('ul', { class: 'lib-items' }, ...g.items.map((e) => h('li', null, h('button', {
+        class: 'lib-item' + (e.exists ? '' : ' missing') + (e.key === libKey ? ' active' : ''), type: 'button',
+        'aria-current': e.key === libKey ? 'true' : null, title: e.path,
+        onclick: () => openLibraryEntry(e.key),
+      }, h('span', { class: 'lib-name', text: e.label }), h('span', { class: 'lib-age', text: e.exists ? ago(e.mtime) : 'missing' }))))))) : [h('p', { class: 'empty', text: 'No files match.' })]));
+  }
+  async function openLibraryEntry(key) {
+    libKey = key;
+    renderLibraryList();
+    ui.libraryDoc.replaceChildren(h('p', { class: 'empty', text: 'Loading…' }));
+    try {
+      const res = await fetch('/api/library/file?key=' + encodeURIComponent(key), { cache: 'no-store' });
+      const body = await res.json();
+      if (libKey !== key) return;
+      if (!res.ok) throw new Error(body.error || 'HTTP ' + res.status);
+      const e = body.entry;
+      const head = h('header', { class: 'doc-head' },
+        h('h2', { class: 'mono', text: e.label }),
+        h('p', { class: 'doc-meta', text: e.exists
+          ? `${e.path} · modified ${agoLong(e.mtime)} (${stamp(e.mtime)}) · ${(e.size / 1024).toFixed(1)} KB${body.truncated ? ' · truncated' : ''}`
+          : e.path }));
+      if (body.text === null) {
+        ui.libraryDoc.replaceChildren(head, h('div', { class: 'doc-missing' }, h('strong', { text: 'Missing' }), h('span', { text: 'This file does not exist (yet). Nothing to show.' })));
+      } else {
+        const md = h('div', { class: 'md' });
+        md.innerHTML = renderMarkdown(body.text); // escaped by renderMarkdown
+        ui.libraryDoc.replaceChildren(head, md);
+      }
+      ui.libraryDoc.scrollTop = 0;
+    } catch (err) {
+      ui.libraryDoc.replaceChildren(h('p', { class: 'empty', text: `Could not open: ${err.message}` }));
+    }
+  }
+  async function openLibrary() {
+    ui.library.hidden = false;
+    ui.libraryScrim.hidden = false;
+    ui.libraryFilter.focus();
+    try {
+      const res = await fetch('/api/library', { cache: 'no-store' });
+      libEntries = (await res.json()).entries || [];
+    } catch {
+      libEntries = [];
+    }
+    renderLibraryList();
+    const first = libEntries.find((e) => e.key === libKey) || libEntries.find((e) => e.exists);
+    if (first) openLibraryEntry(first.key);
+    else ui.libraryDoc.replaceChildren(h('p', { class: 'empty', text: 'The library is empty.' }));
+  }
+  function closeLibrary() {
+    ui.library.hidden = true;
+    ui.libraryScrim.hidden = true;
+    ui.libraryBtn.focus();
+  }
+  ui.libraryBtn.addEventListener('click', openLibrary);
+  ui.libraryClose.addEventListener('click', closeLibrary);
+  ui.libraryScrim.addEventListener('click', closeLibrary);
+  ui.libraryFilter.addEventListener('input', renderLibraryList);
 
   poll();
 })();
