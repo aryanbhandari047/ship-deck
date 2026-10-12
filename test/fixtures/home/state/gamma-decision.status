@@ -1,2 +1,2 @@
 working: scoping the migration
-needs-decision [key=keep-or-drop]: keep the legacy beacon endpoint (a) or drop it (b)?
+needs-decision [key=keep-or-drop]: the legacy beacon endpoint still has callers. Options: (A) keep it behind a flag; (B, recommended) drop it and redirect to v2. I checked the access logs for a week.

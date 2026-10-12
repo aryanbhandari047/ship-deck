@@ -39,6 +39,12 @@
     </button>
     <div class="sync" id="sync" aria-live="polite"><span class="sync-dot"></span><span id="sync-text">Connecting…</span></div>
   </header>
+  <div class="banner" id="reconnect" role="status" hidden>
+    <span class="banner-dot"></span>
+    <span id="reconnect-text">Reconnecting to the Ship Deck server…</span>
+    <span class="banner-sub">Drafts are kept. Run <code>sh bin/start.sh</code> if it stopped.</span>
+    <button class="act-btn" id="reconnect-now" type="button">Retry now</button>
+  </div>
 
   <main class="layout">
     <section class="scene" id="scene" aria-label="Ship deck">
@@ -70,7 +76,7 @@
                   </g>
                 </svg>
               </div>
-              <figure class="officer firstmate">
+              <figure class="officer firstmate" id="firstmate" role="button" tabindex="0" title="First mate: session and Bridge chat">
                 <svg viewBox="0 0 40 48" class="sailor" aria-hidden="true"></svg>
                 <figcaption>First mate</figcaption>
               </figure>
@@ -97,43 +103,96 @@
     </section>
 
     <aside class="panel" id="panel" aria-label="Command Center">
-      <h2 class="panel-title">Command Center</h2>
+      <div class="tabs" role="tablist" aria-label="Command Center">
+        <button class="tab" role="tab" type="button" id="tab-bridge" aria-controls="pane-bridge" aria-selected="true">Bridge <span class="badge zero" id="unread-count" title="Unread replies from the first mate" hidden>0</span></button>
+        <button class="tab" role="tab" type="button" id="tab-command" aria-controls="pane-command" aria-selected="false" tabindex="-1">Command <span class="badge zero" id="needs-tab-count" title="Needs the captain" hidden>0</span></button>
+        <button class="tab" role="tab" type="button" id="tab-sessions" aria-controls="pane-sessions" aria-selected="false" tabindex="-1">Sessions</button>
+      </div>
 
-      <div class="card watch-card" id="watch-card"></div>
-
-      <div class="card orders-card">
-        <h3>Orders to the first mate <span class="badge zero" id="orders-count" title="Pending orders">0</span></h3>
-        <form class="order-form" id="order-form">
-          <label class="sr-only" for="order-text">Order to first mate</label>
-          <textarea id="order-text" rows="2" maxlength="2000" placeholder="Order to first mate…" spellcheck="true"></textarea>
-          <button class="act-btn primary" type="submit">Queue order</button>
+      <section class="pane bridge-pane" id="pane-bridge" role="tabpanel" aria-labelledby="tab-bridge">
+        <div class="bridge-head">
+          <div class="bridge-who">
+            <span class="fm-avatar" aria-hidden="true"><svg viewBox="0 0 40 48" class="sailor"></svg></span>
+            <div>
+              <h2>First mate</h2>
+              <p class="bridge-sub" id="bridge-sub">Messages are queued as orders; replies arrive here.</p>
+            </div>
+          </div>
+          <button class="act-btn" id="notify-btn" type="button" title="Browser notifications for new replies and items needing the captain">Enable alerts</button>
+        </div>
+        <ol class="thread" id="thread" aria-live="polite" aria-label="Conversation with the first mate"></ol>
+        <button class="jump" id="thread-jump" type="button" hidden>New messages ↓</button>
+        <form class="composer" id="chat-form">
+          <label class="sr-only" for="chat-text">Message to the first mate</label>
+          <textarea id="chat-text" rows="2" maxlength="4000" placeholder="Message the first mate…" spellcheck="true"></textarea>
+          <div class="composer-foot">
+            <span class="hint" id="chat-hint">Enter to send · Shift+Enter for a new line</span>
+            <button class="act-btn primary" id="chat-send" type="submit">Send</button>
+          </div>
         </form>
-        <ul class="list orders" id="orders-list"></ul>
-      </div>
+      </section>
 
-      <div class="card">
-        <h3>Crew by state</h3>
-        <div class="counts" id="counts"></div>
-      </div>
+      <section class="pane" id="pane-command" role="tabpanel" aria-labelledby="tab-command" hidden>
+        <div class="card watch-card" id="watch-card"></div>
 
-      <div class="card attention">
-        <h3>Needs the captain <span class="badge" id="needs-count">0</span></h3>
-        <ul class="list" id="needs-list"></ul>
-        <details class="calls" id="calls-wrap">
-          <summary>Captain's Call backlog <span class="badge muted" id="calls-count">0</span></summary>
-          <ul class="list compact" id="calls-list"></ul>
+        <div class="card attention">
+          <h3>Needs the captain <span class="badge" id="needs-count">0</span></h3>
+          <ul class="list" id="needs-list"></ul>
+        </div>
+
+        <div class="card">
+          <h3>Captain's Call <span class="badge" id="calls-count">0</span></h3>
+          <ul class="list compact actions" id="calls-list"></ul>
+        </div>
+
+        <div class="card">
+          <h3>Crew by state</h3>
+          <div class="counts" id="counts"></div>
+        </div>
+
+        <details class="card new-job" id="new-job">
+          <summary><h3>New job</h3></summary>
+          <form class="job-form" id="job-form">
+            <label>Project
+              <select id="job-project" required></select>
+            </label>
+            <fieldset class="seg" aria-label="Kind of job">
+              <label><input type="radio" name="job-kind" value="ship" checked> <span><strong>Ship</strong> make the change</span></label>
+              <label><input type="radio" name="job-kind" value="scout"> <span><strong>Scout</strong> diagnose and report only</span></label>
+            </fieldset>
+            <label>What should the crew do?
+              <textarea id="job-text" rows="4" maxlength="2000" placeholder="Describe the job: goal, links, constraints…"></textarea>
+            </label>
+            <button class="act-btn primary" type="submit">Queue new job</button>
+          </form>
         </details>
-      </div>
 
-      <div class="card">
-        <h3>Recently done</h3>
-        <ul class="list" id="done-list"></ul>
-      </div>
+        <div class="card">
+          <h3>Backlog: queued <span class="badge muted" id="queued-count">0</span></h3>
+          <ul class="list compact actions" id="queued-list"></ul>
+        </div>
 
-      <div class="card">
-        <h3>Pull requests</h3>
-        <ul class="list" id="pr-list"></ul>
-      </div>
+        <div class="card">
+          <h3>Recently done <button class="act-btn mini" id="cleanup-done" type="button" hidden></button></h3>
+          <ul class="list" id="done-list"></ul>
+        </div>
+
+        <div class="card orders-card">
+          <h3>Orders <span class="badge zero" id="orders-count" title="Pending orders">0</span></h3>
+          <ul class="list orders" id="orders-list"></ul>
+        </div>
+
+        <div class="card">
+          <h3>Pull requests</h3>
+          <ul class="list" id="pr-list"></ul>
+        </div>
+      </section>
+
+      <section class="pane" id="pane-sessions" role="tabpanel" aria-labelledby="tab-sessions" hidden>
+        <p class="hint pane-hint">Every Claude Code session Ship Deck has matched to the first mate or a crew member, kept after cleanup. Paste a command into a terminal to resume.</p>
+        <input id="sessions-filter" class="pane-filter" type="search" placeholder="Filter sessions…" autocomplete="off" spellcheck="false" aria-label="Filter sessions">
+        <ul class="list sessions" id="sessions-list"></ul>
+      </section>
     </aside>
   </main>
 
@@ -171,8 +230,20 @@
     </div>
   </section>
 
+  <div class="confirm-scrim" id="confirm-scrim" hidden></div>
+  <section class="confirm" id="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-body" hidden tabindex="-1">
+    <h2 id="confirm-title"></h2>
+    <div id="confirm-body"></div>
+    <p class="confirm-warn" id="confirm-warn" hidden></p>
+    <div class="btn-row confirm-actions">
+      <button class="act-btn" id="confirm-no" type="button">Cancel</button>
+      <button class="act-btn primary" id="confirm-yes" type="button">Queue order</button>
+    </div>
+  </section>
+
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
+  <script src="markdown.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -272,6 +272,7 @@ test('library lists an allow-list of home files and memory *.md, MEMORY.md first
     'home:AGENTS.md', 'home:data/captain.md', 'home:data/captain-shared.md', 'home:data/learnings.md',
     'home:data/projects.md', 'home:data/secondmates.md', 'home:data/backlog.md',
     'memory:MEMORY.md', 'memory:alpha-rule.md', 'memory:zeta-rule.md',
+    'skill:firstmate:harbor-watch',
   ]);
   const by = Object.fromEntries(entries.map((e) => [e.key, e]));
   assert.equal(by['home:AGENTS.md'].exists, false, 'missing files are listed as missing');
@@ -285,7 +286,7 @@ test('library lists an allow-list of home files and memory *.md, MEMORY.md first
   }
 
   const none = library.listLibrary(home, path.join(mem, 'nope'));
-  assert.deepEqual(none.filter((e) => e.group !== 'Fleet home').map((e) => [e.key, e.exists]), [['memory:MEMORY.md', false]]);
+  assert.deepEqual(none.filter((e) => e.group === 'First mate memory').map((e) => [e.key, e.exists]), [['memory:MEMORY.md', false]]);
 });
 
 // ---------- HTTP: guards and endpoints ----------
@@ -296,7 +297,8 @@ async function startServer(t, extra = {}) {
   const memoryDir = tempDir(t, 'ship-deck-mem-');
   fs.writeFileSync(path.join(memoryDir, 'MEMORY.md'), '# Memory index');
   const exec = fakeExec((file, args) => (file === 'tmux' ? { code: 0, stdout: `pane of ${args[3]}\n`, stderr: '' } : { code: 0, stdout: '', stderr: '' }));
-  const server = createServer({ home, tmux: false, staleDays: 7, ordersDir, memoryDir, exec, ...extra });
+  const claudeDir = tempDir(t, 'ship-deck-claude-');
+  const server = createServer({ home, tmux: false, staleDays: 7, ordersDir, memoryDir, claudeDir, exec, ...extra });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   t.after(() => server.close());
   const port = server.address().port;

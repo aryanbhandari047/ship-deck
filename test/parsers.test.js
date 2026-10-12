@@ -35,7 +35,7 @@ test('parseStatus keeps state lines, timestamps and keys; drops junk', () => {
   const g = f.parseStatus(read('state/gamma-decision.status'));
   assert.equal(g[1].state, 'needs-decision');
   assert.equal(g[1].key, 'keep-or-drop');
-  assert.match(g[1].note, /^keep the legacy beacon endpoint/);
+  assert.match(g[1].note, /^the legacy beacon endpoint still has callers\. Options: \(A\)/);
 
   const r = f.parseStatus(read('state/epsilon-resume.status'));
   assert.equal(r[0].ts, '2026-01-04 08:00:00');

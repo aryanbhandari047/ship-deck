@@ -1,5 +1,6 @@
 'use strict';
-// Ship Deck frontend: polls /api/fleet and reconciles the deck in place.
+// Ship Deck frontend: polls /api/fleet, reconciles the deck in place, and runs
+// the captain's control surface (Bridge chat, orders, sessions, library).
 
 (() => {
   const POLL_MS = 3000;
@@ -11,34 +12,61 @@
     'done': 'done', 'failed': 'failed', 'unknown': 'no status', 'resolved': 'resolved', 'stale': 'stale',
   };
   const MAX_CRATES = 48;
+  const MD = window.ShipDeckMarkdown;
 
   const $ = (id) => document.getElementById(id);
   const ui = {
     home: $('home-path'), search: $('search'), sync: $('sync'), syncText: $('sync-text'),
-    captain: $('captain'), awaySign: $('away-sign'), lamp: $('lamp'), lampLabel: $('lamp-label'), wheel: $('wheel'),
+    reconnect: $('reconnect'), reconnectText: $('reconnect-text'), reconnectNow: $('reconnect-now'),
+    captain: $('captain'), firstmate: $('firstmate'), awaySign: $('away-sign'), lamp: $('lamp'), lampLabel: $('lamp-label'), wheel: $('wheel'),
     areas: $('areas'), cabins: $('cabins'), cabinRow: $('cabin-row'),
     hold: $('hold'), holdSub: $('hold-sub'), crates: $('crates'),
+    tabs: { bridge: $('tab-bridge'), command: $('tab-command'), sessions: $('tab-sessions') },
+    panes: { bridge: $('pane-bridge'), command: $('pane-command'), sessions: $('pane-sessions') },
+    unread: $('unread-count'), needsTab: $('needs-tab-count'),
+    thread: $('thread'), threadJump: $('thread-jump'), chatForm: $('chat-form'), chatText: $('chat-text'), chatSend: $('chat-send'),
+    notifyBtn: $('notify-btn'), bridgeSub: $('bridge-sub'),
     watch: $('watch-card'), counts: $('counts'),
     needsCount: $('needs-count'), needsList: $('needs-list'),
-    callsWrap: $('calls-wrap'), callsCount: $('calls-count'), callsList: $('calls-list'),
-    doneList: $('done-list'), prList: $('pr-list'),
+    callsCount: $('calls-count'), callsList: $('calls-list'),
+    queuedCount: $('queued-count'), queuedList: $('queued-list'),
+    jobForm: $('job-form'), jobProject: $('job-project'), jobText: $('job-text'), newJob: $('new-job'),
+    doneList: $('done-list'), cleanupDone: $('cleanup-done'), prList: $('pr-list'),
+    ordersCount: $('orders-count'), ordersList: $('orders-list'),
+    sessionsList: $('sessions-list'), sessionsFilter: $('sessions-filter'),
     drawer: $('drawer'), scrim: $('scrim'), drawerKicker: $('drawer-kicker'), drawerTitle: $('drawer-title'),
     drawerBody: $('drawer-body'), drawerClose: $('drawer-close'),
-    ordersCount: $('orders-count'), ordersList: $('orders-list'), orderForm: $('order-form'), orderText: $('order-text'),
     libraryBtn: $('library-btn'), library: $('library'), libraryScrim: $('library-scrim'), libraryClose: $('library-close'),
     libraryFilter: $('library-filter'), libraryList: $('library-list'), libraryDoc: $('library-doc'),
+    confirm: $('confirm'), confirmScrim: $('confirm-scrim'), confirmTitle: $('confirm-title'), confirmBody: $('confirm-body'),
+    confirmWarn: $('confirm-warn'), confirmYes: $('confirm-yes'), confirmNo: $('confirm-no'),
     toasts: $('toasts'),
   };
 
   let snap = null;
   let query = '';
   let stateFilter = null;
-  let selected = null; // { type: 'task' | 'backlog', id }
+  let selected = null; // { type: 'task' | 'backlog' | 'secondmate' | 'firstmate', id }
   let lastOkAt = 0;
   const stations = new Map(); // id -> element
   const areaEls = new Map(); // projectKey -> { root, plaque, tally, grid }
-  const prevState = new Map();
   let firstRender = true;
+
+  // Per-viewer state in localStorage; every access tolerates a blocked store.
+  const store = {
+    get(k, d = null) { try { const v = localStorage.getItem('shipdeck.' + k); return v === null ? d : v; } catch { return d; } },
+    set(k, v) { try { if (v === null || v === undefined || v === '') localStorage.removeItem('shipdeck.' + k); else localStorage.setItem('shipdeck.' + k, String(v)); } catch { /* ignore */ } },
+    json(k, d) { try { return JSON.parse(this.get(k, 'null')) ?? d; } catch { return d; } },
+  };
+  // Restores a field's draft and saves it on every edit; clearDraft after a successful send.
+  function persist(el, key) {
+    el.dataset.draft = key;
+    const saved = store.get('draft.' + key);
+    if (saved !== null && !el.value) el.value = saved;
+    el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', () => store.set('draft.' + key, el.value));
+    return el;
+  }
+  function clearDraft(el) { el.value = ''; store.set('draft.' + el.dataset.draft, null); }
 
   // ---------- helpers ----------
   function h(tag, attrs, ...kids) {
@@ -325,13 +353,144 @@
     ui.wheel.style.animationPlayState = w.healthy ? 'running' : 'paused';
   }
 
+  // ---------- orders: posting, confirm dialog, lifecycle ----------
+  const KIND_LABEL = {
+    chat: 'Chat', cleanup: 'Clean up', merge: 'Merge PR', answer: 'Answer', decision: 'Decision', status: 'Status?',
+    'new-task': 'New job', 'cleanup-done': 'Clean up done', 'backlog-start': 'Start', 'backlog-answer': 'Answer call', order: 'Order',
+  };
+  const IRREVERSIBLE = new Set(['merge', 'cleanup', 'cleanup-done']);
+  const ORDER_COLOR = { pending: 'needs-decision', acknowledged: 'working', done: 'done', declined: 'failed' };
+
+  async function post(url, body) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Ship-Deck': '1' },
+        body: JSON.stringify(body),
+      });
+      const out = await res.json().catch(() => ({}));
+      return { ...out, ok: res.ok && out.ok !== false, error: out.error || (res.ok ? null : 'HTTP ' + res.status) };
+    } catch (e) {
+      return { ok: false, error: 'cannot reach the server (your text is kept)' };
+    }
+  }
+
+  // In-page confirm: resolves true only on an explicit "Queue order".
+  let confirmResolve = null;
+  function confirmDialog({ title, body, irreversible, yes = 'Queue order' }) {
+    if (confirmResolve) confirmResolve(false);
+    ui.confirmTitle.textContent = title;
+    ui.confirmBody.replaceChildren(...(body === undefined || body === null ? [] : [typeof body === 'string' ? h('p', { class: 'confirm-text', text: body }) : body]));
+    ui.confirmWarn.hidden = !irreversible;
+    ui.confirmWarn.textContent = irreversible
+      ? 'This cannot be undone once carried out. Ship Deck only queues the order: the first mate will still confirm with you before acting.'
+      : '';
+    ui.confirmYes.textContent = yes;
+    ui.confirmYes.classList.toggle('danger', !!irreversible);
+    ui.confirm.hidden = false;
+    ui.confirmScrim.hidden = false;
+    const back = document.activeElement;
+    ui.confirmYes.focus();
+    return new Promise((resolve) => {
+      confirmResolve = (v) => {
+        confirmResolve = null;
+        ui.confirm.hidden = true;
+        ui.confirmScrim.hidden = true;
+        if (back && back.isConnected) back.focus({ preventScroll: true });
+        resolve(v);
+      };
+    });
+  }
+  ui.confirmYes.addEventListener('click', () => confirmResolve && confirmResolve(true));
+  ui.confirmNo.addEventListener('click', () => confirmResolve && confirmResolve(false));
+  ui.confirmScrim.addEventListener('click', () => confirmResolve && confirmResolve(false));
+
+  function describe(req) {
+    const bits = [KIND_LABEL[req.kind] || req.kind];
+    if (req.target) bits.push(req.target);
+    if (req.item) bits.push(req.item);
+    if (req.project) bits.push(`${req.taskKind || ''} in ${req.project}`.trim());
+    return bits.join(' · ');
+  }
+  // Queues an order after the in-page confirm. Returns true when queued.
+  async function queueOrder(req, confirm) {
+    if (confirm !== false) {
+      const c = confirm || {};
+      const ok = await confirmDialog({
+        title: c.title || `Queue “${describe(req)}” for the first mate?`,
+        body: c.body !== undefined ? c.body : req.text || null,
+        irreversible: IRREVERSIBLE.has(req.kind),
+      });
+      if (!ok) return false;
+    }
+    const r = await post('/api/orders', req);
+    if (r.ok) {
+      toast(`Queued for the first mate: ${describe(req)}`, 'ok');
+      poll();
+      return true;
+    }
+    toast(`Order not queued: ${r.error}`, 'err');
+    return false;
+  }
+  function toast(text, kind) {
+    const el = h('div', { class: 'toast ' + (kind || ''), role: kind === 'err' ? 'alert' : 'status', text });
+    ui.toasts.append(el);
+    setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 400); }, kind === 'err' ? 7000 : 3500);
+  }
+
+  function timeOf(ts) { const t = ts ? Date.parse(ts) : NaN; return Number.isFinite(t) ? t : null; }
+  function clock(ms) { return ms ? new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''; }
+  function chip(status) { return h('span', { class: 'chip', style: `--c:${stateVar(ORDER_COLOR[status] || 'unknown')}`, text: status }); }
+  function payloadText(o) {
+    if (o.kind === 'cleanup-done' && o.targets) return `${o.targets.length} crew: ${o.targets.join(', ')}`;
+    if (o.kind === 'new-task') return `${o.taskKind || 'job'} in ${o.project}`;
+    if (o.item) return o.item + (o.option ? ` · option ${o.option}` : '');
+    if (o.option) return `option ${o.option}`;
+    return '';
+  }
+  // queued -> acknowledged -> done/declined, with each step's time and note.
+  function lifecycle(o) {
+    const steps = [h('li', { class: 'lc-step done', style: `--c:${stateVar('needs-decision')}` }, h('b', { text: 'queued' }), ' ', clock(timeOf(o.ts)))];
+    for (const a of o.history || []) {
+      steps.push(h('li', { class: 'lc-step done', style: `--c:${stateVar(ORDER_COLOR[a.status] || 'unknown')}` },
+        h('b', { text: a.status }), ' ', clock(timeOf(a.ts)), a.note ? h('span', { class: 'lc-note', text: ` · ${a.note}` }) : null));
+    }
+    if (o.status === 'pending' || o.status === 'acknowledged') {
+      steps.push(h('li', { class: 'lc-step next', text: o.status === 'pending' ? 'waiting for the first mate' : 'in progress' }));
+    }
+    return h('ol', { class: 'lifecycle' }, ...steps);
+  }
+
+  function orderRow(o) {
+    const when = timeOf(o.ts);
+    const extra = payloadText(o);
+    const inner = [
+      h('span', { class: 'dot' }),
+      h('span', { class: 'r-id' }, h('span', { class: 'o-kind', text: KIND_LABEL[o.kind] || o.kind }), o.target ? ' ' + o.target : ''),
+      h('span', { class: 'r-age' }, chip(o.status), ' ', ago(when)),
+      h('span', { class: 'r-note', text: o.text + (extra ? ` (${extra})` : '') }),
+      h('span', { class: 'r-life' }, lifecycle(o)),
+    ];
+    const title = `${o.id}\n${o.status}${o.ackTs ? ' · ' + o.ackTs : ''}\nqueued ${o.ts}`;
+    const attrs = { class: 'row' + (o.pending ? ' pending' : ''), style: `--c:${stateVar(ORDER_COLOR[o.status] || 'unknown')}`, title };
+    return h('li', null, o.target && snap.tasks.some((t) => t.id === o.target)
+      ? h('button', { ...attrs, type: 'button', onclick: () => openDrawer({ type: 'task', id: o.target }) }, ...inner)
+      : h('div', attrs, ...inner));
+  }
+
   // ---------- command center ----------
   function listRow(t, note, onclick) {
     return h('li', null, h('button', { class: 'row', type: 'button', onclick, style: `--c:${stateVar(bucket(t))}` },
       h('span', { class: 'dot' }), h('span', { class: 'r-id', text: t.id, title: t.id }), h('span', { class: 'r-age', text: ago(t.lastActivity) }),
-      note ? h('span', { class: 'r-note', text: note }) : null));
+      note ? h('span', { class: 'r-note', text: note }) : null,
+      t.options && t.options.length ? h('span', { class: 'r-opts', text: `options ${t.options.map((o) => o.letter).join(' / ')}` }) : null));
   }
   function emptyRow(text) { return h('li', null, h('div', { class: 'empty', text })); }
+  // A list row with an inline action button beside the clickable row.
+  function actionRow(row, label, onclick) {
+    return h('li', { class: 'with-action' }, row, h('button', { class: 'act-btn mini', type: 'button', text: label, onclick }));
+  }
+  function itemKey(b) { return b.id || b.title; }
 
   function renderPanel() {
     const w = snap.watcher;
@@ -359,28 +518,41 @@
       }, h('span', { class: 'n', text: n }), h('span', { class: 'l', text: STATE_LABEL[s] }));
     }));
 
-    const needs = snap.tasks.filter((t) => ATTENTION.has(t.state) && !t.stale).sort(sortTasks);
-    const calls = [...snap.backlog.captain, ...snap.backlog.inFlight, ...snap.backlog.queued].filter((b) => b.captainCall);
+    const needs = needsCaptain();
+    const calls = snap.backlog.calls || [];
     const sigOf = (list) => list.map((t) => [t.id, t.state, t.stale, ago(t.lastActivity), lastNote(t)]);
     ui.needsCount.textContent = needs.length;
     ui.needsCount.classList.toggle('zero', needs.length === 0);
+    ui.needsTab.textContent = needs.length + calls.length;
+    ui.needsTab.hidden = needs.length + calls.length === 0;
     if (!unchanged('needs', sigOf(needs))) ui.needsList.replaceChildren(...(needs.length
       ? needs.map((t) => listRow(t, lastNote(t), () => openDrawer({ type: 'task', id: t.id })))
       : [emptyRow('No crew waiting on the captain.')]));
-    ui.callsCount.textContent = calls.length;
-    ui.callsWrap.hidden = calls.length === 0;
-    if (!unchanged('calls', calls)) ui.callsList.replaceChildren(...calls.map((b) => {
-      const section = snap.backlog.captain.includes(b) ? 'captain' : snap.backlog.inFlight.includes(b) ? 'inFlight' : 'queued';
-      const index = snap.backlog[section].indexOf(b);
-      return h('li', null, h('button', {
-        class: 'row', type: 'button', style: `--c:${stateVar('needs-decision')}`,
-        onclick: () => openDrawer({ type: 'backlog', id: b.id || b.title, section, index }),
-      }, h('span', { class: 'dot' }), h('span', { class: 'r-id', text: b.id || '(untitled)', title: b.id || '' }),
-      h('span', { class: 'r-age', text: (b.tags && b.tags.since) || '' }), h('span', { class: 'r-note', text: b.title })));
-    }));
 
-    const done = snap.tasks.filter((t) => t.state === 'done').sort((a, b) => (b.statusMtime || 0) - (a.statusMtime || 0)).slice(0, 6);
-    if (!unchanged('done', sigOf(done))) ui.doneList.replaceChildren(...(done.length
+    ui.callsCount.textContent = calls.length;
+    ui.callsCount.classList.toggle('zero', calls.length === 0);
+    if (!unchanged('calls', calls.map((b) => [b.id, b.title, b.section, b.index]))) ui.callsList.replaceChildren(...(calls.length ? calls.map((b) => {
+      const open = (focus) => openDrawer({ type: 'backlog', id: itemKey(b), section: b.section, index: b.index, focus });
+      const row = h('button', { class: 'row', type: 'button', style: `--c:${stateVar('needs-decision')}`, onclick: () => open(false) },
+        h('span', { class: 'dot' }), h('span', { class: 'r-id', text: b.id || '(untitled)', title: b.id || '' }),
+        h('span', { class: 'r-age', text: (b.tags && b.tags.since) || '' }), h('span', { class: 'r-note', text: b.title }));
+      return b.id ? actionRow(row, 'Answer', () => open(true)) : h('li', null, row);
+    }) : [emptyRow('No Captain\'s Call items in the backlog.')]));
+
+    const queued = (snap.backlog.queued || []).map((b, index) => ({ b, index })).filter((x) => !x.b.captainCall && !x.b.checked);
+    ui.queuedCount.textContent = queued.length;
+    if (!unchanged('queued', queued.map((x) => [x.b.id, x.b.title, x.index]))) ui.queuedList.replaceChildren(...(queued.length ? queued.map(({ b, index }) => {
+      const row = h('button', { class: 'row', type: 'button', style: `--c:${stateVar('unknown')}`, onclick: () => openDrawer({ type: 'backlog', id: itemKey(b), section: 'queued', index }) },
+        h('span', { class: 'dot' }), h('span', { class: 'r-id', text: b.id || '(untitled)', title: b.id || '' }),
+        h('span', { class: 'r-age', text: (b.tags && b.tags.since) || '' }), h('span', { class: 'r-note', text: b.title }));
+      return b.id ? actionRow(row, 'Start', () => startBacklog(b)) : h('li', null, row);
+    }) : [emptyRow('Nothing queued.')]));
+
+    const doneAll = snap.tasks.filter((t) => t.state === 'done' && t.kind !== 'secondmate');
+    const done = doneAll.slice().sort((a, b) => (b.statusMtime || 0) - (a.statusMtime || 0)).slice(0, 6);
+    ui.cleanupDone.hidden = doneAll.length === 0;
+    ui.cleanupDone.textContent = `Clean up all finished (${doneAll.length})`;
+    if (!unchanged('done', sigOf(done), doneAll.length)) ui.doneList.replaceChildren(...(done.length
       ? done.map((t) => listRow(t, lastNote(t), () => openDrawer({ type: 'task', id: t.id })))
       : [emptyRow('Nothing finished yet.')]));
 
@@ -393,25 +565,57 @@
     ui.ordersCount.textContent = ord.pending;
     ui.ordersCount.classList.toggle('zero', !ord.pending);
     if (!unchanged('orders', ord.list, ord.pending)) ui.ordersList.replaceChildren(...(ord.list.length
-      ? ord.list.slice(0, 12).map(orderRow)
+      ? ord.list.slice(0, 20).map(orderRow)
       : [emptyRow('No orders yet.')]));
+
+    renderJobProjects();
   }
 
-  const ORDER_COLOR = { pending: 'needs-decision', acknowledged: 'working', done: 'done', declined: 'failed' };
-  function orderRow(o) {
-    const when = o.ts ? Date.parse(o.ts) : null;
-    const inner = [
-      h('span', { class: 'dot' }),
-      h('span', { class: 'r-id' }, h('span', { class: 'o-kind', text: KIND_LABEL[o.kind] || o.kind }), o.target ? ' ' + o.target : ''),
-      h('span', { class: 'r-age' }, h('span', { class: 'o-status', text: o.status }), ' ', ago(when)),
-      h('span', { class: 'r-note', text: o.text }),
-      o.note ? h('span', { class: 'r-note o-note', text: `↳ ${o.note}` }) : null,
-    ];
-    const title = `${o.id}\n${o.status}${o.ackTs ? ' · ' + o.ackTs : ''}\nqueued ${o.ts}`;
-    const attrs = { class: 'row' + (o.pending ? ' pending' : ''), style: `--c:${stateVar(ORDER_COLOR[o.status] || 'unknown')}`, title };
-    return h('li', null, o.target && snap.tasks.some((t) => t.id === o.target)
-      ? h('button', { ...attrs, type: 'button', onclick: () => openDrawer({ type: 'task', id: o.target }) }, ...inner)
-      : h('div', attrs, ...inner));
+  function needsCaptain() { return snap.tasks.filter((t) => ATTENTION.has(t.state) && !t.stale).sort(sortTasks); }
+
+  ui.cleanupDone.addEventListener('click', () => {
+    const ids = snap.tasks.filter((t) => t.state === 'done' && t.kind !== 'secondmate').map((t) => t.id).sort();
+    if (!ids.length) return;
+    queueOrder({ kind: 'cleanup-done', targets: ids }, {
+      title: `Clean up all ${ids.length} finished crew?`,
+      body: h('div', null, h('p', { class: 'confirm-text', text: 'One order listing every finished crew member:' }), h('ul', { class: 'confirm-list' }, ...ids.map((id) => h('li', { text: id })))),
+    });
+  });
+
+  // ---------- new job ----------
+  function renderJobProjects() {
+    const names = snap.projects.length ? snap.projects.map((p) => [p.name, p.mode]) : [...new Set(snap.tasks.map((t) => t.project))].sort().map((n) => [n, null]);
+    if (unchanged('job-projects', names)) return;
+    const want = ui.jobProject.value || store.get('draft.job.project');
+    ui.jobProject.replaceChildren(h('option', { value: '', text: names.length ? 'Choose a project…' : 'No projects in data/projects.md' }),
+      ...names.map(([n, mode]) => h('option', { value: n, text: mode ? `${n}  ·  ${mode}` : n })));
+    if (want && names.some(([n]) => n === want)) ui.jobProject.value = want;
+  }
+  persist(ui.jobProject, 'job.project');
+  persist(ui.jobText, 'job.text');
+  const savedKind = store.get('draft.job.kind');
+  for (const r of ui.jobForm.querySelectorAll('input[name="job-kind"]')) {
+    if (savedKind && r.value === savedKind) r.checked = true;
+    r.addEventListener('change', () => store.set('draft.job.kind', r.value));
+  }
+  if (store.get('draft.job.text')) ui.newJob.open = true;
+  ui.jobForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const project = ui.jobProject.value;
+    const taskKind = ui.jobForm.querySelector('input[name="job-kind"]:checked').value;
+    const text = ui.jobText.value.trim();
+    if (!project) { ui.jobProject.focus(); return; }
+    if (!text) { ui.jobText.focus(); return; }
+    const ok = await queueOrder({ kind: 'new-task', project, taskKind, text }, {
+      title: `Queue a new ${taskKind} job in ${project}?`, body: text,
+    });
+    if (ok) { clearDraft(ui.jobText); }
+  });
+
+  async function startBacklog(b, note) {
+    return queueOrder({ kind: 'backlog-start', item: b.id, text: note || `Start ${b.id}: ${b.title}` }, {
+      title: `Start backlog item ${b.id}?`, body: b.title,
+    });
   }
 
   // ---------- drawer ----------
@@ -427,11 +631,44 @@
     td = null;
     if (selected.type === 'backlog') return renderBacklogDrawer();
     if (selected.type === 'secondmate') return renderSecondmateDrawer();
+    if (selected.type === 'firstmate') return renderFirstMateDrawer();
+  }
+
+  // Copies text, falling back to a hidden textarea where the clipboard API is missing.
+  async function copyText(text, btn) {
+    let ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch {
+      const ta = h('textarea', { style: 'position:fixed;opacity:0' });
+      ta.value = text;
+      document.body.append(ta);
+      ta.select();
+      try { ok = document.execCommand('copy'); } catch { ok = false; }
+      ta.remove();
+    }
+    if (btn) {
+      const prev = btn.textContent;
+      btn.textContent = ok ? 'Copied' : 'Copy failed';
+      setTimeout(() => { btn.textContent = prev; }, 1300);
+    }
+  }
+
+  // "Resume in terminal" block for a session view from the server.
+  function resumeBlock(sess) {
+    const wrap = h('div', { class: 'resume' });
+    if (!sess || !sess.resume) {
+      wrap.append(h('p', { class: 'empty', text: (sess && sess.note) || 'No session recorded.' }));
+      return wrap;
+    }
+    const btn = h('button', { class: 'act-btn', type: 'button', text: 'Copy', title: 'Copy the resume command' });
+    btn.addEventListener('click', () => copyText(sess.resume, btn));
+    wrap.append(h('div', { class: 'resume-row' }, h('code', { class: 'resume-cmd', text: sess.resume, tabindex: '0' }), btn),
+      h('p', { class: 'hint resume-meta', text: `${sess.harness || 'claude'} session${sess.firstSeen ? ' · found ' + agoLong(sess.firstSeen) : ''}${sess.lastSeen ? ' · seen ' + agoLong(sess.lastSeen) : ''}` }));
+    return wrap;
   }
 
   // The task drawer keeps its interactive parts (pane peek, message box, order
   // buttons, file viewer) across polls; only the facts are rebuilt each tick.
-  let td = null; // { id, root, info, orders, peek, file, ... }
+  let td = null; // { id, root, info, decision, resume, orders, peek, file, ... }
 
   function renderTaskDrawer() {
     const t = snap.tasks.find((x) => x.id === selected.id);
@@ -440,7 +677,7 @@
       td = null;
       ui.drawerKicker.replaceChildren('Left the ship');
       ui.drawerTitle.textContent = selected.id;
-      ui.drawerBody.replaceChildren(h('p', { text: 'This task no longer has a meta file in state/. It was probably torn down.' }));
+      ui.drawerBody.replaceChildren(h('p', { text: 'This task no longer has a meta file in state/. It was probably torn down. Its session stays listed under Sessions.' }));
       return;
     }
     ui.drawerKicker.replaceChildren(...[h('span', { class: 'pill', style: `background:${stateVar(t.state)}`, text: STATE_LABEL[t.state] }),
@@ -449,6 +686,8 @@
     if (!td || td.id !== t.id || !td.root.isConnected) buildTaskDrawer(t);
     td.task = t;
     if (!unchanged('drawer-info', t, snap.tmux.available)) td.info.replaceChildren(...taskInfo(t));
+    if (!unchanged('drawer-decision', t.id, t.state, lastNote(t), t.options)) renderDecision(t);
+    if (!unchanged('drawer-resume', t.id, t.session)) td.resume.replaceChildren(h('h3', { text: 'Resume in terminal' }), resumeBlock(t.session));
     renderTaskOrders(t);
     td.peekWrap.hidden = !t.window;
     td.msgWrap.hidden = !t.window;
@@ -464,10 +703,11 @@
       links.append(h('button', { class: 'link-btn', type: 'button', title: `data/${t.id}/${name} (read-only)`, onclick: () => openDataFile(t.id, name) },
         h('span', { class: 'file-ico', 'aria-hidden': 'true', text: '¶' }), name));
     }
-    if (t.worktree) links.append(h('button', {
-      class: 'link-btn copy', type: 'button', text: 'Copy worktree path',
-      onclick: (e) => { navigator.clipboard && navigator.clipboard.writeText(t.worktree).then(() => { e.target.textContent = 'Copied'; setTimeout(() => { e.target.textContent = 'Copy worktree path'; }, 1200); }); },
-    }));
+    if (t.worktree) {
+      const b = h('button', { class: 'link-btn copy', type: 'button', text: 'Copy worktree path' });
+      b.addEventListener('click', () => copyText(t.worktree, b));
+      links.append(b);
+    }
     if (links.childNodes.length) kids.push(links);
     const dl = h('dl', { class: 'facts' });
     fact(dl, 'Project', t.project);
@@ -497,6 +737,45 @@
     return kids;
   }
 
+  // Lettered option buttons plus a free-text answer; one shared builder for crew
+  // decisions and Captain's Call backlog items.
+  function answerPanel({ options, draftKey, placeholder, send }) {
+    const text = persist(h('textarea', { rows: '3', maxlength: '2000', placeholder, 'aria-label': placeholder }), draftKey);
+    const opts = (options || []).map((o) => h('button', {
+      class: 'option-btn' + (o.recommended ? ' rec' : ''), type: 'button', title: `Answer with option ${o.letter}`,
+      onclick: async () => { if (await send(o, text.value.trim())) clearDraft(text); },
+    }, h('span', { class: 'opt-letter', text: o.letter }), h('span', { class: 'opt-text', text: o.text }), o.recommended ? h('span', { class: 'opt-rec', text: 'recommended' }) : null));
+    const sendBtn = h('button', { class: 'act-btn primary', type: 'button', text: 'Send answer', onclick: async () => {
+      if (!text.value.trim()) { text.focus(); return; }
+      if (await send(null, text.value.trim())) clearDraft(text);
+    } });
+    text.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendBtn.click(); } });
+    return h('div', { class: 'answer' },
+      opts.length ? h('div', { class: 'options', role: 'group', 'aria-label': 'Options' }, ...opts) : null,
+      opts.length ? h('p', { class: 'hint', text: 'Click an option to answer with it; anything in the box below is sent along with it.' }) : null,
+      text, h('div', { class: 'btn-row end' }, sendBtn));
+  }
+  function answerText(opt, extra) {
+    return opt ? `(${opt.letter}) ${opt.text}${extra ? '\n\n' + extra : ''}` : extra;
+  }
+
+  function renderDecision(t) {
+    if (!ATTENTION.has(t.state) || t.state === 'failed') { td.decision.hidden = true; td.decision.replaceChildren(); return; }
+    td.decision.hidden = false;
+    td.decision.replaceChildren(
+      h('h3', { text: t.state === 'blocked' ? 'Blocked: help it along' : 'Decision needed' }),
+      h('div', { class: 'decision-note', text: lastNote(t) || '(no note)' }),
+      answerPanel({
+        options: t.options,
+        draftKey: 'decision.' + t.id,
+        placeholder: t.options.length ? 'Optional note or your own answer…' : 'Your answer…',
+        send: (opt, extra) => queueOrder({ kind: 'decision', target: t.id, option: opt ? opt.letter : null, text: answerText(opt, extra) }, {
+          title: opt ? `Answer ${t.id} with option ${opt.letter}?` : `Send this answer to ${t.id}?`,
+          body: answerText(opt, extra),
+        }),
+      }));
+  }
+
   function buildTaskDrawer(t) {
     stopPeek();
     const id = t.id;
@@ -513,59 +792,40 @@
       d.fileText);
 
     d.info = h('div', { class: 'task-info' });
+    d.decision = h('section', { class: 'drawer-sec decision-sec', hidden: true });
+    d.resume = h('section', { class: 'drawer-sec' });
 
     // Orders to the first mate about this worker.
-    const answerText = h('textarea', { rows: '2', maxlength: '2000', placeholder: 'Your answer to its decision…', 'aria-label': `Answer for ${id}` });
-    const answerRow = h('div', { class: 'answer-row', hidden: true }, answerText,
-      h('div', { class: 'btn-row' },
-        h('button', { class: 'act-btn primary', type: 'button', text: 'Queue answer', onclick: async () => {
-          if (!answerText.value.trim()) { answerText.focus(); return; }
-          if (await queueOrder({ kind: 'answer', target: id, text: answerText.value })) { answerText.value = ''; answerRow.hidden = true; }
-        } }),
-        h('button', { class: 'act-btn', type: 'button', text: 'Cancel', onclick: () => { answerRow.hidden = true; } })));
-    d.mergeBtn = h('button', { class: 'act-btn', type: 'button', text: 'Merge its PR', onclick: () => queueOrder({ kind: 'merge', target: id }) });
+    d.mergeBtn = h('button', { class: 'act-btn', type: 'button', text: 'Merge its PR', onclick: () => queueOrder({ kind: 'merge', target: id }, { title: `Ask the first mate to merge ${id}'s PR?`, body: (td && td.task && td.task.pr) || null }) });
     d.ordersList = h('ul', { class: 'list orders compact' });
     const ordersSec = h('section', { class: 'drawer-sec' },
       h('h3', { text: 'Orders to the first mate' }),
       h('p', { class: 'hint', text: 'Queued for the first mate to act on; Ship Deck does not run them.' }),
       h('div', { class: 'btn-row' },
-        h('button', { class: 'act-btn', type: 'button', text: 'Clean up this worker', onclick: () => queueOrder({ kind: 'cleanup', target: id }) }),
+        h('button', { class: 'act-btn', type: 'button', text: 'Ask for status', onclick: () => queueOrder({ kind: 'status', target: id }) }),
         d.mergeBtn,
-        h('button', { class: 'act-btn', type: 'button', text: 'Answer decision…', onclick: () => { answerRow.hidden = false; answerText.focus(); } }),
-        h('button', { class: 'act-btn', type: 'button', text: 'Ask for status', onclick: () => queueOrder({ kind: 'status', target: id }) })),
-      answerRow,
+        h('button', { class: 'act-btn', type: 'button', text: 'Clean up this worker', onclick: () => queueOrder({ kind: 'cleanup', target: id }, { title: `Ask the first mate to clean up ${id}?`, body: 'Tears down its window and worktree once its work is safe.' }) })),
       d.ordersList);
 
     // Message the worker directly (fm-send), with a confirmation step.
-    const msg = h('input', { type: 'text', maxlength: '2000', placeholder: 'Message to this worker (one line)…', 'aria-label': `Message to ${id}`, autocomplete: 'off' });
+    const msg = persist(h('input', { type: 'text', maxlength: '2000', placeholder: 'Message to this worker (one line)…', 'aria-label': `Message to ${id}`, autocomplete: 'off' }), 'msg.' + id);
     const sendBtn = h('button', { class: 'act-btn primary', type: 'submit', text: 'Send' });
-    const confirmText = h('span');
-    const confirmYes = h('button', { class: 'act-btn danger', type: 'button', text: 'Send now' });
-    const confirmNo = h('button', { class: 'act-btn', type: 'button', text: 'Cancel' });
-    const confirmRow = h('div', { class: 'confirm-row', hidden: true, role: 'alert' }, confirmText, confirmYes, confirmNo);
     const form = h('form', { class: 'msg-form' }, msg, sendBtn);
-    form.addEventListener('submit', (e) => {
+    form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const text = msg.value.replace(/\s+/g, ' ').trim();
       if (!text) { msg.focus(); return; }
-      confirmText.textContent = `Send to ${id}?`;
-      confirmRow.hidden = false;
-      confirmYes.focus();
-    });
-    confirmNo.addEventListener('click', () => { confirmRow.hidden = true; msg.focus(); });
-    confirmYes.addEventListener('click', async () => {
-      confirmRow.hidden = true;
+      if (!await confirmDialog({ title: `Send to ${id} now?`, body: text, yes: 'Send now' })) return;
       sendBtn.disabled = true;
-      const text = msg.value.replace(/\s+/g, ' ').trim();
       const r = await post('/api/send', { id, message: text });
       sendBtn.disabled = false;
-      if (r.ok) { msg.value = ''; toast(`Sent to ${id}`, 'ok'); setTimeout(refreshPeek, 600); }
+      if (r.ok) { clearDraft(msg); toast(`Sent to ${id}`, 'ok'); setTimeout(refreshPeek, 600); }
       else toast(`Send to ${id} failed: ${r.error || 'unknown error'}`, 'err');
     });
     d.msgWrap = h('section', { class: 'drawer-sec' },
       h('h3', { text: 'Message the worker' }),
       h('p', { class: 'hint', text: 'Types one line into its tmux window via fm-send. Use sparingly: it bypasses the first mate.' }),
-      form, confirmRow);
+      form);
 
     // Live terminal peek.
     d.peekText = h('pre', { class: 'peek', tabindex: '0', 'aria-label': `Terminal of ${id}` });
@@ -581,17 +841,16 @@
       h('div', { class: 'sec-head' }, h('h3', { text: 'Terminal' }), d.peekState, d.pauseBtn),
       d.peekText);
 
-    d.root = h('div', { class: 'task-drawer' }, d.file, d.info, d.peekWrap, d.msgWrap, ordersSec);
+    d.root = h('div', { class: 'task-drawer' }, d.file, d.decision, d.info, d.resume, ordersSec, d.peekWrap, d.msgWrap);
     ui.drawerBody.replaceChildren(d.root);
     ui.drawerBody.scrollTop = 0;
-    sigs.delete('drawer-info');
-    sigs.delete('drawer-orders');
+    for (const k of ['drawer-info', 'drawer-orders', 'drawer-decision', 'drawer-resume']) sigs.delete(k);
     td = d;
     if (t.window) startPeek();
   }
 
   function renderTaskOrders(t) {
-    const mine = ((snap.orders && snap.orders.list) || []).filter((o) => o.target === t.id);
+    const mine = ((snap.orders && snap.orders.list) || []).filter((o) => o.target === t.id || (o.targets && o.targets.includes(t.id)));
     if (unchanged('drawer-orders', t.id, mine)) return;
     td.ordersList.replaceChildren(...(mine.length ? mine.slice(0, 8).map(orderRow) : [emptyRow('No orders about this worker yet.')]));
   }
@@ -669,57 +928,55 @@
     return true;
   }
 
-  // ---------- actions ----------
-  async function post(url, body) {
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Ship-Deck': '1' },
-        body: JSON.stringify(body),
-      });
-      const out = await res.json().catch(() => ({}));
-      return { ...out, ok: res.ok && out.ok !== false, error: out.error || (res.ok ? null : 'HTTP ' + res.status) };
-    } catch (e) {
-      return { ok: false, error: 'cannot reach the server' };
-    }
-  }
-  const KIND_LABEL = { cleanup: 'Clean up', merge: 'Merge PR', answer: 'Answer', status: 'Status?', order: 'Order' };
-  async function queueOrder(req) {
-    const r = await post('/api/orders', req);
-    if (r.ok) {
-      toast(`Order queued for the first mate: ${KIND_LABEL[req.kind] || req.kind}${req.target ? ' · ' + req.target : ''}`, 'ok');
-      poll();
-      return true;
-    }
-    toast(`Order not queued: ${r.error}`, 'err');
-    return false;
-  }
-  function toast(text, kind) {
-    const el = h('div', { class: 'toast ' + (kind || ''), role: kind === 'err' ? 'alert' : 'status', text });
-    ui.toasts.append(el);
-    setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 400); }, kind === 'err' ? 7000 : 3500);
-  }
-
+  // ---------- backlog, secondmate and first mate drawers ----------
   function backlogItem() {
     const list = snap.backlog[selected.section] || [];
     const byIndex = list[selected.index];
-    if (byIndex && (byIndex.id || byIndex.title) === selected.id) return byIndex;
-    return list.find((b) => (b.id || b.title) === selected.id);
+    if (byIndex && itemKey(byIndex) === selected.id) return byIndex;
+    return list.find((b) => itemKey(b) === selected.id);
   }
 
   function renderBacklogDrawer() {
     const b = backlogItem();
-    const sectionName = { captain: "Captain's Call", inFlight: 'In flight', queued: 'Queued', done: 'Done' }[selected.section] || 'Backlog';
-    ui.drawerKicker.replaceChildren(`Backlog · ${sectionName}`);
+    const sectionName = { captain: "Captain's Call", inFlight: 'In flight', queued: 'Queued', done: 'Done', other: 'Backlog' }[selected.section] || 'Backlog';
+    ui.drawerKicker.replaceChildren(`Backlog · ${sectionName}${b && b.captainCall ? " · Captain's Call" : ''}`);
     ui.drawerTitle.textContent = selected.id;
     if (!b) { ui.drawerBody.replaceChildren(h('p', { text: 'This backlog item is no longer listed.' })); return; }
+    if (unchanged('drawer-backlog', selected.id, selected.section, b, (snap.orders && snap.orders.list || []).filter((o) => o.item === b.id))) return;
     const kids = [h('p', { class: 'brief', text: b.title })];
+    const call = (snap.backlog.calls || []).find((c) => c.id && c.id === b.id);
+    if (b.id && call) {
+      kids.push(h('section', { class: 'drawer-sec decision-sec' },
+        h('h3', { text: "Captain's Call: your answer" }),
+        b.tags.hold ? h('div', { class: 'decision-note', text: b.tags.hold }) : null,
+        answerPanel({
+          options: call.options,
+          draftKey: 'call.' + b.id,
+          placeholder: call.options.length ? 'Optional note or your own answer…' : 'Your answer…',
+          send: (opt, extra) => queueOrder({ kind: 'backlog-answer', item: b.id, option: opt ? opt.letter : null, text: answerText(opt, extra) }, {
+            title: opt ? `Answer ${b.id} with option ${opt.letter}?` : `Send this answer on ${b.id}?`, body: answerText(opt, extra),
+          }),
+        })));
+    } else if (b.id && selected.section === 'queued' && !b.checked) {
+      const note = persist(h('textarea', { rows: '2', maxlength: '2000', placeholder: 'Optional instructions for this job…', 'aria-label': 'Instructions' }), 'start.' + b.id);
+      kids.push(h('section', { class: 'drawer-sec' },
+        h('h3', { text: 'Start this' }),
+        h('p', { class: 'hint', text: 'Queues an order asking the first mate to dispatch this backlog item.' }),
+        h('div', { class: 'answer' }, note, h('div', { class: 'btn-row end' }, h('button', { class: 'act-btn primary', type: 'button', text: 'Start this', onclick: async () => {
+          if (await startBacklog(b, note.value.trim() ? `Start ${b.id}: ${b.title}\n\n${note.value.trim()}` : null)) clearDraft(note);
+        } })))));
+    } else if (!b.id) {
+      kids.push(h('p', { class: 'hint', text: 'This item has no id, so it cannot be ordered from here. Mention it in the Bridge chat instead.' }));
+    }
     const dl = h('dl', { class: 'facts' });
     if (b.captainCall) fact(dl, 'Needs', 'captain decision');
-    for (const [k, v] of Object.entries(b.tags || {})) fact(dl, k, v.length > 400 ? v.slice(0, 400) + '…' : v);
-    kids.push(dl);
+    for (const [k, v] of Object.entries(b.tags || {})) if (!(call && k === 'hold')) fact(dl, k, v.length > 600 ? v.slice(0, 600) + '…' : v);
+    kids.push(h('h3', { text: 'Details' }), dl);
     if (b.notes.length) kids.push(h('h3', { text: 'Notes' }), h('pre', { class: 'notes-block', text: b.notes.join('\n') }));
+    const mine = ((snap.orders && snap.orders.list) || []).filter((o) => o.item === b.id);
+    if (mine.length) kids.push(h('h3', { text: 'Orders about this item' }), h('ul', { class: 'list orders compact' }, ...mine.slice(0, 6).map(orderRow)));
     ui.drawerBody.replaceChildren(...kids);
+    if (selected.focus) { selected.focus = false; const ta = ui.drawerBody.querySelector('textarea'); if (ta) ta.focus(); }
   }
 
   function renderSecondmateDrawer() {
@@ -735,8 +992,26 @@
     ui.drawerBody.replaceChildren(dl, h('p', { class: 'empty', text: 'No live meta record: this secondmate is off watch.' }));
   }
 
+  function renderFirstMateDrawer() {
+    ui.drawerKicker.replaceChildren('At the helm');
+    ui.drawerTitle.textContent = 'First mate';
+    const sess = snap.firstmate && snap.firstmate.session;
+    if (unchanged('drawer-fm', sess, snap.watcher, snap.orders && snap.orders.pending)) return;
+    const dl = h('dl', { class: 'facts' });
+    fact(dl, 'Home', snap.home, true);
+    fact(dl, 'Watch', snap.watcher.lastBeat ? `${snap.watcher.healthy ? 'keeping' : 'stale'} · beat ${agoLong(snap.watcher.lastBeat)}` : 'no heartbeat');
+    fact(dl, 'Pending orders', String((snap.orders && snap.orders.pending) || 0));
+    ui.drawerBody.replaceChildren(dl,
+      h('div', { class: 'btn-row' }, h('button', { class: 'act-btn primary', type: 'button', text: 'Open the Bridge chat', onclick: () => { closeDrawer(); showTab('bridge'); ui.chatText.focus(); } })),
+      h('section', { class: 'drawer-sec' }, h('h3', { text: 'Resume in terminal' }),
+        h('p', { class: 'hint', text: 'The newest Claude Code session started in the fleet home.' }), resumeBlock(sess)));
+  }
+
   function openDrawer(sel) {
     if (!selected || selected.type !== sel.type || selected.id !== sel.id) { stopPeek(); td = null; }
+    sigs.delete('drawer-backlog');
+    sigs.delete('drawer-fm');
+    const wantFocus = !!sel.focus;
     selected = sel;
     ui.drawer.classList.add('open');
     ui.drawer.setAttribute('aria-hidden', 'false');
@@ -745,7 +1020,7 @@
     for (const [id, el] of stations) el.classList.toggle('selected', sel.type === 'task' && sel.id === id);
     const want = sel.type === 'task' ? `#task=${encodeURIComponent(sel.id)}` : '';
     if (location.hash !== want) history.replaceState(null, '', want || location.pathname);
-    ui.drawer.focus({ preventScroll: true });
+    if (!wantFocus) ui.drawer.focus({ preventScroll: true });
   }
   function closeDrawer() {
     stopPeek();
@@ -759,6 +1034,267 @@
   }
   ui.drawerClose.addEventListener('click', closeDrawer);
   ui.scrim.addEventListener('click', closeDrawer);
+  const openFirstMate = () => { if (snap) openDrawer({ type: 'firstmate', id: 'first-mate' }); };
+  ui.firstmate.addEventListener('click', openFirstMate);
+  ui.firstmate.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFirstMate(); } });
+
+  // ---------- panel tabs ----------
+  let activeTab = 'bridge';
+  function showTab(name) {
+    if (!ui.panes[name]) name = 'bridge';
+    activeTab = name;
+    for (const [k, tab] of Object.entries(ui.tabs)) {
+      const on = k === name;
+      tab.setAttribute('aria-selected', on ? 'true' : 'false');
+      tab.tabIndex = on ? 0 : -1;
+      ui.panes[k].hidden = !on;
+    }
+    store.set('tab', name);
+    if (name === 'bridge') { scrollThread(true); markSeen(); }
+    if (name === 'sessions') loadSessions(true);
+  }
+  for (const [k, tab] of Object.entries(ui.tabs)) {
+    tab.addEventListener('click', () => showTab(k));
+    tab.addEventListener('keydown', (e) => {
+      const keys = Object.keys(ui.tabs);
+      const i = keys.indexOf(k);
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        const next = keys[(i + (e.key === 'ArrowRight' ? 1 : keys.length - 1)) % keys.length];
+        showTab(next);
+        ui.tabs[next].focus();
+      }
+    });
+  }
+
+  // ---------- bridge chat ----------
+  let threadSig = null;
+  let thread = [];
+  let threadLoading = false;
+  let threadRendered = false;
+  const lastReplyId = () => { const r = thread.filter((x) => x.type === 'reply'); return r.length ? r[r.length - 1].id : null; };
+
+  async function loadThread(sig) {
+    if (threadLoading) return;
+    threadLoading = true;
+    try {
+      const res = await fetch('/api/thread', { cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const body = await res.json();
+      thread = body.items || [];
+      threadSig = sig || body.sig;
+      renderThread();
+      notifyReplies();
+    } catch { /* next poll retries */ } finally {
+      threadLoading = false;
+    }
+  }
+
+  function nearBottom() { const el = ui.thread; return el.scrollHeight - el.scrollTop - el.clientHeight < 60; }
+  function scrollThread(force) {
+    if (force || nearBottom()) { ui.thread.scrollTop = ui.thread.scrollHeight; ui.threadJump.hidden = true; }
+  }
+  function dayLabel(ms) {
+    const d = new Date(ms);
+    const today = new Date();
+    const y = new Date(Date.now() - 86400000);
+    if (d.toDateString() === today.toDateString()) return 'Today';
+    if (d.toDateString() === y.toDateString()) return 'Yesterday';
+    return d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short', year: d.getFullYear() === today.getFullYear() ? undefined : 'numeric' });
+  }
+  function excerpt(s, n = 90) { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+
+  function threadItem(x, prev, byId) {
+    const when = timeOf(x.ts);
+    const stampEl = h('time', { datetime: x.ts || '', title: x.ts ? new Date(when).toLocaleString() : '', text: clock(when) });
+    if (x.type === 'reply') {
+      const body = h('div', { class: 'bubble md' });
+      body.innerHTML = MD.render(x.text, { breaks: true }); // escaped by the renderer
+      const ref = x.inReplyTo && byId.get(x.inReplyTo);
+      const quote = ref && !(prev && prev.id === ref.id)
+        ? h('button', { class: 'quote', type: 'button', title: 'Show the message this answers', onclick: () => flashMessage(ref.id) }, '↪ ', excerpt(ref.text, 70))
+        : null;
+      const unread = !seenId || x.id > seenId;
+      return h('li', { class: 'msg mate' + (unread && seenId !== null ? ' unread' : ''), 'data-id': x.id },
+        h('span', { class: 'fm-avatar small', 'aria-hidden': 'true' }, sailorSvg()),
+        h('div', { class: 'msg-col' }, h('div', { class: 'msg-meta' }, h('strong', { text: 'First mate' }), stampEl), quote, body));
+    }
+    const isChat = x.kind === 'chat';
+    const head = isChat ? null : h('div', { class: 'order-head' }, h('span', { class: 'o-kind', text: KIND_LABEL[x.kind] || x.kind }), x.target ? h('span', { class: 'mono', text: x.target }) : null,
+      payloadText(x) ? h('span', { class: 'o-extra', text: payloadText(x) }) : null);
+    return h('li', { class: 'msg captain' + (isChat ? '' : ' action'), 'data-id': x.id },
+      h('div', { class: 'msg-col' },
+        h('div', { class: 'msg-meta' }, stampEl, chip(x.status)),
+        h('div', { class: 'bubble' }, head, h('div', { class: 'bubble-text', text: x.text })),
+        x.history && x.history.length ? lifecycle(x) : null));
+  }
+  function sailorSvg() {
+    const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 40 48');
+    s.setAttribute('class', 'sailor');
+    s.innerHTML = SAILOR;
+    return s;
+  }
+  function flashMessage(id) {
+    const el = ui.thread.querySelector(`[data-id="${CSS.escape(id)}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.classList.remove('flash');
+    void el.offsetWidth;
+    el.classList.add('flash');
+  }
+
+  function renderThread() {
+    const wasBottom = !threadRendered || nearBottom();
+    const byId = new Map(thread.map((x) => [x.id, x]));
+    const kids = [];
+    let day = null;
+    let prev = null;
+    for (const x of thread) {
+      const when = timeOf(x.ts);
+      const label = when ? dayLabel(when) : null;
+      if (label && label !== day) { kids.push(h('li', { class: 'day', text: label })); day = label; }
+      kids.push(threadItem(x, prev, byId));
+      prev = x;
+    }
+    if (!thread.length) {
+      kids.push(h('li', { class: 'thread-empty' },
+        h('p', { text: 'No messages yet.' }),
+        h('p', { class: 'hint', text: 'Ask the first mate anything: “what needs me?”, “start the watcher fix”, “summarise PR 42”. Every message is queued as an order, and replies show up here.' })));
+    }
+    ui.thread.replaceChildren(...kids);
+    threadRendered = true;
+    if (wasBottom) scrollThread(true);
+    else if (lastReplyId() && lastReplyId() !== seenId) ui.threadJump.hidden = false;
+    markSeen();
+  }
+  ui.threadJump.addEventListener('click', () => { scrollThread(true); markSeen(); });
+  ui.thread.addEventListener('scroll', () => { if (nearBottom()) { ui.threadJump.hidden = true; markSeen(); } });
+
+  // Unread replies: newer than the last reply seen with the Bridge tab open.
+  let seenId = store.get('seenReply');
+  function markSeen() {
+    const last = lastReplyId();
+    if (!last || activeTab !== 'bridge' || document.hidden || !nearBottom()) return updateUnread();
+    if (seenId !== last) { seenId = last; store.set('seenReply', last); }
+    updateUnread();
+  }
+  function updateUnread() {
+    const n = thread.filter((x) => x.type === 'reply' && (!seenId || x.id > seenId)).length;
+    ui.unread.textContent = n;
+    ui.unread.hidden = n === 0;
+    document.title = (n ? `(${n}) ` : '') + 'Ship Deck';
+  }
+
+  async function sendChat() {
+    const text = ui.chatText.value.trim();
+    if (!text) { ui.chatText.focus(); return; }
+    ui.chatSend.disabled = true;
+    const r = await post('/api/orders', { kind: 'chat', text });
+    ui.chatSend.disabled = false;
+    if (r.ok) {
+      clearDraft(ui.chatText);
+      thread.push({ type: 'order', ...r.order, history: [], pending: true });
+      renderThread();
+      scrollThread(true);
+      poll();
+    } else {
+      toast(`Message not sent: ${r.error}`, 'err');
+    }
+    ui.chatText.focus();
+  }
+  persist(ui.chatText, 'chat');
+  ui.chatForm.addEventListener('submit', (e) => { e.preventDefault(); sendChat(); });
+  ui.chatText.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !e.altKey) { e.preventDefault(); sendChat(); }
+  });
+
+  // ---------- notifications ----------
+  const canNotify = 'Notification' in window;
+  function renderNotifyBtn() {
+    if (!canNotify) { ui.notifyBtn.textContent = 'Alerts unavailable'; ui.notifyBtn.disabled = true; return; }
+    const p = Notification.permission;
+    ui.notifyBtn.textContent = p === 'granted' ? 'Alerts on' : p === 'denied' ? 'Alerts blocked' : 'Enable alerts';
+    ui.notifyBtn.setAttribute('aria-pressed', p === 'granted' ? 'true' : 'false');
+    ui.notifyBtn.title = p === 'denied' ? 'Notifications are blocked for this site in the browser settings' : 'Browser notifications for new replies and items needing the captain';
+  }
+  ui.notifyBtn.addEventListener('click', async () => {
+    if (!canNotify) return;
+    if (Notification.permission === 'default') {
+      try { await Notification.requestPermission(); } catch { /* ignore */ }
+    } else if (Notification.permission === 'granted') {
+      notify('Ship Deck alerts are on', 'You will be told about new first mate replies and new items needing the captain.', 'shipdeck-test');
+    }
+    renderNotifyBtn();
+  });
+  function notify(title, body, tag, onclick) {
+    if (!canNotify || Notification.permission !== 'granted') return;
+    try {
+      const n = new Notification(title, { body: excerpt(body, 180), tag, icon: 'favicon.svg' });
+      n.onclick = () => { window.focus(); if (onclick) onclick(); n.close(); };
+    } catch { /* some browsers only allow service-worker notifications */ }
+  }
+  // New replies since the last one notified; the first load only sets the mark.
+  function notifyReplies() {
+    const last = lastReplyId();
+    if (!last) return;
+    const mark = store.get('notifiedReply');
+    if (mark === null) { store.set('notifiedReply', last); return; }
+    const fresh = thread.filter((x) => x.type === 'reply' && x.id > mark);
+    if (!fresh.length) return;
+    store.set('notifiedReply', last);
+    if (!document.hidden && activeTab === 'bridge') return;
+    const r = fresh[fresh.length - 1];
+    notify(fresh.length > 1 ? `First mate (${fresh.length} new)` : 'First mate', r.text, 'shipdeck-reply', () => showTab('bridge'));
+  }
+  // New "needs the captain" items: crew entering decision/blocked/failed, or new Captain's Calls.
+  function notifyNeeds() {
+    const now = [
+      ...needsCaptain().map((t) => ({ key: `t:${t.id}:${t.state}:${t.statusCount}`, title: `${t.id} needs the captain`, body: lastNote(t), open: () => openDrawer({ type: 'task', id: t.id }) })),
+      ...(snap.backlog.calls || []).filter((b) => b.id).map((b) => ({ key: `c:${b.id}`, title: `Captain's Call: ${b.id}`, body: b.title, open: () => openDrawer({ type: 'backlog', id: b.id, section: b.section, index: b.index }) })),
+    ];
+    const seen = store.json('seenNeeds', null);
+    store.set('seenNeeds', JSON.stringify(now.map((x) => x.key)));
+    if (!seen) return;
+    const fresh = now.filter((x) => !seen.includes(x.key));
+    if (!fresh.length) return;
+    toast(fresh.length > 1 ? `${fresh.length} new items need the captain` : fresh[0].title, 'ok');
+    if (fresh.length === 1) notify(fresh[0].title, fresh[0].body, 'shipdeck-needs', fresh[0].open);
+    else notify(`${fresh.length} new items need the captain`, fresh.map((x) => x.title).join('\n'), 'shipdeck-needs', () => showTab('command'));
+  }
+
+  // ---------- sessions ----------
+  let sessionsAt = 0;
+  let sessionEntries = null;
+  async function loadSessions(force) {
+    if (!force && Date.now() - sessionsAt < 15000) return;
+    sessionsAt = Date.now();
+    try {
+      const res = await fetch('/api/sessions', { cache: 'no-store' });
+      sessionEntries = (await res.json()).entries || [];
+    } catch {
+      if (!sessionEntries) sessionEntries = [];
+    }
+    renderSessions();
+  }
+  function renderSessions() {
+    if (!sessionEntries) return;
+    const q = ui.sessionsFilter.value.trim().toLowerCase();
+    const list = sessionEntries.filter((e) => !q || [e.id, e.cwd, e.sessionId, e.harness, e.firstmate && 'first mate'].join(' ').toLowerCase().includes(q));
+    if (unchanged('sessions', list, q)) return;
+    ui.sessionsList.replaceChildren(...(list.length ? list.map((e) => {
+      const name = e.firstmate ? 'First mate' : e.id;
+      const tag = e.firstmate ? 'helm' : e.present ? 'aboard' : 'departed';
+      return h('li', { class: 'session' + (e.present ? '' : ' departed') },
+        h('div', { class: 'session-head' },
+          e.present && !e.firstmate
+            ? h('button', { class: 'linkish mono', type: 'button', text: name, onclick: () => openDrawer({ type: 'task', id: e.id }) })
+            : h('span', { class: 'mono strong', text: name }),
+          h('span', { class: 'tag tag-' + tag, text: tag }),
+          h('span', { class: 'r-age', text: e.lastSeen ? `seen ${ago(e.lastSeen)}` : '' })),
+        resumeBlock(e));
+    }) : [emptyRow(sessionEntries.length ? 'No sessions match.' : 'No sessions recorded yet. Ship Deck records Claude Code sessions as it finds them.')]));
+  }
+  ui.sessionsFilter.addEventListener('input', renderSessions);
 
   // ---------- wiring ----------
   function renderAll() {
@@ -780,22 +1316,43 @@
     if (ok) { ui.sync.classList.remove('tick'); void ui.sync.offsetWidth; ui.sync.classList.add('tick'); }
   }
 
+  // Polls every POLL_MS; after a failure it backs off up to 15 s and shows the banner.
   let timer = null;
+  let failures = 0;
+  let countdown = null;
+  function showReconnect(delay) {
+    ui.reconnect.hidden = false;
+    let left = Math.round(delay / 1000);
+    clearInterval(countdown);
+    const tick = () => { ui.reconnectText.textContent = `Ship Deck server unreachable. Reconnecting in ${left}s…`; left = Math.max(0, left - 1); };
+    tick();
+    countdown = setInterval(tick, 1000);
+  }
   async function poll() {
     clearTimeout(timer);
+    let delay = POLL_MS;
     try {
       const res = await fetch('/api/fleet', { cache: 'no-store' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       snap = await res.json();
       lastOkAt = Date.now();
+      if (failures) { toast('Reconnected to the Ship Deck server', 'ok'); ui.reconnect.hidden = true; clearInterval(countdown); }
+      failures = 0;
       renderAll();
       setSync(true, `Live · ${new Date(lastOkAt).toLocaleTimeString()}`);
+      if (snap.thread && snap.thread.sig !== threadSig) loadThread(snap.thread.sig);
+      notifyNeeds();
+      if (activeTab === 'sessions') loadSessions(false);
       if (firstHash) { const id = firstHash; firstHash = null; if (snap.tasks.some((t) => t.id === id)) openDrawer({ type: 'task', id }); }
     } catch (e) {
+      failures++;
+      delay = Math.min(15000, POLL_MS * Math.pow(1.6, failures - 1));
       setSync(false, lastOkAt ? `Offline · last ${new Date(lastOkAt).toLocaleTimeString()}` : 'Cannot reach server');
+      showReconnect(delay);
     }
-    timer = setTimeout(poll, POLL_MS);
+    timer = setTimeout(poll, delay);
   }
+  ui.reconnectNow.addEventListener('click', () => { ui.reconnectText.textContent = 'Reconnecting…'; poll(); });
 
   let firstHash = (/^#task=(.+)$/.exec(location.hash) || [])[1];
   if (firstHash) firstHash = decodeURIComponent(firstHash);
@@ -807,90 +1364,26 @@
       e.preventDefault();
       if (!ui.library.hidden) { ui.libraryFilter.focus(); ui.libraryFilter.select(); } else { ui.search.focus(); ui.search.select(); }
     } else if (e.key === 'Escape') {
-      if (!ui.library.hidden) closeLibrary();
+      if (confirmResolve) confirmResolve(false);
+      else if (!ui.library.hidden) closeLibrary();
       else if (selected && closeDataFile()) { /* back to the crew details */ }
       else if (selected) closeDrawer();
       else if (document.activeElement === ui.search && ui.search.value) { ui.search.value = ''; query = ''; renderAll(); }
       else if (stateFilter) { stateFilter = null; renderAll(); }
+    } else if (e.key === 'Enter' && confirmResolve && !editable(document.activeElement) && document.activeElement !== ui.confirmNo) {
+      e.preventDefault();
+      confirmResolve(true);
     }
   });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) { poll(); refreshPeek(); } });
-
-  ui.orderForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const text = ui.orderText.value.trim();
-    if (!text) { ui.orderText.focus(); return; }
-    if (await queueOrder({ kind: 'order', text })) ui.orderText.value = '';
-  });
-  ui.orderText.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); ui.orderForm.requestSubmit(); }
-  });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { poll(); refreshPeek(); markSeen(); } });
 
   // ---------- ship's library (read-only) ----------
   let libEntries = [];
   let libKey = null;
-  function mdEscape(s) {
-    return s.replace(/\u0000/g, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  }
-  // Inline markdown on already-escaped text. Code spans and links are held out
-  // as placeholders so emphasis never lands inside them; links only for http(s).
-  function mdInline(s) {
-    const held = [];
-    const hold = (html) => { held.push(html); return `\u0000${held.length - 1}\u0000`; };
-    const link = (u, t) => hold(`<a href="${u}" target="_blank" rel="noopener noreferrer">${t}</a>`);
-    s = s.replace(/`([^`]+)`/g, (_, c) => hold(`<code>${c}</code>`));
-    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, t, u) => link(u, t));
-    s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (_, pre, u) => pre + link(u, u));
-    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/__([^_]+)__/g, '<strong>$1</strong>');
-    s = s.replace(/(^|[^*\w])\*([^*\s][^*]*)\*(?!\w)/g, '$1<em>$2</em>');
-    for (let i = 0; i < 3 && s.includes('\u0000'); i++) s = s.replace(/\u0000(\d+)\u0000/g, (_, n) => held[n]);
-    return s;
-  }
-  // Small, safe markdown renderer: every source character is HTML-escaped first.
-  function renderMarkdown(src) {
-    const lines = mdEscape(String(src)).split(/\r?\n/);
-    const out = [];
-    let para = [];
-    let list = null; // 'ul' | 'ol'
-    const flushPara = () => { if (para.length) { out.push(`<p>${mdInline(para.join(' '))}</p>`); para = []; } };
-    const flushList = () => { if (list) { out.push(`</${list}>`); list = null; } };
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const fence = /^\s*(```|~~~)/.exec(line);
-      if (fence) {
-        flushPara(); flushList();
-        const body = [];
-        for (i++; i < lines.length && !lines[i].trim().startsWith(fence[1]); i++) body.push(lines[i]);
-        out.push(`<pre><code>${body.join('\n')}</code></pre>`);
-        continue;
-      }
-      if (!line.trim()) { flushPara(); flushList(); continue; }
-      let m;
-      if ((m = /^(#{1,6})\s+(.*)$/.exec(line))) { flushPara(); flushList(); const n = Math.min(6, m[1].length + 1); out.push(`<h${n}>${mdInline(m[2])}</h${n}>`); continue; }
-      if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) { flushPara(); flushList(); out.push('<hr>'); continue; }
-      if ((m = /^\s*&gt;\s?(.*)$/.exec(line))) { flushPara(); flushList(); out.push(`<blockquote>${mdInline(m[1])}</blockquote>`); continue; }
-      if ((m = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/.exec(line))) {
-        flushPara();
-        const kind = /\d/.test(m[2]) ? 'ol' : 'ul';
-        if (list !== kind) { flushList(); out.push(`<${kind}>`); list = kind; }
-        const indent = Math.min(4, Math.floor(m[1].length / 2));
-        let item = m[3];
-        const box = /^\[([ xX])\]\s+(.*)$/.exec(item);
-        if (box) item = `<span class="md-box">${box[1].trim() ? '☑' : '☐'}</span> ${box[2]}`;
-        out.push(`<li${indent ? ` style="margin-left:${indent * 1.2}em"` : ''}>${mdInline(item)}</li>`);
-        continue;
-      }
-      if (list && /^\s{2,}\S/.test(line)) { out[out.length - 1] = out[out.length - 1].replace(/<\/li>$/, ` ${mdInline(line.trim())}</li>`); continue; }
-      flushList();
-      para.push(line.trim());
-    }
-    flushPara(); flushList();
-    return out.join('\n');
-  }
 
   function renderLibraryList() {
     const q = ui.libraryFilter.value.trim().toLowerCase();
-    const shown = libEntries.filter((e) => !q || (e.group + ' ' + e.label).toLowerCase().includes(q));
+    const shown = libEntries.filter((e) => !q || [e.group, e.label, e.description].join(' ').toLowerCase().includes(q));
     const groups = [];
     for (const e of shown) {
       let g = groups.find((x) => x.name === e.group);
@@ -898,12 +1391,13 @@
       g.items.push(e);
     }
     ui.libraryList.replaceChildren(...(groups.length ? groups.map((g) => h('div', { class: 'lib-group' },
-      h('h3', { text: g.name }),
+      h('h3', null, g.name, h('span', { class: 'lib-count', text: g.items.length })),
       h('ul', { class: 'lib-items' }, ...g.items.map((e) => h('li', null, h('button', {
-        class: 'lib-item' + (e.exists ? '' : ' missing') + (e.key === libKey ? ' active' : ''), type: 'button',
-        'aria-current': e.key === libKey ? 'true' : null, title: e.path,
+        class: 'lib-item' + (e.exists ? '' : ' missing') + (e.key === libKey ? ' active' : '') + (e.description !== undefined ? ' skill' : ''), type: 'button',
+        'aria-current': e.key === libKey ? 'true' : null, title: e.description || e.path,
         onclick: () => openLibraryEntry(e.key),
-      }, h('span', { class: 'lib-name', text: e.label }), h('span', { class: 'lib-age', text: e.exists ? ago(e.mtime) : 'missing' }))))))) : [h('p', { class: 'empty', text: 'No files match.' })]));
+      }, h('span', { class: 'lib-line' }, h('span', { class: 'lib-name', text: e.label }), h('span', { class: 'lib-age', text: e.exists ? ago(e.mtime) : 'missing' })),
+      e.description ? h('span', { class: 'lib-desc', text: e.description }) : null)))))) : [h('p', { class: 'empty', text: 'No files match.' })]));
   }
   async function openLibraryEntry(key) {
     libKey = key;
@@ -915,8 +1409,11 @@
       if (libKey !== key) return;
       if (!res.ok) throw new Error(body.error || 'HTTP ' + res.status);
       const e = body.entry;
+      const isSkill = e.description !== undefined;
       const head = h('header', { class: 'doc-head' },
+        h('p', { class: 'doc-kicker', text: e.group }),
         h('h2', { class: 'mono', text: e.label }),
+        isSkill && e.description ? h('p', { class: 'doc-desc', text: e.description }) : null,
         h('p', { class: 'doc-meta', text: e.exists
           ? `${e.path} · modified ${agoLong(e.mtime)} (${stamp(e.mtime)}) · ${(e.size / 1024).toFixed(1)} KB${body.truncated ? ' · truncated' : ''}`
           : e.path }));
@@ -924,7 +1421,7 @@
         ui.libraryDoc.replaceChildren(head, h('div', { class: 'doc-missing' }, h('strong', { text: 'Missing' }), h('span', { text: 'This file does not exist (yet). Nothing to show.' })));
       } else {
         const md = h('div', { class: 'md' });
-        md.innerHTML = renderMarkdown(body.text); // escaped by renderMarkdown
+        md.innerHTML = MD.render(body.text, { frontmatter: isSkill ? 'hide' : 'show' }); // escaped by the renderer
         ui.libraryDoc.replaceChildren(head, md);
       }
       ui.libraryDoc.scrollTop = 0;
@@ -957,5 +1454,9 @@
   ui.libraryScrim.addEventListener('click', closeLibrary);
   ui.libraryFilter.addEventListener('input', renderLibraryList);
 
+  // Bridge avatar, notifications button, remembered tab, then the first poll.
+  document.querySelectorAll('.fm-avatar .sailor').forEach((s) => { s.innerHTML = SAILOR; });
+  renderNotifyBtn();
+  showTab(store.get('tab', 'bridge'));
   poll();
 })();

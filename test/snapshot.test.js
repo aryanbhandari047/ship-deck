@@ -193,9 +193,10 @@ test('reportPath rejects traversal', () => {
 
 test('server serves the fleet and reflects a status change', async (t) => {
   const home = tempHome();
-  const server = createServer({ home, tmux: false, staleDays: 7 });
+  const side = fs.mkdtempSync(path.join(os.tmpdir(), 'ship-deck-side-'));
+  const server = createServer({ home, tmux: false, staleDays: 7, ordersDir: path.join(side, 'orders'), claudeDir: path.join(side, 'claude') });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
-  t.after(() => { server.close(); fs.rmSync(home, { recursive: true, force: true }); });
+  t.after(() => { server.close(); fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(side, { recursive: true, force: true }); });
   const base = `http://127.0.0.1:${server.address().port}`;
 
   const fleet = async () => (await fetch(base + '/api/fleet')).json();

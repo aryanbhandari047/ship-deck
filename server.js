@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 'use strict';
-// Ship Deck: a live view of a firstmate fleet with a few captain's actions.
+// Ship Deck: a live view of a firstmate fleet and the captain's control surface.
 //   node server.js [--home <FM_HOME>] [--port 4747] [--stale-days 7] [--no-tmux]
-//                  [--orders-dir ~/.ship-deck] [--memory-dir <dir>]
+//                  [--orders-dir ~/.ship-deck] [--memory-dir <dir>] [--claude-dir ~/.claude]
 // Binds to 127.0.0.1 only. Never writes to FM_HOME; the only file writes go to
 // the orders dir (~/.ship-deck). The only commands run are tmux list-windows,
 // tmux capture-pane and <home>/bin/fm-send.sh (see lib/actions.js).
@@ -14,10 +14,12 @@ const { buildSnapshot, reportPath, readText, DEFAULT_STALE_DAYS } = require('./l
 const orders = require('./lib/orders');
 const actions = require('./lib/actions');
 const library = require('./lib/library');
+const sessions = require('./lib/sessions');
 
 const DEFAULT_HOME = '/Users/aryanbhandari/Desktop/AI/firstmate';
 const MAX_BODY = 16 * 1024;
 const ORDERS_IN_SNAPSHOT = 60;
+const THREAD_LIMIT = 300;
 const POST_ROUTES = new Set(['/api/send', '/api/orders']);
 
 function parseArgs(argv) {
@@ -28,6 +30,7 @@ function parseArgs(argv) {
     staleDays: process.env.SHIP_DECK_STALE_DAYS !== undefined ? Number(process.env.SHIP_DECK_STALE_DAYS) : DEFAULT_STALE_DAYS,
     ordersDir: orders.defaultDir(),
     memoryDir: library.DEFAULT_MEMORY_DIR,
+    claudeDir: sessions.defaultClaudeDir(),
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -39,8 +42,9 @@ function parseArgs(argv) {
     else if (flag === '--stale-days') opts.staleDays = Number(val());
     else if (flag === '--orders-dir') opts.ordersDir = val();
     else if (flag === '--memory-dir') opts.memoryDir = val();
+    else if (flag === '--claude-dir') opts.claudeDir = val();
     else if (flag === '--help' || flag === '-h') {
-      console.log('usage: node server.js [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--orders-dir DIR] [--memory-dir DIR]');
+      console.log('usage: node server.js [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR]');
       process.exit(0);
     } else {
       console.error('unknown argument: ' + a);
@@ -58,6 +62,7 @@ function parseArgs(argv) {
   opts.home = path.resolve(opts.home);
   opts.ordersDir = path.resolve(opts.ordersDir);
   if (opts.memoryDir) opts.memoryDir = path.resolve(opts.memoryDir);
+  opts.claudeDir = path.resolve(opts.claudeDir);
   return opts;
 }
 
@@ -129,10 +134,33 @@ function knownIds(home) {
   return new Set(names.filter((n) => n.endsWith('.meta')).map((n) => n.slice(0, -5)).filter(actions.validId));
 }
 
+// Ids, projects and backlog items an order may name, from a fresh read of the home.
+async function orderContext(home) {
+  const snap = await buildSnapshot(home, { tmux: false });
+  const backlogIds = new Set();
+  for (const k of ['captain', 'inFlight', 'queued']) for (const b of snap.backlog[k]) if (b.id) backlogIds.add(b.id);
+  return {
+    knownIds: knownIds(home),
+    doneIds: new Set(snap.tasks.filter((t) => t.state === 'done').map((t) => t.id)),
+    projects: snap.projects.length ? new Set(snap.projects.map((p) => p.name)) : null,
+    backlogIds,
+  };
+}
+
+// Session info for one crew member or the first mate, as the UI shows it.
+function sessionView(entry, harness) {
+  if (harness && harness !== 'claude') return { harness, sessionId: null, resume: null, note: `resume id unknown (${harness})` };
+  if (!entry) return { harness: harness || 'claude', sessionId: null, resume: null, note: 'no Claude session found for this worktree yet' };
+  return { harness: entry.harness || 'claude', sessionId: entry.sessionId, cwd: entry.cwd, firstSeen: entry.firstSeen || null, lastSeen: entry.lastSeen || null, resume: sessions.resumeCommand(entry.cwd, entry.sessionId), note: null };
+}
+
 function createServer(opts) {
   const exec = opts.exec || actions.defaultExec;
   const ordersDir = opts.ordersDir || orders.defaultDir();
   const memoryDir = opts.memoryDir === undefined ? library.DEFAULT_MEMORY_DIR : opts.memoryDir;
+  const claudeDir = opts.claudeDir || sessions.defaultClaudeDir();
+  const libOpts = { captainSkills: path.join(claudeDir, 'skills') };
+  const tracker = sessions.createTracker({ home: opts.home, claudeDir, ordersDir });
 
   async function handlePost(req, res, url) {
     const why = postGuard(req);
@@ -147,7 +175,7 @@ function createServer(opts) {
     }
     if (url.pathname === '/api/orders') {
       try {
-        const order = orders.createOrder(ordersDir, body, { knownIds: knownIds(opts.home) });
+        const order = orders.createOrder(ordersDir, body, await orderContext(opts.home));
         return json(res, 200, { ok: true, order });
       } catch (e) {
         return json(res, 400, { ok: false, error: e.message });
@@ -165,7 +193,23 @@ function createServer(opts) {
         const snap = await buildSnapshot(opts.home, { tmux: opts.tmux, staleDays: opts.staleDays });
         const list = orders.listOrders(ordersDir);
         snap.orders = { dir: ordersDir, pending: list.filter((o) => o.pending).length, total: list.length, list: list.slice(0, ORDERS_IN_SNAPSHOT) };
+        const replies = orders.readReplies(ordersDir);
+        snap.thread = { sig: orders.threadSignature(ordersDir), replies: replies.length, lastReplyId: replies.length ? replies[replies.length - 1].id : null };
+        const known = tracker.get(snap.tasks);
+        for (const t of snap.tasks) t.session = sessionView(known[t.id], t.harness);
+        snap.firstmate = { session: sessionView(known[sessions.FIRST_MATE_KEY], 'claude') };
         return json(res, 200, snap);
+      }
+      if (url.pathname === '/api/thread') {
+        return json(res, 200, { sig: orders.threadSignature(ordersDir), items: orders.buildThread(ordersDir, { limit: THREAD_LIMIT }) });
+      }
+      if (url.pathname === '/api/sessions') {
+        const present = knownIds(opts.home);
+        const map = sessions.loadSessions(ordersDir);
+        const entries = Object.entries(map).map(([id, e]) => ({
+          id, firstmate: id === sessions.FIRST_MATE_KEY, present: id === sessions.FIRST_MATE_KEY || present.has(id), ...sessionView(e, e.harness),
+        })).sort((a, b) => (b.firstmate - a.firstmate) || (b.present - a.present) || ((b.lastSeen || 0) - (a.lastSeen || 0)));
+        return json(res, 200, { entries });
       }
       const pm = /^\/api\/peek\/([^/]+)$/.exec(url.pathname);
       if (pm) {
@@ -176,10 +220,10 @@ function createServer(opts) {
       const fm = /^\/api\/file\/([^/]+)\/([^/]+)$/.exec(url.pathname);
       if (fm) return json(res, 200, actions.readDataFile(opts.home, decodeURIComponent(fm[1]), decodeURIComponent(fm[2])));
       if (url.pathname === '/api/library') {
-        return json(res, 200, { entries: library.listLibrary(opts.home, memoryDir) });
+        return json(res, 200, { entries: library.listLibrary(opts.home, memoryDir, libOpts) });
       }
       if (url.pathname === '/api/library/file') {
-        const r = library.readLibraryEntry(opts.home, memoryDir, url.searchParams.get('key'));
+        const r = library.readLibraryEntry(opts.home, memoryDir, url.searchParams.get('key'), libOpts);
         if (!r) return json(res, 404, { error: 'not in the library' });
         return json(res, 200, r);
       }
@@ -211,9 +255,9 @@ if (require.main === module) {
   }
   createServer(opts).listen(opts.port, '127.0.0.1', () => {
     console.log(`Ship Deck reading ${opts.home} (read-only, stale after ${opts.staleDays} d)`);
-    console.log(`  orders: ${opts.ordersDir}   library memory: ${opts.memoryDir || '(none)'}`);
+    console.log(`  orders: ${opts.ordersDir}   library memory: ${opts.memoryDir || '(none)'}   claude: ${opts.claudeDir}`);
     console.log(`  http://127.0.0.1:${opts.port}/`);
   });
 }
 
-module.exports = { createServer, parseArgs, postGuard, knownIds };
+module.exports = { createServer, parseArgs, postGuard, knownIds, orderContext };
