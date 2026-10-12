@@ -40,6 +40,7 @@
   --s-done: #3f6fae;
   --s-failed: #c4302b;
   --s-unknown: #9aa3ad;
+  --s-stale: #978b78;
   --ring-alpha: 0.28;
 }
 
@@ -81,6 +82,7 @@
     --s-done: #6f9ee0;
     --s-failed: #ef5350;
     --s-unknown: #6d7782;
+    --s-stale: #85796a;
     --ring-alpha: 0.35;
   }
 }
@@ -346,6 +348,31 @@ a { color: var(--s-done); }
 .xmark { position: absolute; right: 4px; top: 4px; width: 16px; height: 16px; display: none; color: var(--s-failed); }
 .st-failed .xmark { display: block; }
 .st-unknown .sailor { opacity: 0.45; }
+
+/* stale: weathered, greyed and still; overrides the attention styling */
+.station.is-stale {
+  --c: var(--s-stale);
+  background: color-mix(in srgb, var(--house) 45%, transparent);
+  border: 1px dashed var(--s-stale);
+  box-shadow: none;
+}
+.station.is-stale::after { display: none; }
+.station.is-stale:hover { background: color-mix(in srgb, var(--house) 75%, transparent); }
+.is-stale .sailor { filter: grayscale(1); opacity: 0.45; }
+.is-stale .sailor *, .is-stale .flag .cloth { animation: none !important; }
+.is-stale .bell, .is-stale .zz { display: none !important; }
+.is-stale .flag { opacity: 0.55; }
+.is-stale .label .id { color: var(--ink-2); }
+.stale-tag {
+  position: absolute; top: 5px; right: 5px; display: none;
+  padding: 0 5px; border: 1px dashed var(--s-stale); border-radius: 4px;
+  font: 700 8.5px/14px var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--s-stale); background: var(--house);
+}
+.station.is-stale .stale-tag { display: block; }
+.has-tmux .station.is-stale .alive { right: auto; left: 7px; }
+.cabin.is-stale { opacity: 0.6; border-style: dashed; }
+.cabin.is-stale .sailor { filter: grayscale(1); }
 
 /* tmux liveness */
 .alive { position: absolute; top: 6px; right: 7px; width: 7px; height: 7px; border-radius: 50%; display: none; }

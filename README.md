@@ -21,6 +21,7 @@ node server.js                      # reads FM_HOME, default /Users/aryanbhandar
 node server.js --home /path/to/home --port 4747
 FM_HOME=/path/to/home node server.js
 node server.js --no-tmux            # skip the tmux liveness probe
+node server.js --stale-days 14      # stale threshold, default 7 (or SHIP_DECK_STALE_DAYS)
 ```
 
 Open <http://127.0.0.1:4747/>. The server binds to `127.0.0.1` only. The page
@@ -74,10 +75,18 @@ All paths are relative to the fleet home. Missing files are fine.
   decision (amber flag, pulsing beacon), blocked (red flag and ringing bell),
   done (sea chest packed, waiting for cleanup), failed (red, slumped), no status
   yet (faded). A small dot shows whether the tmux window is open.
+- **Stale crew**: any crew member that is not done and has had no activity
+  (newest mtime of its `.status`, `.turn-ended` or `.meta`) for more than
+  `--stale-days` (default 7) gets a greyed, still avatar and a `stale` tag. Its
+  underlying state stays visible on the pill, but it moves out of its state's
+  count into a separate **Stale** count and is left out of "Needs the captain".
+  Done crew are never stale. A new status line makes it active again on the
+  next poll.
 - **Officers' cabins**: secondmates, behind portholes.
 - **Cargo hold**: queued backlog crates; Captain's Call crates carry a red tag.
-- **Command Center**: watch status, counts by state (click to filter), "Needs
-  the captain" (decision/blocked/failed crew plus the Captain's Call backlog),
+- **Command Center**: watch status, counts by state plus Stale (click to
+  filter), "Needs the captain" (non-stale decision/blocked/failed crew plus the
+  Captain's Call backlog),
   recently done, and PR links.
 - **Detail drawer**: click any crew member or crate. `#task=<id>` deep-links.
 - **Filter**: `/` focuses the search box (matches id, project, state, kind,

@@ -124,3 +124,15 @@ test('projectName and parseTmuxWindows', () => {
   assert.ok(w.has('fleet:fm-alpha-fix'));
   assert.equal(w.size, 2);
 });
+
+test('isStale: older than the threshold, never for done crew', () => {
+  const now = Date.parse('2026-01-20T12:00:00Z');
+  const day = 86400000;
+  assert.equal(f.DEFAULT_STALE_DAYS, 7);
+  assert.equal(f.isStale('working', now - 8 * day, now), true);
+  assert.equal(f.isStale('needs-decision', now - 7 * day + 1000, now), false, 'just under 7 days');
+  assert.equal(f.isStale('blocked', now - 8 * day, now, 10), false, 'configurable threshold');
+  assert.equal(f.isStale('paused', now - 2 * day, now, 1.5), true, 'fractional days');
+  assert.equal(f.isStale('done', now - 90 * day, now), false);
+  assert.equal(f.isStale('working', null, now), false, 'no activity recorded');
+});

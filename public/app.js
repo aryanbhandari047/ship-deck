@@ -4,11 +4,11 @@
 (() => {
   const POLL_MS = 3000;
   const STATE_ORDER = ['needs-decision', 'blocked', 'failed', 'working', 'paused', 'unknown', 'done'];
-  const COUNT_ORDER = ['working', 'needs-decision', 'blocked', 'paused', 'done', 'failed'];
+  const COUNT_ORDER = ['working', 'needs-decision', 'blocked', 'paused', 'done', 'failed', 'stale'];
   const ATTENTION = new Set(['needs-decision', 'blocked', 'failed']);
   const STATE_LABEL = {
     'working': 'working', 'needs-decision': 'decision', 'blocked': 'blocked', 'paused': 'paused',
-    'done': 'done', 'failed': 'failed', 'unknown': 'no status', 'resolved': 'resolved',
+    'done': 'done', 'failed': 'failed', 'unknown': 'no status', 'resolved': 'resolved', 'stale': 'stale',
   };
   const MAX_CRATES = 48;
 
@@ -92,6 +92,9 @@
     sigs.set(name, sig);
     return false;
   }
+  // Stale crew are bucketed as "stale" for counts, tallies and the state filter.
+  function bucket(t) { return t.stale ? 'stale' : t.state; }
+  function staleText(t) { return `no activity for ${agoLong(t.lastActivity).replace(' ago', '')} (stale after ${snap.staleDays} d)`; }
   function lastNote(t) { const l = t.lastStatus[t.lastStatus.length - 1]; return l ? l.note : ''; }
 
   const SAILOR = `
@@ -116,9 +119,9 @@
 
   // ---------- filtering ----------
   function matchesTask(t) {
-    if (stateFilter && t.state !== stateFilter) return false;
+    if (stateFilter && bucket(t) !== stateFilter) return false;
     if (!query) return true;
-    const hay = [t.id, t.project, t.state, STATE_LABEL[t.state], t.kind, t.mode, t.brief].join(' ').toLowerCase();
+    const hay = [t.id, t.project, t.state, STATE_LABEL[t.state], t.stale && 'stale', t.kind, t.mode, t.brief].join(' ').toLowerCase();
     return query.split(/\s+/).every((q) => hay.includes(q));
   }
   function matchesCrate(item) {
@@ -142,6 +145,7 @@
         '<span class="zz">z</span><span class="zz">z</span>' +
         '<span class="alive"></span>' +
       '</div>' +
+      '<span class="stale-tag">stale</span>' +
       '<div class="label"><span class="id"></span><span class="sub"><span class="pill"></span><span class="age"></span></span></div>';
     el.addEventListener('click', () => openDrawer({ type: 'task', id: t.id }));
     return el;
@@ -151,6 +155,7 @@
     for (const c of [...el.classList]) if (c.startsWith('st-') || c.startsWith('k-')) el.classList.remove(c);
     el.classList.add('st-' + t.state, 'k-' + t.kind);
     el.classList.toggle('is-alive', t.alive === true);
+    el.classList.toggle('is-stale', !!t.stale);
     el.classList.toggle('selected', !!selected && selected.type === 'task' && selected.id === t.id);
     el.dataset.state = t.state;
     if (prev && prev !== t.state) {
@@ -163,12 +168,15 @@
     el.querySelector('.pill').textContent = STATE_LABEL[t.state] || t.state;
     el.querySelector('.age').textContent = ago(t.lastActivity);
     const alive = t.alive === true ? 'window open' : t.alive === false ? 'window closed' : '';
-    el.title = `${t.id}\n${t.project} · ${t.kind}${t.mode ? ' · ' + t.mode : ''}\n${STATE_LABEL[t.state]}${alive ? ' · ' + alive : ''}\n\n${lastNote(t).slice(0, 220)}`;
-    el.setAttribute('aria-label', `${t.id}, ${t.project}, ${STATE_LABEL[t.state]}`);
+    el.title = `${t.id}\n${t.project} · ${t.kind}${t.mode ? ' · ' + t.mode : ''}\n${STATE_LABEL[t.state]}${alive ? ' · ' + alive : ''}` +
+      `${t.stale ? '\nSTALE: ' + staleText(t) : ''}\n\n${lastNote(t).slice(0, 220)}`;
+    el.setAttribute('aria-label', `${t.id}, ${t.project}, ${STATE_LABEL[t.state]}${t.stale ? ', stale' : ''}`);
   }
 
+  // Stale crew sit after the active crew and before the done crew.
+  function rank(t) { return t.stale ? STATE_ORDER.indexOf('done') - 0.5 : STATE_ORDER.indexOf(t.state); }
   function sortTasks(a, b) {
-    const d = STATE_ORDER.indexOf(a.state) - STATE_ORDER.indexOf(b.state);
+    const d = rank(a) - rank(b);
     return d || a.id.localeCompare(b.id);
   }
 
@@ -203,8 +211,8 @@
       area.plaque.replaceChildren(...[tasks[0].project, reg && reg.mode ? h('span', { class: 'plaque-sub', text: reg.mode }) : null].filter(Boolean));
       if (reg && reg.description) area.plaque.title = reg.description;
       const tallies = {};
-      for (const t of tasks) tallies[t.state] = (tallies[t.state] || 0) + 1;
-      area.tally.replaceChildren(...STATE_ORDER.filter((s) => tallies[s]).map((s) =>
+      for (const t of tasks) tallies[bucket(t)] = (tallies[bucket(t)] || 0) + 1;
+      area.tally.replaceChildren(...[...STATE_ORDER, 'stale'].filter((s) => tallies[s]).map((s) =>
         h('span', { class: 'tally', title: STATE_LABEL[s] }, h('i', { style: `background:${stateVar(s)}` }), tallies[s])));
       let visible = 0;
       tasks.forEach((t) => {
@@ -262,14 +270,15 @@
     const vacant = reg.filter((r) => !ids.has(r.id));
     ui.cabins.hidden = !metas.length && !vacant.length;
     if (ui.cabins.hidden) return;
-    if (unchanged('cabins', metas.map((t) => [t.id, t.state, ago(t.lastActivity), matchesTask(t)]), vacant)) return;
+    if (unchanged('cabins', metas.map((t) => [t.id, t.state, t.stale, ago(t.lastActivity), matchesTask(t)]), vacant)) return;
     const cabin = (id, sub, cls, onclick) => h('button', { class: 'cabin ' + cls, type: 'button', onclick },
       h('span', { class: 'porthole' }),
       h('div', null, h('div', { class: 'cab-id', text: id }), h('div', { class: 'cab-sub', text: sub })));
     const kids = [];
     for (const t of metas.sort(sortTasks)) {
-      const c = cabin(t.id, `${STATE_LABEL[t.state]} · ${ago(t.lastActivity)}`, `k-secondmate st-${t.state}`, () => openDrawer({ type: 'task', id: t.id }));
-      c.style.setProperty('--c', stateVar(t.state));
+      const c = cabin(t.id, `${STATE_LABEL[t.state]}${t.stale ? ' · stale' : ''} · ${ago(t.lastActivity)}`,
+        `k-secondmate st-${t.state}${t.stale ? ' is-stale' : ''}`, () => openDrawer({ type: 'task', id: t.id }));
+      c.style.setProperty('--c', stateVar(bucket(t)));
       c.classList.toggle('hidden-by-filter', !matchesTask(t));
       c.querySelector('.porthole').innerHTML = `<svg class="sailor" viewBox="0 0 40 48" aria-hidden="true">${SAILOR}</svg>`;
       kids.push(c);
@@ -314,7 +323,7 @@
 
   // ---------- command center ----------
   function listRow(t, note, onclick) {
-    return h('li', null, h('button', { class: 'row', type: 'button', onclick, style: `--c:${stateVar(t.state)}` },
+    return h('li', null, h('button', { class: 'row', type: 'button', onclick, style: `--c:${stateVar(bucket(t))}` },
       h('span', { class: 'dot' }), h('span', { class: 'r-id', text: t.id, title: t.id }), h('span', { class: 'r-age', text: ago(t.lastActivity) }),
       note ? h('span', { class: 'r-note', text: note }) : null));
   }
@@ -329,6 +338,7 @@
       h('span', { class: 'row-label', text: 'Heartbeat' }), h('span', { class: 'row-val', text: agoLong(w.lastBeat) }),
       h('span', { class: 'row-label', text: 'Captain' }), h('span', { class: 'row-val', text: snap.afk ? 'ashore (away)' : 'aboard' }),
       h('span', { class: 'row-label', text: 'Crew' }), h('span', { class: 'row-val', text: `${snap.tasks.length} in flight` }),
+      h('span', { class: 'row-label', text: 'Stale after' }), h('span', { class: 'row-val', text: `${snap.staleDays} d without activity` }),
       h('span', { class: 'row-label', text: 'tmux' }), h('span', { class: 'row-val', text: snap.tmux.available ? `${snap.tmux.windows} windows` : 'not available' }),
       h('span', { class: 'row-label', text: 'Updated' }), h('span', { class: 'row-val', text: new Date(snap.generatedAt).toLocaleTimeString() }),
     );
@@ -345,9 +355,9 @@
       }, h('span', { class: 'n', text: n }), h('span', { class: 'l', text: STATE_LABEL[s] }));
     }));
 
-    const needs = snap.tasks.filter((t) => ATTENTION.has(t.state)).sort(sortTasks);
+    const needs = snap.tasks.filter((t) => ATTENTION.has(t.state) && !t.stale).sort(sortTasks);
     const calls = [...snap.backlog.captain, ...snap.backlog.inFlight, ...snap.backlog.queued].filter((b) => b.captainCall);
-    const sigOf = (list) => list.map((t) => [t.id, t.state, ago(t.lastActivity), lastNote(t)]);
+    const sigOf = (list) => list.map((t) => [t.id, t.state, t.stale, ago(t.lastActivity), lastNote(t)]);
     ui.needsCount.textContent = needs.length;
     ui.needsCount.classList.toggle('zero', needs.length === 0);
     if (!unchanged('needs', sigOf(needs))) ui.needsList.replaceChildren(...(needs.length
@@ -372,7 +382,7 @@
 
     const prs = snap.tasks.filter((t) => t.pr).sort(sortTasks);
     if (!unchanged('prs', sigOf(prs).map((x, i) => [...x, prs[i].pr]))) ui.prList.replaceChildren(...(prs.length ? prs.map((t) => h('li', null,
-      h('a', { class: 'row', href: t.pr, target: '_blank', rel: 'noopener noreferrer', style: `--c:${stateVar(t.state)}` },
+      h('a', { class: 'row', href: t.pr, target: '_blank', rel: 'noopener noreferrer', style: `--c:${stateVar(bucket(t))}` },
         h('span', { class: 'dot' }), h('span', { class: 'r-id', text: t.id }), h('span', { class: 'r-age', text: prNumber(t.pr) })))) : [emptyRow('No PRs recorded in meta.')]));
   }
 
@@ -397,7 +407,8 @@
       ui.drawerBody.replaceChildren(h('p', { text: 'This task no longer has a meta file in state/. It was probably torn down.' }));
       return;
     }
-    ui.drawerKicker.replaceChildren(h('span', { class: 'pill', style: `background:${stateVar(t.state)}`, text: STATE_LABEL[t.state] }), t.kind);
+    ui.drawerKicker.replaceChildren(...[h('span', { class: 'pill', style: `background:${stateVar(t.state)}`, text: STATE_LABEL[t.state] }),
+      t.stale ? h('span', { class: 'pill', style: `background:${stateVar('stale')}`, text: 'stale' }) : null, t.kind].filter(Boolean));
     ui.drawerTitle.textContent = t.id;
     const kids = [];
     if (t.brief) kids.push(h('p', { class: 'brief', text: t.brief }));
@@ -418,6 +429,7 @@
     fact(dl, 'Worktree', t.worktree, true);
     fact(dl, 'PR head', t.prHead ? t.prHead.slice(0, 12) : null, true);
     fact(dl, 'Last activity', t.lastActivity ? `${agoLong(t.lastActivity)} · ${stamp(t.lastActivity)}` : null);
+    if (t.stale) fact(dl, 'Stale', staleText(t));
     fact(dl, 'Turn ended', t.turnEnded ? `${agoLong(t.turnEnded)} · ${stamp(t.turnEnded)}` : 'not yet');
     fact(dl, 'Status lines', String(t.statusCount));
     kids.push(dl);

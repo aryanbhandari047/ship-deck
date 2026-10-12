@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { buildSnapshot, reportPath } = require('../lib/fleet');
-const { createServer } = require('../server');
+const { createServer, parseArgs } = require('../server');
 
 const FIX = path.join(__dirname, 'fixtures', 'home');
 
@@ -130,6 +130,59 @@ test('stale heartbeat is not healthy', async (t) => {
   assert.ok(s.watcher.ageSec >= 299);
 });
 
+// Ages every state/<id>.* file so the task's last activity is `days` old.
+function age(home, id, days, now) {
+  const when = new Date(now - days * 86400000);
+  for (const ext of ['meta', 'status', 'turn-ended']) {
+    const p = path.join(home, 'state', `${id}.${ext}`);
+    if (fs.existsSync(p)) fs.utimesSync(p, when, when);
+  }
+}
+
+test('stale crew: flagged, bucketed out of their state count, threshold configurable', async (t) => {
+  const home = tempHome();
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const now = Date.now();
+  age(home, 'gamma-decision', 10, now); // needs-decision, 10 d quiet
+  age(home, 'delta-block', 8, now); // blocked, 8 d quiet
+  age(home, 'alpha-fix', 3, now); // working, 3 d: fresh under the default
+  age(home, 'beta-scout', 40, now); // done: never stale
+
+  const s = await buildSnapshot(home, { tmux: false, now });
+  assert.equal(s.staleDays, 7);
+  const byId = Object.fromEntries(s.tasks.map((x) => [x.id, x]));
+  assert.equal(byId['gamma-decision'].stale, true);
+  assert.equal(byId['gamma-decision'].state, 'needs-decision', 'underlying state is kept');
+  assert.equal(byId['delta-block'].stale, true);
+  assert.equal(byId['alpha-fix'].stale, false);
+  assert.equal(byId['beta-scout'].stale, false);
+  assert.deepEqual(s.counts, { stale: 2, working: 3, done: 1, unknown: 1 });
+  assert.equal(s.counts['needs-decision'], undefined);
+  assert.equal(s.counts.blocked, undefined);
+  const total = Object.values(s.counts).reduce((a, b) => a + b, 0);
+  assert.equal(total, s.tasks.length, 'counts still sum to the crew size');
+
+  const loose = await buildSnapshot(home, { tmux: false, now, staleDays: 9 });
+  assert.equal(loose.staleDays, 9);
+  assert.deepEqual(loose.tasks.filter((x) => x.stale).map((x) => x.id), ['gamma-decision']);
+  assert.equal(loose.counts.blocked, 1);
+
+  const strict = await buildSnapshot(home, { tmux: false, now, staleDays: 2 });
+  assert.deepEqual(strict.tasks.filter((x) => x.stale).map((x) => x.id).sort(), ['alpha-fix', 'delta-block', 'gamma-decision']);
+});
+
+test('parseArgs reads --stale-days and SHIP_DECK_STALE_DAYS', (t) => {
+  const prev = process.env.SHIP_DECK_STALE_DAYS;
+  t.after(() => { if (prev === undefined) delete process.env.SHIP_DECK_STALE_DAYS; else process.env.SHIP_DECK_STALE_DAYS = prev; });
+  delete process.env.SHIP_DECK_STALE_DAYS;
+  assert.equal(parseArgs([]).staleDays, 7);
+  assert.equal(parseArgs(['--stale-days', '14']).staleDays, 14);
+  assert.equal(parseArgs(['--stale-days=2.5']).staleDays, 2.5);
+  process.env.SHIP_DECK_STALE_DAYS = '3';
+  assert.equal(parseArgs([]).staleDays, 3);
+  assert.equal(parseArgs(['--stale-days', '5']).staleDays, 5, 'flag beats env');
+});
+
 test('reportPath rejects traversal', () => {
   assert.ok(reportPath(FIX, 'beta-scout'));
   assert.equal(reportPath(FIX, 'alpha-fix'), null);
@@ -140,7 +193,7 @@ test('reportPath rejects traversal', () => {
 
 test('server serves the fleet and reflects a status change', async (t) => {
   const home = tempHome();
-  const server = createServer({ home, tmux: false });
+  const server = createServer({ home, tmux: false, staleDays: 7 });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   t.after(() => { server.close(); fs.rmSync(home, { recursive: true, force: true }); });
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -148,6 +201,8 @@ test('server serves the fleet and reflects a status change', async (t) => {
   const fleet = async () => (await fetch(base + '/api/fleet')).json();
   let s = await fleet();
   assert.equal(s.tasks.find((x) => x.id === 'delta-block').state, 'blocked');
+
+  assert.equal(s.staleDays, 7, 'server passes its stale threshold to the snapshot');
 
   fs.appendFileSync(path.join(home, 'state', 'delta-block.status'), 'working: database is back, resuming\n');
   s = await fleet();

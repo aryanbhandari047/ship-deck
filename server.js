@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 'use strict';
 // Ship Deck: a read-only live view of a firstmate fleet.
-//   node server.js [--home <FM_HOME>] [--port 4747] [--no-tmux]
+//   node server.js [--home <FM_HOME>] [--port 4747] [--stale-days 7] [--no-tmux]
 // Binds to 127.0.0.1 only. Never writes to FM_HOME.
 
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
-const { buildSnapshot, reportPath, readText } = require('./lib/fleet');
+const { buildSnapshot, reportPath, readText, DEFAULT_STALE_DAYS } = require('./lib/fleet');
 
 const DEFAULT_HOME = '/Users/aryanbhandari/Desktop/AI/firstmate';
 
@@ -16,6 +16,7 @@ function parseArgs(argv) {
     home: process.env.FM_HOME || DEFAULT_HOME,
     port: Number(process.env.SHIP_DECK_PORT) || 4747,
     tmux: true,
+    staleDays: process.env.SHIP_DECK_STALE_DAYS !== undefined ? Number(process.env.SHIP_DECK_STALE_DAYS) : DEFAULT_STALE_DAYS,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -24,8 +25,9 @@ function parseArgs(argv) {
     if (flag === '--home') opts.home = val();
     else if (flag === '--port') opts.port = Number(val());
     else if (flag === '--no-tmux') opts.tmux = false;
+    else if (flag === '--stale-days') opts.staleDays = Number(val());
     else if (flag === '--help' || flag === '-h') {
-      console.log('usage: node server.js [--home FM_HOME] [--port 4747] [--no-tmux]');
+      console.log('usage: node server.js [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux]');
       process.exit(0);
     } else {
       console.error('unknown argument: ' + a);
@@ -34,6 +36,10 @@ function parseArgs(argv) {
   }
   if (!Number.isInteger(opts.port) || opts.port <= 0 || opts.port > 65535) {
     console.error('invalid --port');
+    process.exit(2);
+  }
+  if (!Number.isFinite(opts.staleDays) || opts.staleDays <= 0) {
+    console.error('invalid --stale-days (expected a positive number of days)');
     process.exit(2);
   }
   opts.home = path.resolve(opts.home);
@@ -66,7 +72,7 @@ function createServer(opts) {
     const url = new URL(req.url, 'http://127.0.0.1');
     try {
       if (url.pathname === '/api/fleet') {
-        const snap = await buildSnapshot(opts.home, { tmux: opts.tmux });
+        const snap = await buildSnapshot(opts.home, { tmux: opts.tmux, staleDays: opts.staleDays });
         return send(res, 200, JSON.stringify(snap), 'application/json; charset=utf-8');
       }
       const rm = /^\/api\/report\/([^/]+)$/.exec(url.pathname);
@@ -95,7 +101,7 @@ if (require.main === module) {
     console.warn(`warning: ${opts.home}/state not found; the deck will be empty`);
   }
   createServer(opts).listen(opts.port, '127.0.0.1', () => {
-    console.log(`Ship Deck reading ${opts.home} (read-only)`);
+    console.log(`Ship Deck reading ${opts.home} (read-only, stale after ${opts.staleDays} d)`);
     console.log(`  http://127.0.0.1:${opts.port}/`);
   });
 }
