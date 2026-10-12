@@ -1,0 +1,7 @@
+# comment lines are ignored
+window=fleet:fm-gamma-decision
+project=/tmp/sample/projects/lighthouse-api
+kind=ship
+mode=local-only
+not a key value line
+empty=

@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Ship Deck</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Shared SVG defs referenced by every sailor. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <clipPath id="torso-clip"><path d="M12 21h16a3 3 0 0 1 3 3v15H9V24a3 3 0 0 1 3-3z"/></clipPath>
+    </defs>
+  </svg>
+
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <circle cx="16" cy="16" r="11" fill="none" stroke="currentColor" stroke-width="2"/>
+        <circle cx="16" cy="16" r="3" fill="currentColor"/>
+        <path d="M16 2v8M16 22v8M2 16h8M22 16h8M6 6l5.5 5.5M20.5 20.5L26 26M26 6l-5.5 5.5M11.5 20.5L6 26" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <div>
+        <h1>Ship Deck</h1>
+        <p class="home" id="home-path" title="Fleet home (read-only)">…</p>
+      </div>
+    </div>
+    <label class="search">
+      <span class="sr-only">Filter crew by id, project or state</span>
+      <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M13 13l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <input id="search" type="search" placeholder="Filter by id, project, state…  ( / )" autocomplete="off" spellcheck="false">
+    </label>
+    <div class="sync" id="sync" aria-live="polite"><span class="sync-dot"></span><span id="sync-text">Connecting…</span></div>
+  </header>
+
+  <main class="layout">
+    <section class="scene" id="scene" aria-label="Ship deck">
+      <div class="sea" aria-hidden="true"></div>
+      <div class="ship" id="ship">
+        <svg class="bow" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+          <path class="bow-hull" d="M0 40 C 6 30, 32 8, 50 0 C 68 8, 94 30, 100 40 Z"/>
+          <path class="bow-deck" d="M2.4 40 C 9 31, 34 11, 50 4 C 66 11, 91 31, 97.6 40 Z"/>
+          <path class="bow-rail" d="M5.5 40 C 12 32, 36 14, 50 8 C 64 14, 88 32, 94.5 40" fill="none"/>
+        </svg>
+
+        <div class="bridge" id="bridge">
+          <div class="bridge-house">
+            <div class="windows" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
+            <div class="bridge-floor">
+              <figure class="officer captain" id="captain">
+                <svg viewBox="0 0 40 48" class="sailor" aria-hidden="true"></svg>
+                <figcaption>Captain</figcaption>
+              </figure>
+              <div class="away-sign" id="away-sign" hidden>
+                <span>Captain</span><strong>ashore</strong>
+              </div>
+              <div class="helm" aria-hidden="true">
+                <svg viewBox="0 0 64 64" class="wheel" id="wheel">
+                  <g stroke="currentColor" stroke-linecap="round">
+                    <path stroke-width="3" d="M32 4v12M32 48v12M4 32h12M48 32h12M12.2 12.2l8.5 8.5M43.3 43.3l8.5 8.5M51.8 12.2l-8.5 8.5M20.7 43.3l-8.5 8.5"/>
+                    <circle cx="32" cy="32" r="17" fill="none" stroke-width="4"/>
+                    <circle cx="32" cy="32" r="5" fill="currentColor" stroke="none"/>
+                  </g>
+                </svg>
+              </div>
+              <figure class="officer firstmate">
+                <svg viewBox="0 0 40 48" class="sailor" aria-hidden="true"></svg>
+                <figcaption>First mate</figcaption>
+              </figure>
+              <div class="lamp-post" id="lamp-post">
+                <span class="lamp" id="lamp"></span>
+                <span class="lamp-label" id="lamp-label">Watch</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="areas"></div>
+
+        <section class="cabins" id="cabins" hidden aria-label="Secondmate cabins">
+          <h2 class="plaque">Officers' cabins</h2>
+          <div class="cabin-row" id="cabin-row"></div>
+        </section>
+
+        <section class="hold" id="hold" aria-label="Cargo hold: queued backlog">
+          <h2 class="plaque">Cargo hold <span class="plaque-sub" id="hold-sub"></span></h2>
+          <div class="crates" id="crates"></div>
+        </section>
+      </div>
+    </section>
+
+    <aside class="panel" id="panel" aria-label="Command Center">
+      <h2 class="panel-title">Command Center</h2>
+
+      <div class="card watch-card" id="watch-card"></div>
+
+      <div class="card">
+        <h3>Crew by state</h3>
+        <div class="counts" id="counts"></div>
+      </div>
+
+      <div class="card attention">
+        <h3>Needs the captain <span class="badge" id="needs-count">0</span></h3>
+        <ul class="list" id="needs-list"></ul>
+        <details class="calls" id="calls-wrap">
+          <summary>Captain's Call backlog <span class="badge muted" id="calls-count">0</span></summary>
+          <ul class="list compact" id="calls-list"></ul>
+        </details>
+      </div>
+
+      <div class="card">
+        <h3>Recently done</h3>
+        <ul class="list" id="done-list"></ul>
+      </div>
+
+      <div class="card">
+        <h3>Pull requests</h3>
+        <ul class="list" id="pr-list"></ul>
+      </div>
+    </aside>
+  </main>
+
+  <div class="drawer-scrim" id="scrim" hidden></div>
+  <aside class="drawer" id="drawer" aria-hidden="true" aria-labelledby="drawer-title" tabindex="-1">
+    <header class="drawer-head">
+      <div>
+        <p class="drawer-kicker" id="drawer-kicker"></p>
+        <h2 id="drawer-title"></h2>
+      </div>
+      <button class="icon-btn" id="drawer-close" aria-label="Close details">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </header>
+    <div class="drawer-body" id="drawer-body"></div>
+  </aside>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,2 @@
+working: scoping the migration
+needs-decision [key=keep-or-drop]: keep the legacy beacon endpoint (a) or drop it (b)?

@@ -1,0 +1,8 @@
+window=fleet:fm-beta-scout
+worktree=/tmp/sample/projects/Harbor-App
+project=/tmp/sample/projects/Harbor-App/
+harness=codex
+kind=scout
+mode=direct-PR
+model=gpt-sample
+effort=medium

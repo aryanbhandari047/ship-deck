@@ -1,0 +1,11 @@
+window=fleet:fm-alpha-fix
+worktree=/tmp/sample/worktrees/harbor-app-1
+project=/tmp/sample/projects/harbor-app
+harness=claude
+kind=ship
+mode=no-mistakes
+yolo=off
+model=default
+effort=high
+pr=https://github.com/example-org/harbor-app/pull/42
+pr_head=0123456789abcdef0123456789abcdef01234567

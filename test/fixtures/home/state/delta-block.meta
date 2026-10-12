@@ -1,0 +1,4 @@
+window=fleet:fm-delta-block
+project=/tmp/sample/projects/lighthouse-api
+kind=ship
+mode=no-mistakes

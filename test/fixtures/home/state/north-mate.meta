@@ -1,0 +1,4 @@
+window=fleet:fm-north-mate
+project=/tmp/sample
+kind=secondmate
+home=/tmp/sample/homes/north

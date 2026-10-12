@@ -1,0 +1,6 @@
+2026-01-05 09:12 working: reproduced the lighthouse crash on a clean checkout
+2026-01-05 10:40 working: fix implemented, running the suite
+stray shell output that is not a status line
+filesize               unlimited
+
+working: PR 42 opened, waiting on CI
