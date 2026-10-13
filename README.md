@@ -8,7 +8,8 @@ cargo hold as crates. Inspired by [Munder Difflin](https://github.com/HarnessMD/
 It is the captain's control surface: everything day-to-day happens here, and
 every live Claude Code session stays resumable from a terminal. It is
 **read-only against the fleet home**: it never writes, renames or deletes
-anything there. The captain's actions are deliberately narrow:
+anything there, with one exception: each new order appends one wake line to
+`state/ship-deck-inbox.status` (see the order contract; `--no-wake` disables it). The captain's actions are deliberately narrow:
 
 - **Bridge chat**: free-text messages to the first mate, queued as `chat`
   orders; the first mate's replies come back through `bin/orders.js reply` and
@@ -53,6 +54,7 @@ node server.js --stale-days 14      # stale threshold, default 7 (or SHIP_DECK_S
 node server.js --orders-dir DIR     # orders queue, default ~/.ship-deck (or SHIP_DECK_ORDERS_DIR)
 node server.js --memory-dir DIR     # first mate memory shown in the Ship's Library
 node server.js --claude-dir DIR     # Claude Code data dir, default ~/.claude (transcripts, skills)
+node server.js --no-wake            # don't append wake lines to <home>/state/ship-deck-inbox.status
 sh bin/start.sh [server flags...]   # start in the background unless the port already answers
 ```
 
@@ -109,6 +111,15 @@ sort by time. An order's lifecycle is its acks: pending (no ack) ->
 acknowledged -> done or declined; the UI shows every step with its note.
 `target` is a crew id (or `null`), `text` is what the captain wrote or a default.
 `sessions.json` (resume ids, below) lives in the same directory.
+
+Fast lane: every new order (any kind) also appends exactly one line to
+`<FM_HOME>/state/ship-deck-inbox.status`, so the first mate's status monitor
+wakes within one poll instead of waiting for the slow `orders.jsonl` check:
+`message: <order-id> <kind> <first 80 chars of text, whitespace collapsed>`.
+The file is append-only (O_APPEND, 0644 if created, never truncated, renamed or
+deleted); a failed write is logged and the order still queues. It is only a
+wake signal: `orders.jsonl` stays the source of truth and `bin/orders-check.sh`
+the backstop. `--no-wake` turns it off.
 
 | kind | target | payload | meaning |
 | --- | --- | --- | --- |

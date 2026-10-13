@@ -10,6 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const orders = require('../lib/orders');
+const wake = require('../lib/wake');
 const actions = require('../lib/actions');
 const library = require('../lib/library');
 const { createServer } = require('../server');
@@ -407,7 +408,7 @@ test('HTTP data files and library endpoints', async (t) => {
   assert.equal((await fetch(base + '/api/library/file')).status, 404);
 });
 
-test('actions never write under the home', async (t) => {
+test('actions never write under the home except the wake inbox', async (t) => {
   const { base, post, home } = await startServer(t);
   const snap = () => {
     const out = {};
@@ -428,5 +429,56 @@ test('actions never write under the home', async (t) => {
   await fetch(base + '/api/peek/alpha-fix');
   await fetch(base + '/api/file/beta-scout/report.md');
   await fetch(base + '/api/library');
-  assert.deepEqual(snap(), before);
+  const after = snap();
+  const inbox = path.join('state', wake.INBOX);
+  assert.ok(after[inbox]);
+  delete after[inbox];
+  delete after.state; delete before.state; // dir mtime moves when the inbox is created
+  assert.deepEqual(after, before);
+});
+
+test('wake: one line per order, newlines collapsed, text truncated', async (t) => {
+  const { post, home, ordersDir } = await startServer(t);
+  const inbox = path.join(home, 'state', wake.INBOX);
+  const long = 'line one\nline two\r\n' + 'x'.repeat(200);
+  const a = await (await post('/api/orders', { kind: 'chat', text: long })).json();
+  const b = await (await post('/api/orders', { kind: 'cleanup', target: 'alpha-fix' })).json();
+  const lines = fs.readFileSync(inbox, 'utf8').split('\n').filter(Boolean);
+  assert.equal(lines.length, 2);
+  const text = lines[0].slice(`message: ${a.order.id} chat `.length);
+  assert.ok(lines[0].startsWith(`message: ${a.order.id} chat line one line two x`));
+  assert.equal(text.length, 80);
+  assert.ok(lines[1].startsWith(`message: ${b.order.id} cleanup `));
+  assert.equal(mode(inbox), 0o644);
+  assert.equal(orders.listOrders(ordersDir).length, 2);
+});
+
+test('wake: --no-wake writes nothing', async (t) => {
+  const { post, home } = await startServer(t, { wake: false });
+  assert.equal((await post('/api/orders', { kind: 'chat', text: 'hi' })).status, 200);
+  assert.ok(!fs.existsSync(path.join(home, 'state', wake.INBOX)));
+});
+
+test('wake: unwritable state dir is logged and the order still queues', async (t) => {
+  const { post, home, ordersDir } = await startServer(t);
+  const state = path.join(home, 'state');
+  fs.chmodSync(state, 0o500);
+  const logs = [];
+  let status;
+  try {
+    assert.equal(wake.wake(home, { id: 'o-x', kind: 'chat', text: 't' }, (m) => logs.push(m)), false);
+    status = (await post('/api/orders', { kind: 'chat', text: 'still queued' })).status;
+  } finally { fs.chmodSync(state, 0o755); } // restore before the temp home is removed
+  assert.equal(logs.length, 1);
+  assert.equal(status, 200);
+  assert.equal(orders.listOrders(ordersDir).length, 1);
+  assert.ok(!fs.existsSync(path.join(state, wake.INBOX)));
+});
+
+test('wake: appends to an existing inbox without truncating', (t) => {
+  const home = tempHome(t);
+  const inbox = path.join(home, 'state', wake.INBOX);
+  fs.writeFileSync(inbox, 'earlier\n');
+  wake.wake(home, { id: 'o-1', kind: 'new-task', text: 'go' });
+  assert.equal(fs.readFileSync(inbox, 'utf8'), 'earlier\nmessage: o-1 new-task go\n');
 });

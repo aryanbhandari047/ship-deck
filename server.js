@@ -3,8 +3,8 @@
 // Ship Deck: a live view of a firstmate fleet and the captain's control surface.
 //   node server.js [--home <FM_HOME>] [--port 4747] [--stale-days 7] [--no-tmux]
 //                  [--orders-dir ~/.ship-deck] [--memory-dir <dir>] [--claude-dir ~/.claude]
-// Binds to 127.0.0.1 only. Never writes to FM_HOME; the only file writes go to
-// the orders dir (~/.ship-deck). The only commands run are tmux list-windows,
+// Binds to 127.0.0.1 only. Writes to FM_HOME only one wake line per order (lib/wake.js,
+// --no-wake); other file writes go to the orders dir (~/.ship-deck). The only commands run are tmux list-windows,
 // tmux capture-pane and <home>/bin/fm-send.sh (see lib/actions.js).
 
 const http = require('node:http');
@@ -12,6 +12,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { buildSnapshot, reportPath, readText, parseMeta, DEFAULT_STALE_DAYS } = require('./lib/fleet');
 const orders = require('./lib/orders');
+const wake = require('./lib/wake');
 const actions = require('./lib/actions');
 const library = require('./lib/library');
 const sessions = require('./lib/sessions');
@@ -33,6 +34,7 @@ function parseArgs(argv) {
     ordersDir: orders.defaultDir(),
     memoryDir: library.DEFAULT_MEMORY_DIR,
     claudeDir: sessions.defaultClaudeDir(),
+    wake: true,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -45,8 +47,9 @@ function parseArgs(argv) {
     else if (flag === '--orders-dir') opts.ordersDir = val();
     else if (flag === '--memory-dir') opts.memoryDir = val();
     else if (flag === '--claude-dir') opts.claudeDir = val();
+    else if (flag === '--no-wake') opts.wake = false;
     else if (flag === '--help' || flag === '-h') {
-      console.log('usage: node server.js [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR]');
+      console.log('usage: node server.js [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR] [--no-wake]');
       process.exit(0);
     } else {
       console.error('unknown argument: ' + a);
@@ -220,11 +223,13 @@ function createServer(opts) {
       }
       const text = live ? `Set ${v.field} to ${v.value} (sent ${command}; applies from its next turn)` : `Set ${v.field} to ${v.value} on next relaunch`;
       const order = orders.createOrder(ordersDir, { kind: 'config', target: id, harness, field: v.field, value: v.value, applied: live, text }, { knownIds: known, internal: true });
+      if (opts.wake !== false) wake.wake(opts.home, order);
       return json(res, 200, { ok: true, applied: live, command, order });
     }
     if (url.pathname === '/api/orders') {
       try {
         const order = orders.createOrder(ordersDir, body, await orderContext(opts.home));
+        if (opts.wake !== false) wake.wake(opts.home, order);
         return json(res, 200, { ok: true, order });
       } catch (e) {
         return json(res, 400, { ok: false, error: e.message });
