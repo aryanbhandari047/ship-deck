@@ -138,6 +138,8 @@
   // A status pill: flag + word on the tone's tinted wash. st: { tone, flag, label }.
   function pillEl(st, cls) { return h('span', { class: `pill tone-${st.tone}${cls ? ' ' + cls : ''}` }, flagEl(st.flag), st.label); }
   function taskStatus(t) { return B.statusOf(t); }
+  // Only http(s) pull request links become links (a worker file could hold anything).
+  const safeUrl = (u) => (/^https?:\/\//i.test(String(u || '')) ? u : null);
   function prNumber(url) { const m = /\/pull\/(\d+)/.exec(url || ''); return m ? '#' + m[1] : 'PR'; }
   // Skips a DOM rebuild when its inputs are unchanged, so focus and hover survive polling.
   const sigs = new Map();
@@ -242,7 +244,7 @@
       if (!area) { area = makeArea(key); areaEls.set(key, area); }
       const tasks = byArea.get(key).sort(sortTasks);
       const reg = regMode.get(key);
-      area.plaque.replaceChildren(h('h2', { text: tasks[0].project }), reg && reg.description ? h('span', { class: 'muted', text: reg.description }) : null);
+      area.plaque.replaceChildren(...[h('h2', { text: tasks[0].project }), reg && reg.description ? h('span', { class: 'muted', text: reg.description }) : null].filter(Boolean));
       const tallies = new Map();
       for (const t of tasks) { const tone = taskStatus(t).tone; tallies.set(tone, (tallies.get(tone) || 0) + 1); }
       area.tally.replaceChildren(...B.TONE_ORDER.filter((tone) => tallies.get(tone)).map((tone) =>
@@ -326,7 +328,7 @@
     const calls = queued.filter((q) => q.captainCall && !q.checked).length;
     ui.holdSub.textContent = `${shown.length} waiting${calls ? `, ${calls} need${calls === 1 ? 's' : ''} you` : ''}`;
     ui.hold.classList.toggle('hidden-by-filter', !!query && !shown.length);
-    if (unchanged('hold', queued, shown.length, snap.backlog.present)) return;
+    if (unchanged('hold', queued, shown.map((q) => queued.indexOf(q)), snap.backlog.present)) return;
     const kids = shown.slice(0, MAX_CRATES).map((q) => {
       const index = queued.indexOf(q);
       return h('button', {
@@ -550,7 +552,7 @@
           : !t.stale ? replyRow('card.' + t.id, t.state === 'blocked' ? 'Reply to unblock…' : 'Your answer…', 'Send', (text) => answerTask(t, null, text)) : null;
       }
       const foot = [
-        t.pr ? h('a', { class: 'chip', href: t.pr, target: '_blank', rel: 'noopener noreferrer', title: 'Open the pull request' }, icon('i-pr'), prNumber(t.pr)) : null,
+        safeUrl(t.pr) ? h('a', { class: 'chip', href: safeUrl(t.pr), target: '_blank', rel: 'noopener noreferrer', title: 'Open the pull request' }, icon('i-pr'), prNumber(t.pr)) : null,
         t.state === 'done' && t.hasReport ? h('button', { class: 'chip', type: 'button', onclick: () => openReport(t) }, icon('i-file'), 'Read report') : null,
         t.state === 'failed' ? h('button', { class: 'btn sm', type: 'button', text: 'Ask for status', onclick: () => queueOrder({ kind: 'status', target: t.id }) }) : null,
         t.state === 'done' ? h('button', { class: 'btn sm ghost', type: 'button', text: 'Clean up', onclick: () => cleanupTask(t) }) : null,
@@ -689,6 +691,7 @@
 
   // ---------- new job (a sheet over the board) ----------
   function openJobSheet() {
+    if (!snap || snap.firstRun) return;
     ui.jobSheet.hidden = false;
     ui.jobScrim.hidden = false;
     renderJobProjects();
@@ -853,12 +856,12 @@
     d.meta.replaceChildren(...[
       t.title && t.title !== t.id ? h('code', { text: t.id }) : null,
       h('span', { text: t.project }),
-      t.pr ? h('a', { class: 'chip', href: t.pr, target: '_blank', rel: 'noopener noreferrer', title: 'Open the pull request (O)' }, icon('i-pr'), prNumber(t.pr), icon('i-ext')) : null,
+      safeUrl(t.pr) ? h('a', { class: 'chip', href: safeUrl(t.pr), target: '_blank', rel: 'noopener noreferrer', title: 'Open the pull request (O)' }, icon('i-pr'), prNumber(t.pr), icon('i-ext')) : null,
       h('span', { class: 'chip', text: B.toolText(t) }),
       t.window && t.alive === false ? h('span', { class: 'chip', text: 'Terminal closed' }) : null,
     ].filter(Boolean));
     d.mergeBtn.hidden = !t.pr;
-    d.prLink = t.pr || null;
+    d.prLink = safeUrl(t.pr);
   }
 
   // Latest update first, every one with its flag and one timestamp format.
@@ -1207,7 +1210,7 @@
 
   // ---------- queue item, second mate and first mate drawers ----------
   function backlogItem() {
-    const list = snap.backlog[selected.section] || [];
+    const list = snap.backlog[selected.section] || (snap.backlog.calls || []).filter((c) => c.section === selected.section);
     const byIndex = list[selected.index];
     if (byIndex && itemKey(byIndex) === selected.id) return byIndex;
     return list.find((b) => itemKey(b) === selected.id);
@@ -1309,6 +1312,7 @@
     sigs.delete('drawer-backlog');
     sigs.delete('drawer-fm');
     const wantFocus = !!sel.focus;
+    if (!selected) drawerBack = document.activeElement;
     selected = sel;
     ui.drawer.classList.add('open');
     ui.drawer.setAttribute('aria-hidden', 'false');
@@ -1319,7 +1323,10 @@
     if (location.hash !== want) history.replaceState(null, '', want || location.pathname);
     if (!wantFocus) ui.drawer.focus({ preventScroll: true });
   }
+  let drawerBack = null; // where focus goes back to when the drawer closes
   function closeDrawer() {
+    if (ui.drawer.contains(document.activeElement)) (drawerBack && drawerBack.isConnected ? drawerBack : ui.search).focus({ preventScroll: true });
+    drawerBack = null;
     stopPeek();
     td = null;
     selected = null;
@@ -2224,7 +2231,8 @@
       if (go) { e.preventDefault(); if (selected && k !== 'c' && k !== 'a') closeDrawer(); go(); }
       return;
     }
-    if (k === 'g') { gPending = Date.now(); return; }
+    const optCard = document.activeElement && document.activeElement.closest('.bcard');
+    if (k === 'g' && !(optCard && optCard.querySelector('.opt[data-letter="G"]'))) { gPending = Date.now(); return; }
     // In an open worker drawer.
     if (selected && selected.type === 'task' && td) {
       const tab = { 1: 'terminal', 2: 'updates', 3: 'details', 4: 'settings' }[k];

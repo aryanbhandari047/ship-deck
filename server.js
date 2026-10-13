@@ -167,7 +167,7 @@ function knownIds(home) {
 async function orderContext(home) {
   const snap = await buildSnapshot(home, { tmux: false });
   const backlogIds = new Set();
-  for (const k of ['captain', 'inFlight', 'queued']) for (const b of snap.backlog[k]) if (b.id) backlogIds.add(b.id);
+  for (const k of ['captain', 'inFlight', 'queued', 'calls']) for (const b of snap.backlog[k] || []) if (b.id) backlogIds.add(b.id); // calls include questions from unknown sections
   return {
     knownIds: knownIds(home),
     doneIds: new Set(snap.tasks.filter((t) => t.state === 'done').map((t) => t.id)),
