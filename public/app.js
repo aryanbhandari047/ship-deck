@@ -12,6 +12,7 @@
   const MAX_CRATES = 48;
   const LISTENING_MS = 2 * 60 * 1000; // first mate activity this recent = listening
   const MD = window.ShipDeckMarkdown;
+  const B = window.ShipDeckBoard;
 
   const $ = (id) => document.getElementById(id);
   const ui = {
@@ -114,13 +115,41 @@
     if (s < 86400) return Math.round(s / 3600) + ' h ago';
     return Math.round(s / 86400) + ' d ago';
   }
-  function stamp(ms) {
-    if (!ms) return '—';
+
+  // "2026-01-05 09:12" (local time, as written in status logs) -> ms, or null.
+  function localTime(s) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(s || ''));
+    return m ? new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)).getTime() : null;
+  }
+  // One timestamp format everywhere: "Today 12:15", "Yesterday 09:12", "5 Jan 10:40", "5 Jan 2025 10:40".
+  function whenText(ms) {
+    if (!ms) return '';
     const d = new Date(ms);
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const now = new Date();
+    const hm = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (d.toDateString() === now.toDateString()) return `Today ${hm}`;
+    if (d.toDateString() === new Date(now - 86400000).toDateString()) return `Yesterday ${hm}`;
+    const day = d.toLocaleDateString([], { day: 'numeric', month: 'short', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' });
+    return `${day} ${hm}`;
   }
   function stateVar(state) { return `var(--s-${state || 'unknown'})`; }
+  // Inline SVG from the sprite in index.html: line icons (#i-*) and status flags (#flag-*).
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  function icon(id, cls) {
+    const s = document.createElementNS(SVG_NS, 'svg');
+    s.setAttribute('class', cls || 'ico');
+    s.setAttribute('aria-hidden', 'true');
+    const u = document.createElementNS(SVG_NS, 'use');
+    u.setAttribute('href', '#' + id);
+    s.append(u);
+    return s;
+  }
+  function flagEl(flag, cls) { return icon('flag-' + flag, 'flag' + (cls ? ' ' + cls : '')); }
+  // A status pill: flag + word on the tone's tinted wash. st: { tone, flag, label }.
+  function pillEl(st, cls) { return h('span', { class: `pill tone-${st.tone}${cls ? ' ' + cls : ''}` }, flagEl(st.flag), st.label); }
+  function taskStatus(t) { return B.statusOf(t); }
+  // bucket (a state or "stale") -> the pill shown for it.
+  function bucketStatus(s) { return s === 'stale' ? { tone: 'quiet', flag: 'q0', label: 'Quiet' } : { ...B.statusOf({ state: s }), label: B.TONES[B.toneOf(s)].word }; }
   function prNumber(url) { const m = /\/pull\/(\d+)/.exec(url || ''); return m ? '#' + m[1] : 'PR'; }
   // Skips a DOM rebuild when its inputs are unchanged, so focus and hover survive polling.
   const sigs = new Map();
@@ -177,7 +206,7 @@
     el.style.setProperty('--d', `-${(hash(t.id) % 1100) / 1000}s`);
     el.innerHTML =
       '<div class="post">' +
-        svg('flag', '0 0 22 40', FLAG) +
+        svg('st-flag', '0 0 22 40', FLAG) +
         `<svg class="sailor" viewBox="0 0 40 48" aria-hidden="true">${SAILOR}</svg>` +
         svg('chest', '0 0 22 18', CHEST) +
         svg('bell', '0 0 16 16', BELL) +
@@ -206,7 +235,7 @@
     }
     el.querySelector('.id').textContent = t.title || t.id;
     el.querySelector('.rid').textContent = t.title && t.title !== t.id ? t.id : '';
-    el.querySelector('.pill').textContent = STATE_LABEL[t.state] || t.state;
+    el.querySelector('.pill').replaceWith(pillEl(taskStatus(t), 'sm'));
     el.querySelector('.age').textContent = ago(t.lastActivity);
     el.querySelector('.stale-tag').textContent = t.stale ? `quiet ${L.quietDays(t.lastActivity) || ''}d` : 'quiet';
     const alive = t.alive === true ? 'terminal open' : t.alive === false ? 'terminal closed' : '';
@@ -254,7 +283,7 @@
       const tallies = {};
       for (const t of tasks) tallies[bucket(t)] = (tallies[bucket(t)] || 0) + 1;
       area.tally.replaceChildren(...[...STATE_ORDER, 'stale'].filter((s) => tallies[s]).map((s) =>
-        h('span', { class: 'tally', title: STATE_LABEL[s] }, h('i', { style: `background:${stateVar(s)}` }), tallies[s])));
+        h('span', { class: 'tally', title: `${bucketStatus(s).label}: ${tallies[s]}` }, flagEl(bucketStatus(s).flag), tallies[s])));
       let visible = 0;
       tasks.forEach((t) => {
         seen.add(t.id);
@@ -368,7 +397,7 @@
 
   // ---------- orders: posting, confirm dialog, lifecycle ----------
   const IRREVERSIBLE = new Set(['merge', 'cleanup', 'cleanup-done']);
-  const ORDER_COLOR = { pending: 'needs-decision', acknowledged: 'working', done: 'done', declined: 'failed' };
+  const ORDER_TONE = { pending: 'needs', acknowledged: 'working', done: 'done', declined: 'failed' };
 
   async function post(url, body) {
     try {
@@ -449,7 +478,7 @@
 
   function timeOf(ts) { const t = ts ? Date.parse(ts) : NaN; return Number.isFinite(t) ? t : null; }
   function clock(ms) { return ms ? new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''; }
-  function chip(status) { return h('span', { class: 'chip', style: `--c:${stateVar(ORDER_COLOR[status] || 'unknown')}`, text: L.messageStatus(status) }); }
+  function chip(status) { return h('span', { class: `pill sm tone-${ORDER_TONE[status] || 'waiting'}`, text: L.messageStatus(status) }); }
   function payloadText(o) {
     if (o.kind === 'cleanup-done' && o.targets) return `${o.targets.length} worker${o.targets.length === 1 ? '' : 's'}: ${o.targets.join(', ')}`;
     if (o.kind === 'new-task') return `${o.taskKind || 'task'} in ${o.project}${o.harness ? ` · ${o.harness}${o.model ? ' ' + o.model : ''}${o.effort ? ' · effort ' + o.effort : ''}` : ''}`;
@@ -458,31 +487,34 @@
     if (o.option) return `option ${o.option}`;
     return '';
   }
-  // queued -> acknowledged -> done/declined, with each step's time and note.
+  // Sent -> Seen -> Done (or Declined): one row of receipts, each step with its time, then the note.
   function lifecycle(o) {
-    const steps = [h('li', { class: 'lc-step done', style: `--c:${stateVar('needs-decision')}` }, h('b', { text: 'sent' }), ' ', clock(timeOf(o.ts)))];
-    for (const a of o.history || []) {
-      steps.push(h('li', { class: 'lc-step done', style: `--c:${stateVar(ORDER_COLOR[a.status] || 'unknown')}` },
-        h('b', { text: L.messageStatus(a.status) }), ' ', clock(timeOf(a.ts)), a.note ? h('span', { class: 'lc-note', text: ` · ${a.note}` }) : null));
-    }
-    if (o.status === 'pending' || o.status === 'acknowledged') {
-      steps.push(h('li', { class: 'lc-step next', text: o.status === 'pending' ? 'waiting for the first mate' : 'in progress' }));
-    }
-    return h('ol', { class: 'lifecycle' }, ...steps);
+    const at = (st) => (o.history || []).find((a) => a.status === st);
+    const seen = at('acknowledged') || (o.status !== 'pending' ? {} : null);
+    const end = at(o.status === 'declined' ? 'declined' : 'done');
+    const step = (label, on, ts, cls) => h('li', { class: 'lc-step' + (on ? ' on' : '') + (cls ? ' ' + cls : ''), title: ts ? new Date(timeOf(ts)).toLocaleString() : null },
+      label, ts ? ' ' + clock(timeOf(ts)) : '');
+    const last = (o.history || []).filter((a) => a.note).pop();
+    return h('div', { class: 'receipt' },
+      h('ol', { class: 'lifecycle', 'aria-label': `Message ${L.messageStatus(o.status)}` },
+        step('Sent', true, o.ts),
+        step('Seen', !!seen, seen && seen.ts),
+        o.status === 'declined' ? step('Declined', true, end && end.ts, 'no') : step('Done', o.status === 'done', end && end.ts)),
+      last ? h('p', { class: 'lc-note', text: `“${last.note}”` }) : null);
   }
 
   function orderRow(o) {
     const when = timeOf(o.ts);
     const extra = payloadText(o);
     const inner = [
-      h('span', { class: 'dot' }),
-      h('span', { class: 'r-id' }, h('span', { class: 'o-kind', text: L.kindLabel(o.kind) }), o.target ? ' ' + titleOf(o.target) : ''),
+      icon('i-chat', 'ico muted'),
+      h('span', { class: 'r-id' }, h('span', { class: 'o-kind', text: L.kindLabel(o.kind) }), o.target ? ' · ' + titleOf(o.target) : ''),
       h('span', { class: 'r-age' }, chip(o.status), ' ', ago(when)),
       h('span', { class: 'r-note', text: o.text + (extra ? ` (${extra})` : '') }),
       h('span', { class: 'r-life' }, lifecycle(o)),
     ];
     const title = `${o.target ? o.target + '\n' : ''}${L.messageStatus(o.status)}${o.ackTs ? ' · ' + o.ackTs : ''}\nsent ${o.ts}`;
-    const attrs = { class: 'row' + (o.pending ? ' pending' : ''), style: `--c:${stateVar(ORDER_COLOR[o.status] || 'unknown')}`, title };
+    const attrs = { class: 'row' + (o.pending ? ' pending' : ''), title };
     return h('li', null, o.target && snap.tasks.some((t) => t.id === o.target)
       ? h('button', { ...attrs, type: 'button', onclick: () => openDrawer({ type: 'task', id: o.target }) }, ...inner)
       : h('div', attrs, ...inner));
@@ -491,21 +523,21 @@
   // ---------- command center ----------
   // A worker row: its title, then a one-sentence summary with the raw id beside it.
   function listRow(t, onclick) {
-    return h('li', null, h('button', { class: 'row', type: 'button', onclick, style: `--c:${stateVar(bucket(t))}` },
-      h('span', { class: 'dot' }), h('span', { class: 'r-id', text: t.title || t.id, title: t.title || t.id }), h('span', { class: 'r-age', text: ago(t.lastActivity) }),
+    return h('li', null, h('button', { class: 'row', type: 'button', onclick },
+      flagEl(taskStatus(t).flag), h('span', { class: 'r-id', text: t.title || t.id, title: t.title || t.id }), h('span', { class: 'r-age', text: ago(t.lastActivity) }),
       h('span', { class: 'r-note' }, L.summary(t), t.title && t.title !== t.id ? h('span', { class: 'r-rid', text: t.id }) : null),
       t.options && t.options.length ? h('span', { class: 'r-opts', text: `options ${t.options.map((o) => o.letter).join(' / ')}` }) : null));
   }
   // A queue item row: its title, with the raw id as the secondary label.
-  function itemRow(b, color, onclick) {
-    return h('button', { class: 'row', type: 'button', style: `--c:${stateVar(color)}`, onclick },
-      h('span', { class: 'dot' }), h('span', { class: 'r-id', text: b.title || b.id || '(untitled)', title: b.title || '' }),
+  function itemRow(b, flag, onclick) {
+    return h('button', { class: 'row', type: 'button', onclick },
+      flagEl(flag), h('span', { class: 'r-id', text: b.title || b.id || '(untitled)', title: b.title || '' }),
       h('span', { class: 'r-age', text: (b.tags && b.tags.since) || '' }), h('span', { class: 'r-note' }, b.id ? h('span', { class: 'r-rid', text: b.id, style: 'margin-left:0' }) : null));
   }
   function emptyRow(text) { return h('li', null, h('div', { class: 'empty', text })); }
   // A list row with an inline action button beside the clickable row.
   function actionRow(row, label, onclick) {
-    return h('li', { class: 'with-action' }, row, h('button', { class: 'act-btn mini', type: 'button', text: label, onclick }));
+    return h('li', { class: 'with-action' }, row, h('button', { class: 'btn sm', type: 'button', text: label, onclick }));
   }
   function itemKey(b) { return b.id || b.title; }
 
@@ -528,11 +560,11 @@
     if (!unchanged('counts', snap.counts, stateFilter)) ui.counts.replaceChildren(...states.map((s) => {
       const n = snap.counts[s] || 0;
       return h('button', {
-        class: 'count' + (n ? '' : ' zero') + (stateFilter === s ? ' active' : ''), type: 'button',
-        style: `--c:${stateVar(s)}`, 'aria-pressed': stateFilter === s ? 'true' : 'false',
-        title: `Show only ${STATE_LABEL[s] || s}`,
+        class: `count tone-${bucketStatus(s).tone}` + (n ? '' : ' zero'), type: 'button',
+        'aria-pressed': stateFilter === s ? 'true' : 'false',
+        title: `Show only ${bucketStatus(s).label.toLowerCase()}`,
         onclick: () => { stateFilter = stateFilter === s ? null : s; renderAll(); },
-      }, h('span', { class: 'n', text: n }), h('span', { class: 'l', text: STATE_LABEL[s] }));
+      }, h('span', { class: 'n', text: n }), h('span', { class: 'l' }, flagEl(bucketStatus(s).flag), s === 'unknown' ? 'Starting' : s === 'paused' ? 'Paused' : bucketStatus(s).label));
     }));
 
     const needs = needsCaptain();
@@ -547,7 +579,7 @@
       ...needs.map((t) => listRow(t, () => openDrawer({ type: 'task', id: t.id }))),
       ...calls.map((b) => {
         const open = (focus) => openDrawer({ type: 'backlog', id: itemKey(b), section: b.section, index: b.index, focus });
-        const row = itemRow(b, 'needs-decision', () => open(false));
+        const row = itemRow(b, 'k', () => open(false));
         return b.id ? actionRow(row, 'Answer', () => open(true)) : h('li', null, row);
       }),
     ] : [emptyRow('Nothing needs you right now.')]));
@@ -555,7 +587,7 @@
     const queued = (snap.backlog.queued || []).map((b, index) => ({ b, index })).filter((x) => !x.b.captainCall && !x.b.checked);
     ui.queuedCount.textContent = queued.length;
     if (!unchanged('queued', queued.map((x) => [x.b.id, x.b.title, x.index]))) ui.queuedList.replaceChildren(...(queued.length ? queued.map(({ b, index }) => {
-      const row = itemRow(b, 'unknown', () => openDrawer({ type: 'backlog', id: itemKey(b), section: 'queued', index }));
+      const row = itemRow(b, 'x', () => openDrawer({ type: 'backlog', id: itemKey(b), section: 'queued', index }));
       return b.id ? actionRow(row, 'Start', () => startBacklog(b)) : h('li', null, row);
     }) : [emptyRow('Nothing in the queue.')]));
 
@@ -569,8 +601,8 @@
 
     const prs = snap.tasks.filter((t) => t.pr).sort(sortTasks);
     if (!unchanged('prs', sigOf(prs).map((x, i) => [...x, prs[i].pr]))) ui.prList.replaceChildren(...(prs.length ? prs.map((t) => h('li', null,
-      h('a', { class: 'row', href: t.pr, target: '_blank', rel: 'noopener noreferrer', style: `--c:${stateVar(bucket(t))}` },
-        h('span', { class: 'dot' }), h('span', { class: 'r-id', text: t.title || t.id, title: t.id }), h('span', { class: 'r-age', text: prNumber(t.pr) })))) : [emptyRow('No pull requests yet.')]));
+      h('a', { class: 'row', href: t.pr, target: '_blank', rel: 'noopener noreferrer' },
+        flagEl(taskStatus(t).flag), h('span', { class: 'r-id', text: t.title || t.id, title: t.id }), h('span', { class: 'r-age', text: prNumber(t.pr) })))) : [emptyRow('No pull requests yet.')]));
 
     const ord = snap.orders || { pending: 0, list: [] };
     ui.ordersCount.textContent = ord.pending;
@@ -693,7 +725,7 @@
       wrap.append(h('p', { class: 'empty', text: (sess && sess.note) || 'No session recorded.' }));
       return wrap;
     }
-    const btn = h('button', { class: 'act-btn', type: 'button', text: 'Copy', title: 'Copy the resume command' });
+    const btn = h('button', { class: 'btn', type: 'button', text: 'Copy', title: 'Copy the resume command' });
     btn.addEventListener('click', () => copyText(sess.resume, btn));
     wrap.append(h('div', { class: 'resume-row' }, h('code', { class: 'resume-cmd', text: sess.resume, tabindex: '0' }), btn),
       h('p', { class: 'hint resume-meta', text: `${sess.harness || 'claude'} session${sess.firstSeen ? ' · found ' + agoLong(sess.firstSeen) : ''}${sess.lastSeen ? ' · seen ' + agoLong(sess.lastSeen) : ''}` }));
@@ -714,9 +746,7 @@
       ui.drawerBody.replaceChildren(h('p', { text: 'This worker has been cleaned up. Its session stays listed under Sessions.' }));
       return;
     }
-    ui.drawerKicker.replaceChildren(...[h('span', { class: 'pill', style: `--c:${stateVar(t.state)}`, text: STATE_LABEL[t.state] }),
-      t.stale ? h('span', { class: 'pill', style: `--c:${stateVar('stale')}`, text: L.quietText(t.lastActivity).toLowerCase() }) : null, t.kind,
-      h('span', { class: 'mono', text: t.id })].filter(Boolean));
+    ui.drawerKicker.replaceChildren(pillEl(taskStatus(t)), h('span', { text: t.lastActivity ? `Last update ${agoLong(t.lastActivity)}` : 'No update yet' }));
     ui.drawerTitle.textContent = t.title || t.id;
     if (!td || td.id !== t.id || !td.root.isConnected) buildTaskDrawer(t);
     td.task = t;
@@ -734,13 +764,12 @@
     const kids = [];
     if (t.brief) kids.push(h('p', { class: 'brief', text: t.brief }));
     const links = h('div', { class: 'links' });
-    if (t.pr) links.append(h('a', { class: 'link-btn', href: t.pr, target: '_blank', rel: 'noopener noreferrer', text: `Pull request ${prNumber(t.pr)} ↗` }));
+    if (t.pr) links.append(h('a', { class: 'chip', href: t.pr, target: '_blank', rel: 'noopener noreferrer' }, icon('i-pr'), `Pull request ${prNumber(t.pr)}`, icon('i-ext')));
     for (const name of t.files || []) {
-      links.append(h('button', { class: 'link-btn', type: 'button', title: `data/${t.id}/${name} (read-only)`, onclick: () => openDataFile(t.id, name) },
-        h('span', { class: 'file-ico', 'aria-hidden': 'true', text: '¶' }), name));
+      links.append(h('button', { class: 'chip', type: 'button', title: `${name} (read-only)`, onclick: () => openDataFile(t.id, name) }, icon('i-file'), name));
     }
     if (t.worktree) {
-      const b = h('button', { class: 'link-btn copy', type: 'button', text: 'Copy workspace path' });
+      const b = h('button', { class: 'chip', type: 'button', text: 'Copy folder path' });
       b.addEventListener('click', () => copyText(t.worktree, b));
       links.append(b);
     }
@@ -755,17 +784,17 @@
     fact(dl, 'Terminal', t.window ? `${t.window}${t.alive === true ? '  (open)' : t.alive === false ? '  (closed)' : ''}` : null, true);
     fact(dl, 'Workspace', t.worktree, true);
     fact(dl, 'PR head', t.prHead ? t.prHead.slice(0, 12) : null, true);
-    fact(dl, 'Last activity', t.lastActivity ? `${agoLong(t.lastActivity)} · ${stamp(t.lastActivity)}` : null);
+    fact(dl, 'Last activity', t.lastActivity ? `${agoLong(t.lastActivity)} · ${whenText(t.lastActivity)}` : null);
     if (t.stale) fact(dl, 'Quiet', staleText(t));
-    fact(dl, 'Turn ended', t.turnEnded ? `${agoLong(t.turnEnded)} · ${stamp(t.turnEnded)}` : 'not yet');
+    fact(dl, 'Turn ended', t.turnEnded ? `${agoLong(t.turnEnded)} · ${whenText(t.turnEnded)}` : 'not yet');
     kids.push(dl);
     const entry = (e) => {
-      const when = e.ts || (e.approxTs ? `≈ ${stamp(e.approxTs)}` : 'no timestamp');
+      const ms = e.ts ? localTime(e.ts) : e.approxTs;
       const note = h('div', { class: 't-note', text: e.note, title: 'Click to expand' });
       note.addEventListener('click', () => note.classList.toggle('expanded'));
-      return h('li', { style: `--c:${stateVar(e.state === 'resolved' ? 'working' : e.state)}` },
-        h('div', { class: 't-head' }, h('strong', { text: e.state }), e.key ? h('span', { text: `[${e.key}]` }) : null, h('span', { text: when })),
-        note);
+      const st = B.statusOf({ state: e.state });
+      return h('li', null, flagEl(st.flag, 'lg'),
+        h('div', null, note, h('div', { class: 't-when', text: `${st.label} · ${ms ? whenText(ms) : 'time not recorded'}` })));
     };
     // Latest update: the worker's full last line, verbatim; the earlier ones below it.
     const recent = t.lastStatus.slice().reverse();
@@ -784,7 +813,7 @@
       class: 'option-btn' + (o.recommended ? ' rec' : ''), type: 'button', title: `Answer with option ${o.letter}`,
       onclick: async () => { if (await send(o, text.value.trim())) clearDraft(text); },
     }, h('span', { class: 'opt-letter', text: o.letter }), h('span', { class: 'opt-text', text: o.text }), o.recommended ? h('span', { class: 'opt-rec', text: 'recommended' }) : null));
-    const sendBtn = h('button', { class: 'act-btn primary', type: 'button', text: 'Send answer', onclick: async () => {
+    const sendBtn = h('button', { class: 'btn primary', type: 'button', text: 'Send answer', onclick: async () => {
       if (!text.value.trim()) { text.focus(); return; }
       if (await send(null, text.value.trim())) clearDraft(text);
     } });
@@ -831,7 +860,7 @@
       const choice = L.configChoices(list, c[field], c.pending[field]);
       const sel = h('select', { 'aria-label': `${field} for ${t.id}` }, ...choice.options.map(([v, label]) => h('option', { value: v, text: label })));
       sel.value = choice.selected;
-      const btn = h('button', { class: 'act-btn', type: 'button', disabled: true, text: live ? 'Apply live' : 'Send change', onclick: () => sel.value && applyConfig(t, field, sel.value, live) });
+      const btn = h('button', { class: 'btn', type: 'button', disabled: true, text: live ? 'Apply live' : 'Send change', onclick: () => sel.value && applyConfig(t, field, sel.value, live) });
       sel.addEventListener('change', () => { btn.disabled = !sel.value; });
       rows.push(h('div', { class: 'cfg-row' }, h('span', { class: 'cfg-label', text: field }), h('span', { class: 'cfg-val mono', text: show(field) }), h('span', { class: 'cfg-ctl' }, sel, btn)));
     }
@@ -867,7 +896,7 @@
     d.fileText = h('pre', { class: 'file-text', tabindex: '0' });
     d.file = h('section', { class: 'file-view', hidden: true },
       h('div', { class: 'file-head' },
-        h('button', { class: 'act-btn', type: 'button', text: '← Back', onclick: () => closeDataFile() }),
+        h('button', { class: 'btn sm', type: 'button', onclick: () => closeDataFile() }, icon('i-back'), 'Back'),
         d.fileTitle, d.fileMeta),
       d.fileText);
 
@@ -878,20 +907,20 @@
 
     // Messages to the first mate about this worker.
     const name = () => (td && td.task && td.task.title) || id;
-    d.mergeBtn = h('button', { class: 'act-btn', type: 'button', text: 'Merge its pull request', onclick: () => queueOrder({ kind: 'merge', target: id }, { title: `Ask the first mate to merge the pull request of “${name()}”?`, body: (td && td.task && td.task.pr) || null }) });
+    d.mergeBtn = h('button', { class: 'btn', type: 'button', text: 'Merge its pull request', onclick: () => queueOrder({ kind: 'merge', target: id }, { title: `Ask the first mate to merge the pull request of “${name()}”?`, body: (td && td.task && td.task.pr) || null }) });
     d.ordersList = h('ul', { class: 'list orders compact' });
     const ordersSec = h('section', { class: 'drawer-sec' },
       h('h3', { text: 'Ask the first mate' }),
       h('p', { class: 'hint', text: 'Sent to the first mate to act on; Ship Deck does not do these itself.' }),
       h('div', { class: 'btn-row' },
-        h('button', { class: 'act-btn', type: 'button', text: 'Ask for status', onclick: () => queueOrder({ kind: 'status', target: id }) }),
+        h('button', { class: 'btn', type: 'button', text: 'Ask for status', onclick: () => queueOrder({ kind: 'status', target: id }) }),
         d.mergeBtn,
-        h('button', { class: 'act-btn', type: 'button', text: 'Clean up this worker', onclick: () => queueOrder({ kind: 'cleanup', target: id }, { title: `Ask the first mate to clean up “${name()}”?`, body: 'Closes its terminal and workspace once its work is safe.' }) })),
+        h('button', { class: 'btn', type: 'button', text: 'Clean up this worker', onclick: () => queueOrder({ kind: 'cleanup', target: id }, { title: `Ask the first mate to clean up “${name()}”?`, body: 'Closes its terminal and workspace once its work is safe.' }) })),
       d.ordersList);
 
     // Message the worker directly (fm-send), with a confirmation step.
     const msg = persist(h('input', { type: 'text', maxlength: '2000', placeholder: 'Message to this worker (one line)…', 'aria-label': `Message to ${id}`, autocomplete: 'off' }), 'msg.' + id);
-    const sendBtn = h('button', { class: 'act-btn primary', type: 'submit', text: 'Send' });
+    const sendBtn = h('button', { class: 'btn primary', type: 'submit', text: 'Send' });
     const form = h('form', { class: 'msg-form' }, msg, sendBtn);
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -912,7 +941,7 @@
     // Live terminal peek.
     d.peekText = h('pre', { class: 'peek', tabindex: '0', 'aria-label': `Terminal of ${id}` });
     d.peekState = h('span', { class: 'peek-state' });
-    d.pauseBtn = h('button', { class: 'act-btn', type: 'button', 'aria-pressed': 'false', text: 'Pause refresh', onclick: () => {
+    d.pauseBtn = h('button', { class: 'btn', type: 'button', 'aria-pressed': 'false', text: 'Pause refresh', onclick: () => {
       d.paused = !d.paused;
       d.pauseBtn.textContent = d.paused ? 'Resume refresh' : 'Pause refresh';
       d.pauseBtn.setAttribute('aria-pressed', d.paused ? 'true' : 'false');
@@ -921,7 +950,7 @@
     } });
     // Wrap long lines / Follow the newest output; scrolling up stops following.
     const toggle = (key, label, apply) => {
-      const btn = h('button', { class: 'act-btn', type: 'button', text: label, onclick: () => { d[key] = !d[key]; store.set('peek.' + key, d[key] ? '1' : '0'); apply(); } });
+      const btn = h('button', { class: 'btn', type: 'button', text: label, onclick: () => { d[key] = !d[key]; store.set('peek.' + key, d[key] ? '1' : '0'); apply(); } });
       d[key] = store.get('peek.' + key) !== '0';
       return btn;
     };
@@ -1069,7 +1098,7 @@
       kids.push(h('section', { class: 'drawer-sec' },
         h('h3', { text: 'Start this' }),
         h('p', { class: 'hint', text: 'Asks the first mate to start a worker on this queue item.' }),
-        h('div', { class: 'answer' }, note, h('div', { class: 'btn-row end' }, h('button', { class: 'act-btn primary', type: 'button', text: 'Start this', onclick: async () => {
+        h('div', { class: 'answer' }, note, h('div', { class: 'btn-row end' }, h('button', { class: 'btn primary', type: 'button', text: 'Start this', onclick: async () => {
           if (await startBacklog(b, note.value.trim() ? `Start ${b.id}: ${b.title}\n\n${note.value.trim()}` : null)) clearDraft(note);
         } })))));
     } else if (!b.id) {
@@ -1109,7 +1138,7 @@
     fact(dl, 'Monitoring', snap.watcher.lastBeat ? `${snap.watcher.healthy ? 'on' : 'late'} · last check ${agoLong(snap.watcher.lastBeat)}` : 'has not checked in');
     fact(dl, 'Unread messages', String((snap.orders && snap.orders.pending) || 0));
     ui.drawerBody.replaceChildren(dl,
-      h('div', { class: 'btn-row' }, h('button', { class: 'act-btn primary', type: 'button', text: 'Open the Bridge chat', onclick: () => { closeDrawer(); showTab('bridge'); ui.chatText.focus(); } })),
+      h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', type: 'button', text: 'Open the Bridge chat', onclick: () => { closeDrawer(); showTab('bridge'); ui.chatText.focus(); } })),
       h('section', { class: 'drawer-sec' }, h('h3', { text: 'Resume in terminal' }),
         h('p', { class: 'hint', text: 'The newest Claude Code session started in the fleet home.' }), resumeBlock(sess)));
   }
@@ -1224,7 +1253,9 @@
   { const saved = Number(store.get('panelWidth')); if (saved >= PANEL_MIN) setPanelWidth(saved, false); else syncResizeAria(); }
 
   // ---------- first mate activity (read-only, from its own transcript) ----------
-  const ACT_ICON = { shell: '⌨️', browser: '🧭', read: '📖', edit: '✏️', write: '📝', agent: '👥', publish: '📤', tool: '🔧', text: '💬', session: '⚓' };
+  // Activity kind -> sprite icon (line icons, no emoji).
+  const ACT_ICON = { shell: 'i-term', browser: 'i-globe', read: 'i-eye', edit: 'i-pencil', write: 'i-file', agent: 'i-people', publish: 'i-send', tool: 'i-bolt', text: 'i-chat', session: 'i-anchor' };
+  const actIcon = (e) => ACT_ICON[e.kind === 'text' ? 'text' : e.icon] || ACT_ICON.tool;
   const ACT_MAX = 200;
   const act = { epoch: null, rev: null, events: new Map(), working: false, running: false, lastAt: null, sessionId: null, loaded: false };
   const expanded = new Set(); // seqs of Bash events showing their command
@@ -1255,23 +1286,22 @@
   }
   function evStatus(e) {
     if (e.kind !== 'tool') return null;
-    const text = { running: 'running…', done: '✓ ' + dur(e.duration), failed: '✗ failed ' + dur(e.duration), unknown: '—' }[e.status] || '';
-    return h('span', { class: 'ev-status st-' + e.status, title: e.status === 'unknown' ? 'No result recorded (session changed)' : e.status, text: text.trim() });
+    const text = { running: 'Running', done: dur(e.duration), failed: `Failed${e.duration !== null && e.duration !== undefined ? ', ' + dur(e.duration) : ''}`, unknown: 'No result' }[e.status] || '';
+    return h('span', { class: 'ev-status st-' + e.status, title: e.status === 'unknown' ? 'No result recorded (session changed)' : null, text });
   }
   function evRow(e) {
-    if (e.kind === 'session') return h('li', { class: 'ev ev-session' }, h('span', { text: `${ACT_ICON.session} ${e.label}` }));
+    if (e.kind === 'session') return h('li', { class: 'ev-session' }, icon(ACT_ICON.session), h('span', { text: e.label }));
     let main;
     if (e.detail) {
       const d = h('details', { class: 'ev-cmd', ontoggle: () => (d.open ? expanded.add(e.seq) : expanded.delete(e.seq)) },
-        h('summary', { title: 'Show the command', text: e.label }), h('pre', { class: 'mono', text: e.detail }));
+        h('summary', { title: 'Show the command' }, e.label, ' ', icon('i-chev')), h('pre', { class: 'mono', text: e.detail }));
       d.open = expanded.has(e.seq);
       main = d;
     } else main = h('span', { class: 'ev-label', text: e.kind === 'text' ? `“${e.label}”` : e.label });
     return h('li', { class: `ev ev-${e.kind}` + (e.status ? ' st-' + e.status : '') },
-      h('time', { class: 'ev-time mono', text: clock(e.ts) }),
-      h('span', { class: 'ev-icon', 'aria-hidden': 'true', text: ACT_ICON[e.kind === 'text' ? 'text' : e.icon] || ACT_ICON.tool }),
+      icon(actIcon(e), 'ev-icon'),
       h('div', { class: 'ev-main' }, main),
-      evStatus(e));
+      h('span', { class: 'ev-side' }, evStatus(e), h('time', { class: 'ev-time', text: clock(e.ts) })));
   }
   function renderActivity() {
     const has = act.loaded && !!act.sessionId;
@@ -1290,7 +1320,7 @@
     const latest = list.find((e) => e.kind === 'tool' || e.kind === 'text');
     ui.ticker.hidden = !latest;
     if (latest) {
-      ui.tickerIcon.textContent = ACT_ICON[latest.kind === 'text' ? 'text' : latest.icon] || ACT_ICON.tool;
+      ui.tickerIcon.replaceChildren(icon(actIcon(latest)));
       ui.tickerText.textContent = latest.kind === 'text' ? `“${latest.label}”` : latest.label;
       ui.tickerAge.textContent = latest.status === 'running' ? 'running…' : latest.status === 'failed' ? 'failed · ' + ago(latest.ts) : ago(latest.ts);
       ui.ticker.classList.toggle('on', act.working);
@@ -1348,11 +1378,11 @@
       body.innerHTML = MD.render(x.text, { breaks: true }); // escaped by the renderer
       const ref = x.inReplyTo && byId.get(x.inReplyTo);
       const quote = ref && !(prev && prev.id === ref.id)
-        ? h('button', { class: 'quote', type: 'button', title: 'Show the message this answers', onclick: () => flashMessage(ref.id) }, '↪ ', excerpt(ref.text, 70))
+        ? h('button', { class: 'quote', type: 'button', title: 'Show the message this answers', onclick: () => flashMessage(ref.id) }, 'Re: ', excerpt(ref.text, 70))
         : null;
       const unread = !seenId || x.id > seenId;
       return h('li', { class: 'msg mate' + (unread && seenId !== null ? ' unread' : ''), 'data-id': x.id },
-        h('span', { class: 'fm-avatar small', 'aria-hidden': 'true' }, sailorSvg()),
+        h('span', { class: 'fm-avatar small', 'aria-hidden': 'true' }, icon('i-helm')),
         h('div', { class: 'msg-col' }, h('div', { class: 'msg-meta' }, h('strong', { text: 'First mate' }), stampEl), quote, x.text ? body : null, attachmentsBlock(x.attachments)));
     }
     const isChat = x.kind === 'chat';
@@ -1364,13 +1394,7 @@
         h('div', { class: 'bubble' + (x.text || head ? '' : ' bare') }, head, x.text ? h('div', { class: 'bubble-text', text: x.text }) : null, attachmentsBlock(x.attachments)),
         x.history && x.history.length ? lifecycle(x) : null));
   }
-  function sailorSvg() {
-    const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    s.setAttribute('viewBox', '0 0 40 48');
-    s.setAttribute('class', 'sailor');
-    s.innerHTML = SAILOR;
-    return s;
-  }
+
   function flashMessage(id) {
     const el = ui.thread.querySelector(`[data-id="${CSS.escape(id)}"]`);
     if (!el) return;
@@ -1612,7 +1636,7 @@
         a.el = h('li', { title: a.name },
           h('span', { class: 'att-thumb' + (a.kind === 'video' ? ' is-video' : '') }, thumb),
           h('span', { class: 'att-info' }, h('span', { class: 'att-name', text: a.name }), a.noteEl),
-          h('button', { class: 'att-x', type: 'button', 'aria-label': `Remove ${a.name}`, title: 'Remove', text: '×', onclick: () => removeAttachment(a) }));
+          h('button', { class: 'att-x', type: 'button', 'aria-label': `Remove ${a.name}`, title: 'Remove', onclick: () => removeAttachment(a) }, icon('i-x')));
       }
       a.el.className = `att-chip ${a.state}`;
       a.noteEl.textContent = a.note;
@@ -1939,7 +1963,7 @@
         h('h2', { class: 'mono', text: e.label }),
         isSkill && e.description ? h('p', { class: 'doc-desc', text: e.description }) : null,
         h('p', { class: 'doc-meta', text: e.exists
-          ? `${e.path} · modified ${agoLong(e.mtime)} (${stamp(e.mtime)}) · ${(e.size / 1024).toFixed(1)} KB${body.truncated ? ' · truncated' : ''}`
+          ? `${e.path} · modified ${agoLong(e.mtime)} (${whenText(e.mtime)}) · ${(e.size / 1024).toFixed(1)} KB${body.truncated ? ' · truncated' : ''}`
           : e.path }));
       if (body.text === null) {
         ui.libraryDoc.replaceChildren(head, h('div', { class: 'doc-missing' }, h('strong', { text: 'Missing' }), h('span', { text: 'This file does not exist (yet). Nothing to show.' })));
@@ -1978,8 +2002,7 @@
   ui.libraryScrim.addEventListener('click', closeLibrary);
   ui.libraryFilter.addEventListener('input', renderLibraryList);
 
-  // Bridge avatar, notifications button, remembered tab, then the first poll.
-  document.querySelectorAll('.fm-avatar .sailor').forEach((s) => { s.innerHTML = SAILOR; });
+  // Notifications button, remembered tab, then the first poll.
   renderNotifyBtn();
   showTab(store.get('tab', 'bridge'));
   poll();

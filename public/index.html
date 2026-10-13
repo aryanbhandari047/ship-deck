@@ -9,6 +9,61 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- Status flags (International Code of Signals) and line icons, used as <svg><use href="#..."/></svg>. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <clipPath id="fclip"><rect width="30" height="20" rx="1.5"/></clipPath>
+      <!-- K "I wish to communicate with you" = Needs you -->
+      <symbol id="flag-k" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="15" height="20" style="fill:var(--signal-yellow)"/><rect x="15" width="15" height="20" style="fill:var(--signal-blue)"/></g></symbol>
+      <!-- V "I require assistance" = Blocked -->
+      <symbol id="flag-v" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="30" height="20" style="fill:var(--flag-white)"/><path d="M0 0L30 20M30 0L0 20" style="stroke:var(--signal-red)" stroke-width="5"/></g><rect x=".5" y=".5" width="29" height="19" rx="1.5" fill="none" style="stroke:var(--flag-edge)"/></symbol>
+      <!-- P, the Blue Peter: under way = Working -->
+      <symbol id="flag-p" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="30" height="20" style="fill:var(--signal-blue)"/><rect x="10" y="6.5" width="10" height="7" style="fill:var(--flag-white)"/></g></symbol>
+      <!-- X "Stop and watch for my signals" = Waiting -->
+      <symbol id="flag-x" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="30" height="20" style="fill:var(--flag-white)"/><rect x="12" width="6" height="20" style="fill:var(--signal-blue)"/><rect y="7" width="30" height="6" style="fill:var(--signal-blue)"/></g><rect x=".5" y=".5" width="29" height="19" rx="1.5" fill="none" style="stroke:var(--flag-edge)"/></symbol>
+      <!-- C "Affirmative" = Done -->
+      <symbol id="flag-c" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="30" height="20" style="fill:var(--signal-blue)"/><rect y="4" width="30" height="12" style="fill:var(--flag-white)"/><rect y="8" width="30" height="4" style="fill:var(--signal-red)"/></g></symbol>
+      <!-- O "Man overboard" = Failed -->
+      <symbol id="flag-o" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="30" height="20" style="fill:var(--signal-yellow)"/><path d="M0 0H30V20Z" style="fill:var(--signal-red)"/></g></symbol>
+      <!-- Struck flag = Quiet (no activity for days) -->
+      <symbol id="flag-q0" viewBox="0 0 30 20"><rect x="1" y="1" width="28" height="18" rx="1.5" fill="none" style="stroke:var(--quiet-edge)" stroke-width="2" stroke-dasharray="4 3"/></symbol>
+
+      <symbol id="i-search" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M13 13l4.5 4.5"/></symbol>
+      <symbol id="i-board" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="2.5" y="3.5" width="4" height="13" rx="1"/><rect x="8" y="3.5" width="4" height="9" rx="1"/><rect x="13.5" y="3.5" width="4" height="11" rx="1"/></symbol>
+      <symbol id="i-ship" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><path d="M10 2.5v7M10 3l5 5h-5"/><path d="M3 11.5h14l-2.5 4.5h-9z"/></symbol>
+      <symbol id="i-book" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3 4.5c2.5-1 5-1 7 .5v11c-2-1.5-4.5-1.5-7-.5zM17 4.5c-2.5-1-5-1-7 .5v11c2-1.5 4.5-1.5 7-.5z"/></symbol>
+      <symbol id="i-help" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="7.5"/><path d="M7.8 7.8a2.3 2.3 0 1 1 3.2 2.1c-.6.3-1 .8-1 1.5v.4"/><circle cx="10" cy="14.3" r=".4" fill="currentColor"/></symbol>
+      <symbol id="i-x" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 5l10 10M15 5L5 15"/></symbol>
+      <symbol id="i-term" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M6 8l2.5 2L6 12M10.5 12.5h3.5"/></symbol>
+      <symbol id="i-clip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></symbol>
+      <symbol id="i-send" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10l14-6.5-5 14-2.5-5.5z"/><path d="M9.5 12L17 3.5"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M13 4.5V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h.5"/></symbol>
+      <symbol id="i-wrap" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h14M3 10h11a2.5 2.5 0 0 1 0 5h-3M12.5 13l-1.5 2 1.5 2M3 15h4"/></symbol>
+      <symbol id="i-follow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3v10M5.5 8.5L10 13l4.5-4.5M4 17h12"/></symbol>
+      <symbol id="i-pause" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7.5 5v10M12.5 5v10"/></symbol>
+      <symbol id="i-pr" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="5.5" cy="4.5" r="2"/><circle cx="5.5" cy="15.5" r="2"/><circle cx="14.5" cy="15.5" r="2"/><path d="M5.5 6.5v7M14.5 13.5V8a2.5 2.5 0 0 0-2.5-2.5H9M10.5 3.8L9 5.5l1.5 1.7"/></symbol>
+      <symbol id="i-ext" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4h5v5M16 4l-7 7M14 12v3.5a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5v-9a.5.5 0 0 1 .5-.5H8"/></symbol>
+      <symbol id="i-helm" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="4.5"/><circle cx="10" cy="10" r="1.2" fill="currentColor"/><path d="M10 1.5v4M10 14.5v4M1.5 10h4M14.5 10h4M4 4l2.8 2.8M13.2 13.2L16 16M16 4l-2.8 2.8M6.8 13.2L4 16"/></symbol>
+      <symbol id="i-check" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 10.5l3.5 3.5 7.5-8"/></symbol>
+      <symbol id="i-dash" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5.5 10h9"/></symbol>
+      <symbol id="i-eye" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1.8 10S5 4.5 10 4.5 18.2 10 18.2 10 15 15.5 10 15.5 1.8 10 1.8 10z"/><circle cx="10" cy="10" r="2.5"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="4" y="9" width="12" height="8.5" rx="1.5"/><path d="M6.5 9V6.5a3.5 3.5 0 0 1 7 0V9"/></symbol>
+      <symbol id="i-file" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M5 2.5h6.5L15.5 6.5v11h-10.5zM11 2.5V7h4.5"/></symbol>
+      <symbol id="i-pencil" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3.5 16.5l1-4 9-9 3 3-9 9zM12 5l3 3"/></symbol>
+      <symbol id="i-people" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7.5" cy="7" r="2.8"/><path d="M2.5 16c.6-2.6 2.6-4 5-4s4.4 1.4 5 4"/><path d="M13 4.5a2.6 2.6 0 0 1 0 5M15.5 12.4c1 .6 1.7 1.8 2 3.6"/></symbol>
+      <symbol id="i-globe" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="10" cy="10" r="7.5"/><path d="M2.5 10h15M10 2.5c2.2 2.4 2.2 12.6 0 15M10 2.5c-2.2 2.4-2.2 12.6 0 15"/></symbol>
+      <symbol id="i-bolt" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M11 2L4.5 11H10l-1 7 6.5-9H10z"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M10 4v12M4 10h12"/></symbol>
+      <symbol id="i-chev" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 5l5 5-5 5"/></symbol>
+      <symbol id="i-back" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 5l-5 5 5 5"/></symbol>
+      <symbol id="i-down" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7.5l5 5 5-5"/></symbol>
+      <symbol id="i-chat" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3.5 4.5h13v9h-7l-4 3v-3h-2z"/></symbol>
+      <symbol id="i-anchor" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="4.5" r="2"/><path d="M10 6.5v11M6.5 9.5h7M3.5 12a6.5 6.5 0 0 0 13 0"/></symbol>
+      <symbol id="i-bell" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M5 13.5V9a5 5 0 0 1 10 0v4.5l1.5 2h-13zM8.2 17.5a2 2 0 0 0 3.6 0"/></symbol>
+      <symbol id="i-crew" viewBox="0 0 22 26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="6" r="3.5"/><path d="M4 24v-6a7 7 0 0 1 14 0v6"/><path d="M8 14l3 3 3-3"/></symbol>
+      <symbol id="i-rose" viewBox="0 0 100 100" fill="none" stroke="currentColor"><circle cx="50" cy="50" r="40" stroke-width="1"/><circle cx="50" cy="50" r="31" stroke-width=".6" stroke-dasharray="1 3"/><path d="M50 4L56 44L96 50L56 56L50 96L44 56L4 50L44 44Z" stroke-width="1"/><path d="M50 4L56 44L50 50Z" fill="currentColor" stroke="none"/></symbol>
+    </defs>
+  </svg>
   <!-- Shared SVG defs referenced by every sailor. -->
   <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
     <defs>
@@ -18,11 +73,7 @@
 
   <header class="topbar">
     <div class="brand">
-      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-        <circle cx="16" cy="16" r="11" fill="none" stroke="currentColor" stroke-width="2"/>
-        <circle cx="16" cy="16" r="3" fill="currentColor"/>
-        <path d="M16 2v8M16 22v8M2 16h8M22 16h8M6 6l5.5 5.5M20.5 20.5L26 26M26 6l-5.5 5.5M11.5 20.5L6 26" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-      </svg>
+      <span class="brand-mark" aria-hidden="true"><svg class="flag"><use href="#flag-k"/></svg><svg class="flag"><use href="#flag-p"/></svg><svg class="flag"><use href="#flag-c"/></svg></span>
       <div>
         <h1>Ship Deck</h1>
         <p class="home" id="home-path" title="Fleet home (read-only)">…</p>
@@ -33,7 +84,7 @@
       <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M13 13l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       <input id="search" type="search" placeholder="Filter by task, project, state…  ( / )" autocomplete="off" spellcheck="false">
     </label>
-    <button class="head-btn" id="library-btn" type="button" title="The first mate's permanent context files (read-only)">
+    <button class="btn ghost" id="library-btn" type="button" title="The first mate's permanent context files (read-only)">
       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3.5h3.5v13H3zM7.5 3.5H11v13H7.5zM12.2 4.3l3.3-.9 3 12.4-3.3.9z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
       Ship's Library
     </button>
@@ -58,7 +109,7 @@ cd /path/to/firstmate &amp;&amp; npx ship-deck   # run from inside the home</pre
     <span class="banner-dot"></span>
     <span id="reconnect-text">Reconnecting to the Ship Deck server…</span>
     <span class="banner-sub">Drafts are kept. Run <code>npx ship-deck</code> (or <code>sh bin/start.sh</code>) if it stopped.</span>
-    <button class="act-btn" id="reconnect-now" type="button">Retry now</button>
+    <button class="btn" id="reconnect-now" type="button">Retry now</button>
   </div>
 
   <main class="layout">
@@ -135,13 +186,13 @@ cd /path/to/firstmate &amp;&amp; npx ship-deck   # run from inside the home</pre
       <section class="pane bridge-pane" id="pane-bridge" role="tabpanel" aria-labelledby="tab-bridge">
         <div class="bridge-head">
           <div class="bridge-who">
-            <span class="fm-avatar" aria-hidden="true"><svg viewBox="0 0 40 48" class="sailor"></svg></span>
+            <span class="fm-avatar" aria-hidden="true"><svg class="ico"><use href="#i-helm"/></svg></span>
             <div>
               <h2>First mate</h2>
               <p class="bridge-sub" id="bridge-sub">Your messages go to the first mate; replies arrive here.</p>
             </div>
           </div>
-          <button class="act-btn" id="notify-btn" type="button" title="Browser notifications for new replies and items that need you">Enable alerts</button>
+          <button class="btn" id="notify-btn" type="button" title="Browser notifications for new replies and items that need you">Enable alerts</button>
         </div>
         <ol class="thread" id="thread" aria-live="polite" aria-label="Conversation with the first mate"></ol>
         <button class="jump" id="thread-jump" type="button" hidden>New messages ↓</button>
@@ -150,12 +201,12 @@ cd /path/to/firstmate &amp;&amp; npx ship-deck   # run from inside the home</pre
           <label class="sr-only" for="chat-text">Message to the first mate</label>
           <textarea id="chat-text" rows="2" maxlength="4000" placeholder="Message the first mate… (paste or drop screenshots and recordings)" spellcheck="true"></textarea>
           <div class="composer-foot">
-            <button class="act-btn attach-btn" id="attach-btn" type="button" title="Attach screenshots or screen recordings (or paste / drop them)" aria-label="Attach images or videos">
+            <button class="btn attach-btn" id="attach-btn" type="button" title="Attach screenshots or screen recordings (or paste / drop them)" aria-label="Attach images or videos">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
             <input id="attach-input" type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm,.png,.jpg,.jpeg,.gif,.webp,.mp4,.mov,.webm" hidden>
             <span class="hint" id="chat-hint">Enter to send · Shift+Enter for a new line</span>
-            <button class="act-btn primary" id="chat-send" type="submit">Send</button>
+            <button class="btn primary" id="chat-send" type="submit">Send</button>
           </div>
         </form>
       </section>
@@ -179,7 +230,7 @@ cd /path/to/firstmate &amp;&amp; npx ship-deck   # run from inside the home</pre
             <label>Project
               <select id="job-project" required></select>
             </label>
-            <fieldset class="seg" aria-label="Kind of task">
+            <fieldset class="kind-seg" aria-label="Kind of task">
               <label><input type="radio" name="job-kind" value="ship" checked> <span><strong>Ship</strong> make the change</span></label>
               <label><input type="radio" name="job-kind" value="scout"> <span><strong>Scout</strong> diagnose and report only</span></label>
             </fieldset>
@@ -191,7 +242,7 @@ cd /path/to/firstmate &amp;&amp; npx ship-deck   # run from inside the home</pre
             <label>What should the worker do?
               <textarea id="job-text" rows="4" maxlength="2000" placeholder="Describe the task: goal, links, constraints…"></textarea>
             </label>
-            <button class="act-btn primary" type="submit">Send new task</button>
+            <button class="btn primary" type="submit">Send new task</button>
           </form>
         </details>
 
@@ -201,7 +252,7 @@ cd /path/to/firstmate &amp;&amp; npx ship-deck   # run from inside the home</pre
         </div>
 
         <div class="card">
-          <h3>Recently done <button class="act-btn mini" id="cleanup-done" type="button" hidden></button></h3>
+          <h3>Recently done <button class="btn sm" id="cleanup-done" type="button" hidden></button></h3>
           <ul class="list" id="done-list"></ul>
         </div>
 
@@ -239,7 +290,7 @@ cd /path/to/firstmate &amp;&amp; npx ship-deck   # run from inside the home</pre
         <p class="drawer-kicker" id="drawer-kicker"></p>
         <h2 id="drawer-title"></h2>
       </div>
-      <button class="icon-btn" id="drawer-close" aria-label="Close details">
+      <button class="btn ghost icon-btn" type="button" id="drawer-close" aria-label="Close details">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       </button>
     </header>
@@ -253,7 +304,7 @@ cd /path/to/firstmate &amp;&amp; npx ship-deck   # run from inside the home</pre
         <p class="drawer-kicker">Read-only · the first mate's permanent context</p>
         <h2 id="library-title">Ship's Library</h2>
       </div>
-      <button class="icon-btn" id="library-close" aria-label="Close library">
+      <button class="btn ghost icon-btn" type="button" id="library-close" aria-label="Close library">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       </button>
     </header>
@@ -272,13 +323,13 @@ cd /path/to/firstmate &amp;&amp; npx ship-deck   # run from inside the home</pre
     <div id="confirm-body"></div>
     <p class="confirm-warn" id="confirm-warn" hidden></p>
     <div class="btn-row confirm-actions">
-      <button class="act-btn" id="confirm-no" type="button">Cancel</button>
-      <button class="act-btn primary" id="confirm-yes" type="button">Send</button>
+      <button class="btn" id="confirm-no" type="button">Cancel</button>
+      <button class="btn primary" id="confirm-yes" type="button">Send</button>
     </div>
   </section>
 
   <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Attachment" hidden>
-    <button class="lightbox-close" id="lightbox-close" type="button" aria-label="Close">×</button>
+    <button class="lightbox-close" id="lightbox-close" type="button" aria-label="Close"><svg class="ico"><use href="#i-x"/></svg></button>
     <img id="lightbox-img" alt="">
     <p class="lightbox-cap" id="lightbox-cap"></p>
   </div>
@@ -287,6 +338,7 @@ cd /path/to/firstmate &amp;&amp; npx ship-deck   # run from inside the home</pre
 
   <script src="markdown.js"></script>
   <script src="labels.js"></script>
+  <script src="board.js"></script>
   <script src="ansi.js"></script>
   <script src="app.js"></script>
 </body>
