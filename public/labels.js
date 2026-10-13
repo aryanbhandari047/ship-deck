@@ -61,7 +61,15 @@
     return t && t.stale ? `${quietText(t.lastActivity, now)} · ${s}` : s;
   }
 
-  const api = { KIND_LABEL, STATE_LABEL, MESSAGE_STATUS, kindLabel, stateLabel, messageStatus, firstClause, quietDays, quietText, summary };
+  // Settings picker for one field: "Current (x)" first with value '' (selected), then the other
+  // allow-listed values, so Apply stays off until the captain picks a real change.
+  function configChoices(list, current, pending) {
+    const cur = current || 'default';
+    const label = `Current (${cur}${pending ? `, ${pending} on relaunch` : ''})`;
+    return { selected: '', options: [['', label], ...(list || []).filter((v) => v !== cur && v !== pending).map((v) => [v, v])] };
+  }
+
+  const api = { configChoices, KIND_LABEL, STATE_LABEL, MESSAGE_STATUS, kindLabel, stateLabel, messageStatus, firstClause, quietDays, quietText, summary };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.ShipDeckLabels = api;
 })(typeof window !== 'undefined' ? window : globalThis);

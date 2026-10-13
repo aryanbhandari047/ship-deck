@@ -172,7 +172,8 @@ under 2 minutes; "late" otherwise) · the last update time.
   finished workers, change settings. Each is a message the first mate acts on;
   Ship Deck never does these itself.
 - **Terminal peek**: a worker's details show the last 80 lines of its
-  terminal (`tmux capture-pane -p -t <window> -S -80`), refreshed every 2 s.
+  terminal (`tmux capture-pane -p -e -J -t <window> -S -80`), refreshed every 2 s,
+  with its colours (parsed into class names, never HTML) and Wrap/Follow toggles.
 - **Message a worker directly**: one line (max 2000 chars, confirmed first)
   sent with exactly `FM_HOME=<home> <home>/bin/fm-send.sh <window> <message>`.
 - **Live settings** (claude workers only): `/effort <level>` or
@@ -316,8 +317,9 @@ renders it in the thread (videos from replies get no stills).
 
 Each worker's details show its tool (harness), model and effort under Settings: the values in
 `state/<id>.meta`, overridden by the latest applied `config` order (unapplied
-ones show as "on relaunch"). The pickers are allow-listed server-side
-(`lib/config.js`); anything else is rejected:
+ones show as "on relaunch"). Each picker starts on "Current (<value>)" and
+Apply stays off until a different value is picked. The pickers are
+allow-listed server-side (`lib/config.js`); anything else is rejected:
 
 | harness | effort | model | live |
 | --- | --- | --- | --- |
@@ -414,6 +416,9 @@ wake check on chat orders, decision option parsing, Captain's Call against the
 real backlog format (`test/fixtures/backlog/real-format.md`), session discovery
 and `sessions.json`, skills, the markdown renderer, the config allow-list and
 the exact fm-send argv, and `bin/start.sh`.
+`test/peek.test.js` covers the terminal peek's SGR parser (`public/ansi.js`:
+colour classes, unclosed codes, malicious and truncated sequences) and the
+settings picker preselecting the current value.
 `test/attachments.test.js` covers magic-byte validation, safe names and path
 traversal (ids, frame names, tampered metadata, symlinks), size limits, the
 upload guards, Range serving, video stills, chat orders with attachments,
@@ -530,6 +535,6 @@ bin/orders.js      Orders, replies, thread and sessions CLI for the first mate
 bin/orders-check.sh  Watcher wake check (POSIX sh)
 bin/ship-deck.js   `ship-deck` / `npx` entry (same flags as server.js)
 bin/start.sh       Start the server in the background unless it already answers
-public/            index.html, style.css, app.js, markdown.js, labels.js (no build step)
+public/            index.html, style.css, app.js, markdown.js, labels.js, ansi.js (no build step)
 test/              node:test suites and fabricated fixtures
 ```

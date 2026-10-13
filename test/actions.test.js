@@ -201,11 +201,11 @@ test('lookupWindow reads the window from meta and validates it strictly', (t) =>
   });
 });
 
-test('peekPane runs only tmux capture-pane on the meta window', async (t) => {
+test('peekPane runs only tmux capture-pane -e -J on the meta window', async (t) => {
   const home = tempHome(t);
   const exec = fakeExec({ code: 0, stdout: Array.from({ length: 120 }, (_, i) => `line ${i}`).join('\n') + '\n\n\n', stderr: '' });
   const r = await actions.peekPane(home, 'alpha-fix', exec);
-  assert.deepEqual(exec.calls.map((c) => [c.file, c.args]), [['tmux', ['capture-pane', '-p', '-t', 'fleet:fm-alpha-fix', '-S', '-80']]]);
+  assert.deepEqual(exec.calls.map((c) => [c.file, c.args]), [['tmux', ['capture-pane', '-p', '-e', '-J', '-t', 'fleet:fm-alpha-fix', '-S', '-80']]]);
   assert.equal(r.window, 'fleet:fm-alpha-fix');
   assert.equal(r.text.split('\n').length, 80);
   assert.equal(r.text.split('\n').at(-1), 'line 119', 'trailing blank lines trimmed');
@@ -297,7 +297,7 @@ async function startServer(t, extra = {}) {
   const ordersDir = tempDir(t);
   const memoryDir = tempDir(t, 'ship-deck-mem-');
   fs.writeFileSync(path.join(memoryDir, 'MEMORY.md'), '# Memory index');
-  const exec = fakeExec((file, args) => (file === 'tmux' ? { code: 0, stdout: `pane of ${args[3]}\n`, stderr: '' } : { code: 0, stdout: '', stderr: '' }));
+  const exec = fakeExec((file, args) => (file === 'tmux' ? { code: 0, stdout: `pane of ${args[args.indexOf('-t') + 1]}\n`, stderr: '' } : { code: 0, stdout: '', stderr: '' }));
   const claudeDir = tempDir(t, 'ship-deck-claude-');
   const server = createServer({ home, tmux: false, staleDays: 7, ordersDir, memoryDir, claudeDir, exec, ...extra });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -380,7 +380,7 @@ test('HTTP send and peek use the meta window and the injected executor', async (
   r = await fetch(base + '/api/peek/alpha-fix');
   assert.equal(r.status, 200);
   assert.equal((await r.json()).text, 'pane of fleet:fm-alpha-fix');
-  assert.deepEqual(exec.calls.at(-1).args, ['capture-pane', '-p', '-t', 'fleet:fm-alpha-fix', '-S', '-80']);
+  assert.deepEqual(exec.calls.at(-1).args, ['capture-pane', '-p', '-e', '-J', '-t', 'fleet:fm-alpha-fix', '-S', '-80']);
   assert.equal((await fetch(base + '/api/peek/ghost')).status, 404);
   assert.equal((await fetch(base + '/api/peek/..%2Fx')).status, 404);
   assert.equal(exec.calls.length, before + 1);

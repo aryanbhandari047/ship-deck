@@ -714,8 +714,8 @@
       ui.drawerBody.replaceChildren(h('p', { text: 'This worker has been cleaned up. Its session stays listed under Sessions.' }));
       return;
     }
-    ui.drawerKicker.replaceChildren(...[h('span', { class: 'pill', style: `background:${stateVar(t.state)}`, text: STATE_LABEL[t.state] }),
-      t.stale ? h('span', { class: 'pill', style: `background:${stateVar('stale')}`, text: L.quietText(t.lastActivity).toLowerCase() }) : null, t.kind,
+    ui.drawerKicker.replaceChildren(...[h('span', { class: 'pill', style: `--c:${stateVar(t.state)}`, text: STATE_LABEL[t.state] }),
+      t.stale ? h('span', { class: 'pill', style: `--c:${stateVar('stale')}`, text: L.quietText(t.lastActivity).toLowerCase() }) : null, t.kind,
       h('span', { class: 'mono', text: t.id })].filter(Boolean));
     ui.drawerTitle.textContent = t.title || t.id;
     if (!td || td.id !== t.id || !td.root.isConnected) buildTaskDrawer(t);
@@ -828,10 +828,12 @@
         rows.push(h('div', { class: 'cfg-row' }, h('span', { class: 'cfg-label', text: field }), h('span', { class: 'cfg-val mono', text: show(field) }), h('span', { class: 'hint cfg-fixed', text: 'show current only' })));
         continue;
       }
-      const sel = h('select', { 'aria-label': `${field} for ${t.id}` }, ...list.map((v) => h('option', { value: v, text: v })));
-      sel.value = list.includes(c.pending[field] || c[field]) ? (c.pending[field] || c[field]) : list[0];
-      const btn = h('button', { class: 'act-btn', type: 'button', text: live ? 'Apply live' : 'Send change', onclick: () => applyConfig(t, field, sel.value, live) });
-      rows.push(h('div', { class: 'cfg-row' }, h('span', { class: 'cfg-label', text: field }), h('span', { class: 'cfg-val mono', text: show(field) }), sel, btn));
+      const choice = L.configChoices(list, c[field], c.pending[field]);
+      const sel = h('select', { 'aria-label': `${field} for ${t.id}` }, ...choice.options.map(([v, label]) => h('option', { value: v, text: label })));
+      sel.value = choice.selected;
+      const btn = h('button', { class: 'act-btn', type: 'button', disabled: true, text: live ? 'Apply live' : 'Send change', onclick: () => sel.value && applyConfig(t, field, sel.value, live) });
+      sel.addEventListener('change', () => { btn.disabled = !sel.value; });
+      rows.push(h('div', { class: 'cfg-row' }, h('span', { class: 'cfg-label', text: field }), h('span', { class: 'cfg-val mono', text: show(field) }), h('span', { class: 'cfg-ctl' }, sel, btn)));
     }
     td.config.replaceChildren(h('h3', { text: 'Settings' }),
       h('p', { class: 'hint', text: `Tool: ${c.harness}. ` + (live
@@ -917,8 +919,23 @@
       if (!d.paused) refreshPeek();
       setPeekState();
     } });
+    // Wrap long lines / Follow the newest output; scrolling up stops following.
+    const toggle = (key, label, apply) => {
+      const btn = h('button', { class: 'act-btn', type: 'button', text: label, onclick: () => { d[key] = !d[key]; store.set('peek.' + key, d[key] ? '1' : '0'); apply(); } });
+      d[key] = store.get('peek.' + key) !== '0';
+      return btn;
+    };
+    const applyWrap = () => { d.peekText.classList.toggle('wrap', d.wrap); d.wrapBtn.setAttribute('aria-pressed', String(d.wrap)); if (d.follow) d.peekText.scrollTop = d.peekText.scrollHeight; };
+    const applyFollow = () => { d.followBtn.setAttribute('aria-pressed', String(d.follow)); if (d.follow) d.peekText.scrollTop = d.peekText.scrollHeight; };
+    d.wrapBtn = toggle('wrap', 'Wrap', applyWrap);
+    d.followBtn = toggle('follow', 'Follow', applyFollow);
+    d.peekText.addEventListener('scroll', () => {
+      const pre = d.peekText;
+      if (d.follow && pre.scrollHeight - pre.scrollTop - pre.clientHeight > 24) { d.follow = false; applyFollow(); }
+    });
+    applyWrap(); applyFollow();
     d.peekWrap = h('section', { class: 'drawer-sec' },
-      h('div', { class: 'sec-head' }, h('h3', { text: 'Terminal' }), d.peekState, d.pauseBtn),
+      h('div', { class: 'sec-head' }, h('h3', { text: 'Terminal' }), d.peekState, h('div', { class: 'btn-row' }, d.wrapBtn, d.followBtn, d.pauseBtn)),
       d.peekText);
 
     d.root = h('div', { class: 'task-drawer' }, d.file, d.decision, d.info, d.resume, d.config, ordersSec, d.peekWrap, d.msgWrap);
@@ -953,9 +970,8 @@
       const body = await res.json().catch(() => ({}));
       if (td !== d) return;
       const pre = d.peekText;
-      const atBottom = !d.peekLoaded || pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
       if (res.ok) {
-        if (pre.textContent !== body.text) pre.textContent = body.text;
+        if (d.peekRaw !== body.text || pre.classList.contains('peek-err')) { d.peekRaw = body.text; renderPeek(pre, body.text); }
         pre.classList.remove('peek-err');
         setPeekState(`live · ${new Date().toLocaleTimeString()}`);
       } else {
@@ -963,13 +979,24 @@
         pre.classList.add('peek-err');
         setPeekState('unavailable');
       }
-      if (atBottom) pre.scrollTop = pre.scrollHeight;
-      d.peekLoaded = true;
+      if (d.follow) pre.scrollTop = pre.scrollHeight;
     } catch {
       setPeekState('offline');
     } finally {
       peekBusy = false;
     }
+  }
+  // Coloured spans from the pane text: class names and textContent only, never HTML.
+  function renderPeek(pre, text) {
+    const frag = document.createDocumentFragment();
+    for (const seg of window.ShipDeckAnsi.parse(text)) {
+      if (!seg.cls) { frag.append(seg.text); continue; }
+      const span = document.createElement('span');
+      span.className = seg.cls;
+      span.textContent = seg.text;
+      frag.append(span);
+    }
+    pre.replaceChildren(frag);
   }
   function startPeek() {
     stopPeek();
