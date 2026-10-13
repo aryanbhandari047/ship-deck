@@ -7,16 +7,17 @@
   const STATE_ORDER = ['needs-decision', 'blocked', 'failed', 'working', 'paused', 'unknown', 'done'];
   const COUNT_ORDER = ['working', 'needs-decision', 'blocked', 'paused', 'done', 'failed', 'stale'];
   const ATTENTION = new Set(['needs-decision', 'blocked', 'failed']);
-  const STATE_LABEL = {
-    'working': 'working', 'needs-decision': 'decision', 'blocked': 'blocked', 'paused': 'paused',
-    'done': 'done', 'failed': 'failed', 'unknown': 'no status', 'resolved': 'resolved', 'stale': 'stale',
-  };
+  const L = window.ShipDeckLabels;
+  const STATE_LABEL = L.STATE_LABEL;
   const MAX_CRATES = 48;
+  const LISTENING_MS = 2 * 60 * 1000; // first mate activity this recent = listening
   const MD = window.ShipDeckMarkdown;
 
   const $ = (id) => document.getElementById(id);
   const ui = {
     home: $('home-path'), search: $('search'), sync: $('sync'), syncText: $('sync-text'),
+    healthFm: $('health-fm'), healthMon: $('health-mon'), healthTime: $('health-time'),
+    firstRun: $('first-run'), firstRunChecked: $('first-run-checked'), captainName: $('captain-name'), awayName: $('away-name'),
     reconnect: $('reconnect'), reconnectText: $('reconnect-text'), reconnectNow: $('reconnect-now'),
     captain: $('captain'), firstmate: $('firstmate'), awaySign: $('away-sign'), lamp: $('lamp'), lampLabel: $('lamp-label'), wheel: $('wheel'),
     areas: $('areas'), cabins: $('cabins'), cabinRow: $('cabin-row'),
@@ -33,7 +34,6 @@
     lightbox: $('lightbox'), lightboxImg: $('lightbox-img'), lightboxCap: $('lightbox-cap'), lightboxClose: $('lightbox-close'),
     watch: $('watch-card'), counts: $('counts'),
     needsCount: $('needs-count'), needsList: $('needs-list'),
-    callsCount: $('calls-count'), callsList: $('calls-list'),
     queuedCount: $('queued-count'), queuedList: $('queued-list'),
     jobForm: $('job-form'), jobProject: $('job-project'), jobText: $('job-text'), newJob: $('new-job'),
     jobHarness: $('job-harness'), jobModel: $('job-model'), jobEffort: $('job-effort'),
@@ -132,7 +132,9 @@
   }
   // Stale crew are bucketed as "stale" for counts, tallies and the state filter.
   function bucket(t) { return t.stale ? 'stale' : t.state; }
-  function staleText(t) { return `no activity for ${agoLong(t.lastActivity).replace(' ago', '')} (stale after ${snap.staleDays} d)`; }
+  function staleText(t) { return `${L.quietText(t.lastActivity)} (marked quiet after ${snap.staleDays} d without activity)`; }
+  // Worker title (from its queue entry or brief), falling back to the raw id.
+  function titleOf(id) { const t = snap && snap.tasks.find((x) => x.id === id); return t ? t.title || t.id : id; }
   function lastNote(t) { const l = t.lastStatus[t.lastStatus.length - 1]; return l ? l.note : ''; }
 
   const SAILOR = `
@@ -159,13 +161,13 @@
   function matchesTask(t) {
     if (stateFilter && bucket(t) !== stateFilter) return false;
     if (!query) return true;
-    const hay = [t.id, t.project, t.state, STATE_LABEL[t.state], t.stale && 'stale', t.kind, t.mode, t.brief].join(' ').toLowerCase();
+    const hay = [t.id, t.title, t.project, t.state, STATE_LABEL[t.state], t.stale && 'stale quiet', t.kind, t.mode, t.brief, L.summary(t)].join(' ').toLowerCase();
     return query.split(/\s+/).every((q) => hay.includes(q));
   }
   function matchesCrate(item) {
     if (stateFilter) return false;
     if (!query) return true;
-    const hay = [item.id, item.title, item.tags && item.tags.repo, 'queued backlog'].join(' ').toLowerCase();
+    const hay = [item.id, item.title, item.tags && item.tags.repo, 'queued backlog queue'].join(' ').toLowerCase();
     return query.split(/\s+/).every((q) => hay.includes(q));
   }
 
@@ -183,8 +185,8 @@
         '<span class="zz">z</span><span class="zz">z</span>' +
         '<span class="alive"></span>' +
       '</div>' +
-      '<span class="stale-tag">stale</span>' +
-      '<div class="label"><span class="id"></span><span class="sub"><span class="pill"></span><span class="age"></span></span></div>';
+      '<span class="stale-tag">quiet</span>' +
+      '<div class="label"><span class="id"></span><span class="rid"></span><span class="sub"><span class="pill"></span><span class="age"></span></span></div>';
     el.addEventListener('click', () => openDrawer({ type: 'task', id: t.id }));
     return el;
   }
@@ -202,13 +204,14 @@
       el.classList.add('changed');
       setTimeout(() => el.classList.remove('changed'), 1700);
     }
-    el.querySelector('.id').textContent = t.id;
+    el.querySelector('.id').textContent = t.title || t.id;
+    el.querySelector('.rid').textContent = t.title && t.title !== t.id ? t.id : '';
     el.querySelector('.pill').textContent = STATE_LABEL[t.state] || t.state;
     el.querySelector('.age').textContent = ago(t.lastActivity);
-    const alive = t.alive === true ? 'window open' : t.alive === false ? 'window closed' : '';
-    el.title = `${t.id}\n${t.project} · ${t.kind}${t.mode ? ' · ' + t.mode : ''}\n${STATE_LABEL[t.state]}${alive ? ' · ' + alive : ''}` +
-      `${t.stale ? '\nSTALE: ' + staleText(t) : ''}\n\n${lastNote(t).slice(0, 220)}`;
-    el.setAttribute('aria-label', `${t.id}, ${t.project}, ${STATE_LABEL[t.state]}${t.stale ? ', stale' : ''}`);
+    el.querySelector('.stale-tag').textContent = t.stale ? `quiet ${L.quietDays(t.lastActivity) || ''}d` : 'quiet';
+    const alive = t.alive === true ? 'terminal open' : t.alive === false ? 'terminal closed' : '';
+    el.title = `${t.title || t.id}\n${t.id} · ${t.project}${alive ? ' · ' + alive : ''}\n\n${L.summary(t)}`;
+    el.setAttribute('aria-label', `${t.title || t.id}, ${t.project}, ${L.summary(t)}`);
   }
 
   // Stale crew sit after the active crew and before the done crew.
@@ -279,7 +282,7 @@
       setTimeout(() => el.remove(), 650);
     }
     if (!crew.length && !ui.areas.querySelector('.empty-deck')) {
-      ui.areas.append(h('p', { class: 'empty-deck', text: 'The deck is quiet. No tasks in flight.' }));
+      ui.areas.append(h('p', { class: 'empty-deck', text: 'No workers right now. Ask the first mate for a task in the Bridge chat.' }));
     } else if (crew.length) {
       ui.areas.querySelectorAll('.empty-deck').forEach((e) => e.remove());
     }
@@ -314,7 +317,7 @@
       h('div', null, h('div', { class: 'cab-id', text: id }), h('div', { class: 'cab-sub', text: sub })));
     const kids = [];
     for (const t of metas.sort(sortTasks)) {
-      const c = cabin(t.id, `${STATE_LABEL[t.state]}${t.stale ? ' · stale' : ''} · ${ago(t.lastActivity)}`,
+      const c = cabin(t.title || t.id, `${L.summary(t)} · ${ago(t.lastActivity)}`,
         `k-secondmate st-${t.state}${t.stale ? ' is-stale' : ''}`, () => openDrawer({ type: 'task', id: t.id }));
       c.style.setProperty('--c', stateVar(bucket(t)));
       c.classList.toggle('hidden-by-filter', !matchesTask(t));
@@ -332,19 +335,19 @@
     const queued = snap.backlog.queued || [];
     const shown = queued.filter(matchesCrate);
     const calls = queued.filter((q) => q.captainCall).length;
-    ui.holdSub.textContent = `${queued.length} queued${calls ? ` · ${calls} awaiting the captain` : ''}`;
+    ui.holdSub.textContent = `${queued.length} waiting${calls ? ` · ${calls} need${calls === 1 ? 's' : ''} you` : ''}`;
     ui.hold.classList.toggle('hidden-by-filter', !!(query || stateFilter) && !shown.length);
     if (unchanged('hold', queued, shown.length, snap.backlog.present)) return;
     const kids = shown.slice(0, MAX_CRATES).map((q, i) => {
       const key = q.id || `item-${i}`;
       return h('button', {
         class: 'crate' + (q.captainCall ? ' captain-call' : ''), type: 'button',
-        title: `${q.id || ''}\n${q.title}`,
+        title: `${q.title}${q.id ? '\n' + q.id : ''}`,
         onclick: () => openDrawer({ type: 'backlog', id: key, section: 'queued', index: queued.indexOf(q) }),
-      }, h('span', { text: q.id || q.title }));
+      }, h('span', { text: q.title || q.id }));
     });
     if (shown.length > MAX_CRATES) kids.push(h('div', { class: 'crate more', text: `+${shown.length - MAX_CRATES} more` }));
-    if (!queued.length) kids.push(h('p', { class: 'hold-empty', text: snap.backlog.present ? 'The hold is empty.' : 'No backlog found (data/backlog.md).' }));
+    if (!queued.length) kids.push(h('p', { class: 'hold-empty', text: snap.backlog.present ? 'The queue is empty.' : 'No queue yet.' }));
     ui.crates.replaceChildren(...kids);
   }
 
@@ -352,18 +355,18 @@
   function renderBridge() {
     ui.captain.classList.toggle('away', snap.afk);
     ui.awaySign.hidden = !snap.afk;
+    const name = (snap.captain && snap.captain.name) || 'Captain';
+    ui.captainName.textContent = name;
+    ui.awayName.textContent = name;
+    ui.captain.title = snap.captain && snap.captain.name ? `Captain ${name}` : 'Captain';
     const w = snap.watcher;
     ui.lamp.className = 'lamp ' + (w.lastBeat ? (w.healthy ? 'on' : 'amber') : '');
-    ui.lampLabel.textContent = w.lastBeat ? (w.healthy ? 'Watch ' : 'Watch stale ') + ago(w.lastBeat) : 'No watch';
-    ui.lamp.parentElement.title = w.lastBeat ? `Watcher heartbeat ${agoLong(w.lastBeat)}` : 'No watcher heartbeat file';
+    ui.lampLabel.textContent = w.lastBeat ? (w.healthy ? 'Monitoring ' : 'Monitoring late ') + ago(w.lastBeat) : 'Not monitoring';
+    ui.lamp.parentElement.title = w.lastBeat ? `Last monitoring check ${agoLong(w.lastBeat)}` : 'Monitoring has not checked in';
     ui.wheel.style.animationPlayState = w.healthy ? 'running' : 'paused';
   }
 
   // ---------- orders: posting, confirm dialog, lifecycle ----------
-  const KIND_LABEL = {
-    chat: 'Chat', cleanup: 'Clean up', merge: 'Merge PR', answer: 'Answer', decision: 'Decision', status: 'Status?',
-    'new-task': 'New job', 'cleanup-done': 'Clean up done', 'backlog-start': 'Start', 'backlog-answer': 'Answer call', config: 'Config', order: 'Order',
-  };
   const IRREVERSIBLE = new Set(['merge', 'cleanup', 'cleanup-done']);
   const ORDER_COLOR = { pending: 'needs-decision', acknowledged: 'working', done: 'done', declined: 'failed' };
 
@@ -377,19 +380,19 @@
       const out = await res.json().catch(() => ({}));
       return { ...out, ok: res.ok && out.ok !== false, error: out.error || (res.ok ? null : 'HTTP ' + res.status) };
     } catch (e) {
-      return { ok: false, error: 'cannot reach the server (your text is kept)' };
+      return { ok: false, error: 'cannot reach Ship Deck (your text is kept)' };
     }
   }
 
-  // In-page confirm: resolves true only on an explicit "Queue order".
+  // In-page confirm: resolves true only on an explicit "Send".
   let confirmResolve = null;
-  function confirmDialog({ title, body, irreversible, yes = 'Queue order' }) {
+  function confirmDialog({ title, body, irreversible, yes = 'Send' }) {
     if (confirmResolve) confirmResolve(false);
     ui.confirmTitle.textContent = title;
     ui.confirmBody.replaceChildren(...(body === undefined || body === null ? [] : [typeof body === 'string' ? h('p', { class: 'confirm-text', text: body }) : body]));
     ui.confirmWarn.hidden = !irreversible;
     ui.confirmWarn.textContent = irreversible
-      ? 'This cannot be undone once carried out. Ship Deck only queues the order: the first mate will still confirm with you before acting.'
+      ? 'This cannot be undone once carried out. Ship Deck only passes the message on: the first mate will still confirm with you before acting.'
       : '';
     ui.confirmYes.textContent = yes;
     ui.confirmYes.classList.toggle('danger', !!irreversible);
@@ -412,18 +415,18 @@
   ui.confirmScrim.addEventListener('click', () => confirmResolve && confirmResolve(false));
 
   function describe(req) {
-    const bits = [KIND_LABEL[req.kind] || req.kind];
-    if (req.target) bits.push(req.target);
+    const bits = [L.kindLabel(req.kind)];
+    if (req.target) bits.push(titleOf(req.target));
     if (req.item) bits.push(req.item);
     if (req.project) bits.push(`${req.taskKind || ''} in ${req.project}`.trim());
     return bits.join(' · ');
   }
-  // Queues an order after the in-page confirm. Returns true when queued.
+  // Sends a message (an order) after the in-page confirm. Returns true when sent.
   async function queueOrder(req, confirm) {
     if (confirm !== false) {
       const c = confirm || {};
       const ok = await confirmDialog({
-        title: c.title || `Queue “${describe(req)}” for the first mate?`,
+        title: c.title || `Send “${describe(req)}” to the first mate?`,
         body: c.body !== undefined ? c.body : req.text || null,
         irreversible: IRREVERSIBLE.has(req.kind),
       });
@@ -431,11 +434,11 @@
     }
     const r = await post('/api/orders', req);
     if (r.ok) {
-      toast(`Queued for the first mate: ${describe(req)}`, 'ok');
+      toast(`Sent to the first mate: ${describe(req)}`, 'ok');
       poll();
       return true;
     }
-    toast(`Order not queued: ${r.error}`, 'err');
+    toast(`Message not sent: ${r.error}`, 'err');
     return false;
   }
   function toast(text, kind) {
@@ -446,10 +449,10 @@
 
   function timeOf(ts) { const t = ts ? Date.parse(ts) : NaN; return Number.isFinite(t) ? t : null; }
   function clock(ms) { return ms ? new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''; }
-  function chip(status) { return h('span', { class: 'chip', style: `--c:${stateVar(ORDER_COLOR[status] || 'unknown')}`, text: status }); }
+  function chip(status) { return h('span', { class: 'chip', style: `--c:${stateVar(ORDER_COLOR[status] || 'unknown')}`, text: L.messageStatus(status) }); }
   function payloadText(o) {
-    if (o.kind === 'cleanup-done' && o.targets) return `${o.targets.length} crew: ${o.targets.join(', ')}`;
-    if (o.kind === 'new-task') return `${o.taskKind || 'job'} in ${o.project}${o.harness ? ` · ${o.harness}${o.model ? ' ' + o.model : ''}${o.effort ? ' · effort ' + o.effort : ''}` : ''}`;
+    if (o.kind === 'cleanup-done' && o.targets) return `${o.targets.length} worker${o.targets.length === 1 ? '' : 's'}: ${o.targets.join(', ')}`;
+    if (o.kind === 'new-task') return `${o.taskKind || 'task'} in ${o.project}${o.harness ? ` · ${o.harness}${o.model ? ' ' + o.model : ''}${o.effort ? ' · effort ' + o.effort : ''}` : ''}`;
     if (o.kind === 'config') return `${o.field} → ${o.value} · ${o.applied ? 'applied live' : 'on relaunch'}`;
     if (o.item) return o.item + (o.option ? ` · option ${o.option}` : '');
     if (o.option) return `option ${o.option}`;
@@ -457,10 +460,10 @@
   }
   // queued -> acknowledged -> done/declined, with each step's time and note.
   function lifecycle(o) {
-    const steps = [h('li', { class: 'lc-step done', style: `--c:${stateVar('needs-decision')}` }, h('b', { text: 'queued' }), ' ', clock(timeOf(o.ts)))];
+    const steps = [h('li', { class: 'lc-step done', style: `--c:${stateVar('needs-decision')}` }, h('b', { text: 'sent' }), ' ', clock(timeOf(o.ts)))];
     for (const a of o.history || []) {
       steps.push(h('li', { class: 'lc-step done', style: `--c:${stateVar(ORDER_COLOR[a.status] || 'unknown')}` },
-        h('b', { text: a.status }), ' ', clock(timeOf(a.ts)), a.note ? h('span', { class: 'lc-note', text: ` · ${a.note}` }) : null));
+        h('b', { text: L.messageStatus(a.status) }), ' ', clock(timeOf(a.ts)), a.note ? h('span', { class: 'lc-note', text: ` · ${a.note}` }) : null));
     }
     if (o.status === 'pending' || o.status === 'acknowledged') {
       steps.push(h('li', { class: 'lc-step next', text: o.status === 'pending' ? 'waiting for the first mate' : 'in progress' }));
@@ -473,12 +476,12 @@
     const extra = payloadText(o);
     const inner = [
       h('span', { class: 'dot' }),
-      h('span', { class: 'r-id' }, h('span', { class: 'o-kind', text: KIND_LABEL[o.kind] || o.kind }), o.target ? ' ' + o.target : ''),
+      h('span', { class: 'r-id' }, h('span', { class: 'o-kind', text: L.kindLabel(o.kind) }), o.target ? ' ' + titleOf(o.target) : ''),
       h('span', { class: 'r-age' }, chip(o.status), ' ', ago(when)),
       h('span', { class: 'r-note', text: o.text + (extra ? ` (${extra})` : '') }),
       h('span', { class: 'r-life' }, lifecycle(o)),
     ];
-    const title = `${o.id}\n${o.status}${o.ackTs ? ' · ' + o.ackTs : ''}\nqueued ${o.ts}`;
+    const title = `${o.target ? o.target + '\n' : ''}${L.messageStatus(o.status)}${o.ackTs ? ' · ' + o.ackTs : ''}\nsent ${o.ts}`;
     const attrs = { class: 'row' + (o.pending ? ' pending' : ''), style: `--c:${stateVar(ORDER_COLOR[o.status] || 'unknown')}`, title };
     return h('li', null, o.target && snap.tasks.some((t) => t.id === o.target)
       ? h('button', { ...attrs, type: 'button', onclick: () => openDrawer({ type: 'task', id: o.target }) }, ...inner)
@@ -486,11 +489,18 @@
   }
 
   // ---------- command center ----------
-  function listRow(t, note, onclick) {
+  // A worker row: its title, then a one-sentence summary with the raw id beside it.
+  function listRow(t, onclick) {
     return h('li', null, h('button', { class: 'row', type: 'button', onclick, style: `--c:${stateVar(bucket(t))}` },
-      h('span', { class: 'dot' }), h('span', { class: 'r-id', text: t.id, title: t.id }), h('span', { class: 'r-age', text: ago(t.lastActivity) }),
-      note ? h('span', { class: 'r-note', text: note }) : null,
+      h('span', { class: 'dot' }), h('span', { class: 'r-id', text: t.title || t.id, title: t.title || t.id }), h('span', { class: 'r-age', text: ago(t.lastActivity) }),
+      h('span', { class: 'r-note' }, L.summary(t), t.title && t.title !== t.id ? h('span', { class: 'r-rid', text: t.id }) : null),
       t.options && t.options.length ? h('span', { class: 'r-opts', text: `options ${t.options.map((o) => o.letter).join(' / ')}` }) : null));
+  }
+  // A queue item row: its title, with the raw id as the secondary label.
+  function itemRow(b, color, onclick) {
+    return h('button', { class: 'row', type: 'button', style: `--c:${stateVar(color)}`, onclick },
+      h('span', { class: 'dot' }), h('span', { class: 'r-id', text: b.title || b.id || '(untitled)', title: b.title || '' }),
+      h('span', { class: 'r-age', text: (b.tags && b.tags.since) || '' }), h('span', { class: 'r-note' }, b.id ? h('span', { class: 'r-rid', text: b.id, style: 'margin-left:0' }) : null));
   }
   function emptyRow(text) { return h('li', null, h('div', { class: 'empty', text })); }
   // A list row with an inline action button beside the clickable row.
@@ -504,12 +514,12 @@
     const lampCls = w.lastBeat ? (w.healthy ? 'on' : 'amber') : '';
     ui.watch.replaceChildren(
       h('div', { class: 'head' }, h('span', { class: 'lamp ' + lampCls }),
-        w.lastBeat ? (w.healthy ? 'Watch is keeping' : 'Watch heartbeat is stale') : 'No watcher heartbeat'),
-      h('span', { class: 'row-label', text: 'Heartbeat' }), h('span', { class: 'row-val', text: agoLong(w.lastBeat) }),
-      h('span', { class: 'row-label', text: 'Captain' }), h('span', { class: 'row-val', text: snap.afk ? 'ashore (away)' : 'aboard' }),
-      h('span', { class: 'row-label', text: 'Crew' }), h('span', { class: 'row-val', text: `${snap.tasks.length} in flight` }),
-      h('span', { class: 'row-label', text: 'Stale after' }), h('span', { class: 'row-val', text: `${snap.staleDays} d without activity` }),
-      h('span', { class: 'row-label', text: 'tmux' }), h('span', { class: 'row-val', text: snap.tmux.available ? `${snap.tmux.windows} windows` : 'not available' }),
+        w.lastBeat ? (w.healthy ? 'Monitoring is on' : 'Monitoring is late') : 'Monitoring has not checked in'),
+      h('span', { class: 'row-label', text: 'Last check' }), h('span', { class: 'row-val', text: agoLong(w.lastBeat) }),
+      h('span', { class: 'row-label', text: 'Captain' }), h('span', { class: 'row-val', text: `${(snap.captain && snap.captain.name) || 'you'} · ${snap.afk ? 'away' : 'here'}` }),
+      h('span', { class: 'row-label', text: 'Workers' }), h('span', { class: 'row-val', text: `${snap.tasks.length} active` }),
+      h('span', { class: 'row-label', text: 'Quiet after' }), h('span', { class: 'row-val', text: `${snap.staleDays} days without activity` }),
+      h('span', { class: 'row-label', text: 'Terminals' }), h('span', { class: 'row-val', text: snap.tmux.available ? `${snap.tmux.windows} open` : 'not available' }),
       h('span', { class: 'row-label', text: 'Updated' }), h('span', { class: 'row-val', text: new Date(snap.generatedAt).toLocaleTimeString() }),
     );
 
@@ -520,60 +530,54 @@
       return h('button', {
         class: 'count' + (n ? '' : ' zero') + (stateFilter === s ? ' active' : ''), type: 'button',
         style: `--c:${stateVar(s)}`, 'aria-pressed': stateFilter === s ? 'true' : 'false',
-        title: `Show only ${STATE_LABEL[s]}`,
+        title: `Show only ${STATE_LABEL[s] || s}`,
         onclick: () => { stateFilter = stateFilter === s ? null : s; renderAll(); },
       }, h('span', { class: 'n', text: n }), h('span', { class: 'l', text: STATE_LABEL[s] }));
     }));
 
     const needs = needsCaptain();
     const calls = snap.backlog.calls || [];
-    const sigOf = (list) => list.map((t) => [t.id, t.state, t.stale, ago(t.lastActivity), lastNote(t)]);
-    ui.needsCount.textContent = needs.length;
-    ui.needsCount.classList.toggle('zero', needs.length === 0);
+    const sigOf = (list) => list.map((t) => [t.id, t.title, t.state, t.stale, ago(t.lastActivity), lastNote(t)]);
+    // Needs you: workers waiting on a call, then queue items waiting on one.
+    ui.needsCount.textContent = needs.length + calls.length;
+    ui.needsCount.classList.toggle('zero', needs.length + calls.length === 0);
     ui.needsTab.textContent = needs.length + calls.length;
     ui.needsTab.hidden = needs.length + calls.length === 0;
-    if (!unchanged('needs', sigOf(needs))) ui.needsList.replaceChildren(...(needs.length
-      ? needs.map((t) => listRow(t, lastNote(t), () => openDrawer({ type: 'task', id: t.id })))
-      : [emptyRow('No crew waiting on the captain.')]));
-
-    ui.callsCount.textContent = calls.length;
-    ui.callsCount.classList.toggle('zero', calls.length === 0);
-    if (!unchanged('calls', calls.map((b) => [b.id, b.title, b.section, b.index]))) ui.callsList.replaceChildren(...(calls.length ? calls.map((b) => {
-      const open = (focus) => openDrawer({ type: 'backlog', id: itemKey(b), section: b.section, index: b.index, focus });
-      const row = h('button', { class: 'row', type: 'button', style: `--c:${stateVar('needs-decision')}`, onclick: () => open(false) },
-        h('span', { class: 'dot' }), h('span', { class: 'r-id', text: b.id || '(untitled)', title: b.id || '' }),
-        h('span', { class: 'r-age', text: (b.tags && b.tags.since) || '' }), h('span', { class: 'r-note', text: b.title }));
-      return b.id ? actionRow(row, 'Answer', () => open(true)) : h('li', null, row);
-    }) : [emptyRow('No Captain\'s Call items in the backlog.')]));
+    if (!unchanged('needs', sigOf(needs), calls.map((b) => [b.id, b.title, b.section, b.index]))) ui.needsList.replaceChildren(...(needs.length + calls.length ? [
+      ...needs.map((t) => listRow(t, () => openDrawer({ type: 'task', id: t.id }))),
+      ...calls.map((b) => {
+        const open = (focus) => openDrawer({ type: 'backlog', id: itemKey(b), section: b.section, index: b.index, focus });
+        const row = itemRow(b, 'needs-decision', () => open(false));
+        return b.id ? actionRow(row, 'Answer', () => open(true)) : h('li', null, row);
+      }),
+    ] : [emptyRow('Nothing needs you right now.')]));
 
     const queued = (snap.backlog.queued || []).map((b, index) => ({ b, index })).filter((x) => !x.b.captainCall && !x.b.checked);
     ui.queuedCount.textContent = queued.length;
     if (!unchanged('queued', queued.map((x) => [x.b.id, x.b.title, x.index]))) ui.queuedList.replaceChildren(...(queued.length ? queued.map(({ b, index }) => {
-      const row = h('button', { class: 'row', type: 'button', style: `--c:${stateVar('unknown')}`, onclick: () => openDrawer({ type: 'backlog', id: itemKey(b), section: 'queued', index }) },
-        h('span', { class: 'dot' }), h('span', { class: 'r-id', text: b.id || '(untitled)', title: b.id || '' }),
-        h('span', { class: 'r-age', text: (b.tags && b.tags.since) || '' }), h('span', { class: 'r-note', text: b.title }));
+      const row = itemRow(b, 'unknown', () => openDrawer({ type: 'backlog', id: itemKey(b), section: 'queued', index }));
       return b.id ? actionRow(row, 'Start', () => startBacklog(b)) : h('li', null, row);
-    }) : [emptyRow('Nothing queued.')]));
+    }) : [emptyRow('Nothing in the queue.')]));
 
     const doneAll = snap.tasks.filter((t) => t.state === 'done' && t.kind !== 'secondmate');
     const done = doneAll.slice().sort((a, b) => (b.statusMtime || 0) - (a.statusMtime || 0)).slice(0, 6);
     ui.cleanupDone.hidden = doneAll.length === 0;
     ui.cleanupDone.textContent = `Clean up all finished (${doneAll.length})`;
     if (!unchanged('done', sigOf(done), doneAll.length)) ui.doneList.replaceChildren(...(done.length
-      ? done.map((t) => listRow(t, lastNote(t), () => openDrawer({ type: 'task', id: t.id })))
+      ? done.map((t) => listRow(t, () => openDrawer({ type: 'task', id: t.id })))
       : [emptyRow('Nothing finished yet.')]));
 
     const prs = snap.tasks.filter((t) => t.pr).sort(sortTasks);
     if (!unchanged('prs', sigOf(prs).map((x, i) => [...x, prs[i].pr]))) ui.prList.replaceChildren(...(prs.length ? prs.map((t) => h('li', null,
       h('a', { class: 'row', href: t.pr, target: '_blank', rel: 'noopener noreferrer', style: `--c:${stateVar(bucket(t))}` },
-        h('span', { class: 'dot' }), h('span', { class: 'r-id', text: t.id }), h('span', { class: 'r-age', text: prNumber(t.pr) })))) : [emptyRow('No PRs recorded in meta.')]));
+        h('span', { class: 'dot' }), h('span', { class: 'r-id', text: t.title || t.id, title: t.id }), h('span', { class: 'r-age', text: prNumber(t.pr) })))) : [emptyRow('No pull requests yet.')]));
 
     const ord = snap.orders || { pending: 0, list: [] };
     ui.ordersCount.textContent = ord.pending;
     ui.ordersCount.classList.toggle('zero', !ord.pending);
     if (!unchanged('orders', ord.list, ord.pending)) ui.ordersList.replaceChildren(...(ord.list.length
       ? ord.list.slice(0, 20).map(orderRow)
-      : [emptyRow('No orders yet.')]));
+      : [emptyRow('No messages yet.')]));
 
     renderJobProjects();
     renderJobConfig();
@@ -585,8 +589,8 @@
     const ids = snap.tasks.filter((t) => t.state === 'done' && t.kind !== 'secondmate').map((t) => t.id).sort();
     if (!ids.length) return;
     queueOrder({ kind: 'cleanup-done', targets: ids }, {
-      title: `Clean up all ${ids.length} finished crew?`,
-      body: h('div', null, h('p', { class: 'confirm-text', text: 'One order listing every finished crew member:' }), h('ul', { class: 'confirm-list' }, ...ids.map((id) => h('li', { text: id })))),
+      title: `Clean up all ${ids.length} finished worker${ids.length === 1 ? '' : 's'}?`,
+      body: h('div', null, h('p', { class: 'confirm-text', text: 'One message listing every finished worker:' }), h('ul', { class: 'confirm-list' }, ...ids.map((id) => h('li', { text: titleOf(id) === id ? id : `${titleOf(id)} (${id})` })))),
     });
   });
 
@@ -637,14 +641,14 @@
     const effort = ui.jobEffort.disabled ? 'auto' : ui.jobEffort.value;
     const setup = `${harness} · ${model || 'first mate default model'} · effort ${effort}`;
     const ok = await queueOrder({ kind: 'new-task', project, taskKind, harness, model, effort, text }, {
-      title: `Queue a new ${taskKind} job in ${project}?`, body: `${text}\n\n(${setup})`,
+      title: `Send a new ${taskKind} task in ${project}?`, body: `${text}\n\n(${setup})`,
     });
     if (ok) { clearDraft(ui.jobText); }
   });
 
   async function startBacklog(b, note) {
     return queueOrder({ kind: 'backlog-start', item: b.id, text: note || `Start ${b.id}: ${b.title}` }, {
-      title: `Start backlog item ${b.id}?`, body: b.title,
+      title: `Start “${b.title || b.id}”?`, body: `From the queue (${b.id}).`,
     });
   }
 
@@ -705,14 +709,15 @@
     if (!t) {
       stopPeek();
       td = null;
-      ui.drawerKicker.replaceChildren('Left the ship');
+      ui.drawerKicker.replaceChildren('Cleaned up');
       ui.drawerTitle.textContent = selected.id;
-      ui.drawerBody.replaceChildren(h('p', { text: 'This task no longer has a meta file in state/. It was probably torn down. Its session stays listed under Sessions.' }));
+      ui.drawerBody.replaceChildren(h('p', { text: 'This worker has been cleaned up. Its session stays listed under Sessions.' }));
       return;
     }
     ui.drawerKicker.replaceChildren(...[h('span', { class: 'pill', style: `background:${stateVar(t.state)}`, text: STATE_LABEL[t.state] }),
-      t.stale ? h('span', { class: 'pill', style: `background:${stateVar('stale')}`, text: 'stale' }) : null, t.kind].filter(Boolean));
-    ui.drawerTitle.textContent = t.id;
+      t.stale ? h('span', { class: 'pill', style: `background:${stateVar('stale')}`, text: L.quietText(t.lastActivity).toLowerCase() }) : null, t.kind,
+      h('span', { class: 'mono', text: t.id })].filter(Boolean));
+    ui.drawerTitle.textContent = t.title || t.id;
     if (!td || td.id !== t.id || !td.root.isConnected) buildTaskDrawer(t);
     td.task = t;
     if (!unchanged('drawer-info', t, snap.tmux.available)) td.info.replaceChildren(...taskInfo(t));
@@ -735,36 +740,39 @@
         h('span', { class: 'file-ico', 'aria-hidden': 'true', text: '¶' }), name));
     }
     if (t.worktree) {
-      const b = h('button', { class: 'link-btn copy', type: 'button', text: 'Copy worktree path' });
+      const b = h('button', { class: 'link-btn copy', type: 'button', text: 'Copy workspace path' });
       b.addEventListener('click', () => copyText(t.worktree, b));
       links.append(b);
     }
     if (links.childNodes.length) kids.push(links);
     const dl = h('dl', { class: 'facts' });
+    fact(dl, 'Now', L.summary(t));
+    fact(dl, 'Task id', t.id, true);
     fact(dl, 'Project', t.project);
     fact(dl, 'Kind', t.kind);
     fact(dl, 'Mode', t.mode);
-    fact(dl, 'Harness', [t.harness, t.model && `model ${t.model}`, t.effort && `effort ${t.effort}`].filter(Boolean).join(' · '));
-    fact(dl, 'Window', t.window ? `${t.window}${t.alive === true ? '  (open)' : t.alive === false ? '  (closed)' : ''}` : null, true);
-    fact(dl, 'Worktree', t.worktree, true);
+    fact(dl, 'Tool', [t.harness, t.model && `model ${t.model}`, t.effort && `effort ${t.effort}`].filter(Boolean).join(' · '));
+    fact(dl, 'Terminal', t.window ? `${t.window}${t.alive === true ? '  (open)' : t.alive === false ? '  (closed)' : ''}` : null, true);
+    fact(dl, 'Workspace', t.worktree, true);
     fact(dl, 'PR head', t.prHead ? t.prHead.slice(0, 12) : null, true);
     fact(dl, 'Last activity', t.lastActivity ? `${agoLong(t.lastActivity)} · ${stamp(t.lastActivity)}` : null);
-    if (t.stale) fact(dl, 'Stale', staleText(t));
+    if (t.stale) fact(dl, 'Quiet', staleText(t));
     fact(dl, 'Turn ended', t.turnEnded ? `${agoLong(t.turnEnded)} · ${stamp(t.turnEnded)}` : 'not yet');
-    fact(dl, 'Status lines', String(t.statusCount));
     kids.push(dl);
-    kids.push(h('h3', { text: `Latest status (${Math.min(5, t.lastStatus.length)} of ${t.statusCount})` }));
-    if (!t.lastStatus.length) kids.push(h('p', { class: 'empty', text: 'No status reported yet.' }));
-    else {
-      kids.push(h('ol', { class: 'timeline' }, ...t.lastStatus.slice().reverse().map((e) => {
-        const when = e.ts || (e.approxTs ? `≈ ${stamp(e.approxTs)}` : 'no timestamp');
-        const note = h('div', { class: 't-note', text: e.note, title: 'Click to expand' });
-        note.addEventListener('click', () => note.classList.toggle('expanded'));
-        return h('li', { style: `--c:${stateVar(e.state === 'resolved' ? 'working' : e.state)}` },
-          h('div', { class: 't-head' }, h('strong', { text: e.state }), e.key ? h('span', { text: `[${e.key}]` }) : null, h('span', { text: when })),
-          note);
-      })));
-    }
+    const entry = (e) => {
+      const when = e.ts || (e.approxTs ? `≈ ${stamp(e.approxTs)}` : 'no timestamp');
+      const note = h('div', { class: 't-note', text: e.note, title: 'Click to expand' });
+      note.addEventListener('click', () => note.classList.toggle('expanded'));
+      return h('li', { style: `--c:${stateVar(e.state === 'resolved' ? 'working' : e.state)}` },
+        h('div', { class: 't-head' }, h('strong', { text: e.state }), e.key ? h('span', { text: `[${e.key}]` }) : null, h('span', { text: when })),
+        note);
+    };
+    // Latest update: the worker's full last line, verbatim; the earlier ones below it.
+    const recent = t.lastStatus.slice().reverse();
+    kids.push(h('h3', { text: 'Latest update' }));
+    if (!recent.length) kids.push(h('p', { class: 'empty', text: 'No update yet.' }));
+    else kids.push(h('ol', { class: 'timeline' }, entry(recent[0])));
+    if (recent.length > 1) kids.push(h('h3', { text: 'Earlier updates' }), h('ol', { class: 'timeline' }, ...recent.slice(1).map(entry)));
     return kids;
   }
 
@@ -794,14 +802,14 @@
     if (!ATTENTION.has(t.state) || t.state === 'failed') { td.decision.hidden = true; td.decision.replaceChildren(); return; }
     td.decision.hidden = false;
     td.decision.replaceChildren(
-      h('h3', { text: t.state === 'blocked' ? 'Blocked: help it along' : 'Decision needed' }),
+      h('h3', { text: t.state === 'blocked' ? 'Blocked: help it along' : 'Needs your call' }),
       h('div', { class: 'decision-note', text: lastNote(t) || '(no note)' }),
       answerPanel({
         options: t.options,
         draftKey: 'decision.' + t.id,
         placeholder: t.options.length ? 'Optional note or your own answer…' : 'Your answer…',
         send: (opt, extra) => queueOrder({ kind: 'decision', target: t.id, option: opt ? opt.letter : null, text: answerText(opt, extra) }, {
-          title: opt ? `Answer ${t.id} with option ${opt.letter}?` : `Send this answer to ${t.id}?`,
+          title: opt ? `Answer “${t.title || t.id}” with option ${opt.letter}?` : `Send this answer to “${t.title || t.id}”?`,
           body: answerText(opt, extra),
         }),
       }));
@@ -822,28 +830,28 @@
       }
       const sel = h('select', { 'aria-label': `${field} for ${t.id}` }, ...list.map((v) => h('option', { value: v, text: v })));
       sel.value = list.includes(c.pending[field] || c[field]) ? (c.pending[field] || c[field]) : list[0];
-      const btn = h('button', { class: 'act-btn', type: 'button', text: live ? 'Apply live' : 'Queue change', onclick: () => applyConfig(t, field, sel.value, live) });
+      const btn = h('button', { class: 'act-btn', type: 'button', text: live ? 'Apply live' : 'Send change', onclick: () => applyConfig(t, field, sel.value, live) });
       rows.push(h('div', { class: 'cfg-row' }, h('span', { class: 'cfg-label', text: field }), h('span', { class: 'cfg-val mono', text: show(field) }), sel, btn));
     }
-    td.config.replaceChildren(h('h3', { text: 'Configuration' }),
-      h('p', { class: 'hint', text: `Harness: ${c.harness}. ` + (live
-        ? 'Changes are sent as /effort or /model to its terminal via fm-send; Claude Code queues slash commands, so they apply from its next turn.'
-        : spec.live ? 'No tmux window recorded, so changes are queued for the first mate to apply on relaunch.'
-          : `${c.harness} workers cannot change live; changes are queued for the first mate to apply on relaunch.`) }),
+    td.config.replaceChildren(h('h3', { text: 'Settings' }),
+      h('p', { class: 'hint', text: `Tool: ${c.harness}. ` + (live
+        ? 'Changes are typed into its terminal as /effort or /model; Claude Code applies them from its next turn.'
+        : spec.live ? 'No terminal is open for it, so the first mate applies changes when it next restarts the worker.'
+          : `${c.harness} workers cannot change live; the first mate applies changes when it next restarts the worker.`) }),
       ...rows);
   }
   async function applyConfig(t, field, value, live) {
     const ok = await confirmDialog({
-      title: `Set ${field} of ${t.id} to ${value}?`,
+      title: `Set ${field} of “${t.title || t.id}” to ${value}?`,
       body: live
-        ? `Sends “/${field} ${value}” into its terminal now (fm-send). It applies from the worker's next turn, and a config order is recorded for the first mate.`
-        : `Queues a config order; the first mate applies it when it next relaunches ${t.id}.`,
-      yes: live ? 'Apply now' : 'Queue change',
+        ? `Types “/${field} ${value}” into its terminal now. It applies from the worker's next turn, and the first mate is told about the change.`
+        : `Tells the first mate, who applies it when it next restarts this worker.`,
+      yes: live ? 'Apply now' : 'Send change',
     });
     if (!ok) return;
     const r = await post('/api/config', { id: t.id, field, value });
-    if (r.ok) { toast(r.applied ? `Sent ${r.command} to ${t.id}` : `Queued: ${t.id} ${field} → ${value} on relaunch`, 'ok'); poll(); }
-    else toast(`Config change failed: ${r.error}`, 'err');
+    if (r.ok) { toast(r.applied ? `Sent ${r.command} to ${t.title || t.id}` : `Sent: ${field} → ${value} on restart`, 'ok'); poll(); }
+    else toast(`Settings change failed: ${r.error}`, 'err');
   }
 
   function buildTaskDrawer(t) {
@@ -866,16 +874,17 @@
     d.resume = h('section', { class: 'drawer-sec' });
     d.config = h('section', { class: 'drawer-sec config-sec' });
 
-    // Orders to the first mate about this worker.
-    d.mergeBtn = h('button', { class: 'act-btn', type: 'button', text: 'Merge its PR', onclick: () => queueOrder({ kind: 'merge', target: id }, { title: `Ask the first mate to merge ${id}'s PR?`, body: (td && td.task && td.task.pr) || null }) });
+    // Messages to the first mate about this worker.
+    const name = () => (td && td.task && td.task.title) || id;
+    d.mergeBtn = h('button', { class: 'act-btn', type: 'button', text: 'Merge its pull request', onclick: () => queueOrder({ kind: 'merge', target: id }, { title: `Ask the first mate to merge the pull request of “${name()}”?`, body: (td && td.task && td.task.pr) || null }) });
     d.ordersList = h('ul', { class: 'list orders compact' });
     const ordersSec = h('section', { class: 'drawer-sec' },
-      h('h3', { text: 'Orders to the first mate' }),
-      h('p', { class: 'hint', text: 'Queued for the first mate to act on; Ship Deck does not run them.' }),
+      h('h3', { text: 'Ask the first mate' }),
+      h('p', { class: 'hint', text: 'Sent to the first mate to act on; Ship Deck does not do these itself.' }),
       h('div', { class: 'btn-row' },
         h('button', { class: 'act-btn', type: 'button', text: 'Ask for status', onclick: () => queueOrder({ kind: 'status', target: id }) }),
         d.mergeBtn,
-        h('button', { class: 'act-btn', type: 'button', text: 'Clean up this worker', onclick: () => queueOrder({ kind: 'cleanup', target: id }, { title: `Ask the first mate to clean up ${id}?`, body: 'Tears down its window and worktree once its work is safe.' }) })),
+        h('button', { class: 'act-btn', type: 'button', text: 'Clean up this worker', onclick: () => queueOrder({ kind: 'cleanup', target: id }, { title: `Ask the first mate to clean up “${name()}”?`, body: 'Closes its terminal and workspace once its work is safe.' }) })),
       d.ordersList);
 
     // Message the worker directly (fm-send), with a confirmation step.
@@ -886,16 +895,16 @@
       e.preventDefault();
       const text = msg.value.replace(/\s+/g, ' ').trim();
       if (!text) { msg.focus(); return; }
-      if (!await confirmDialog({ title: `Send to ${id} now?`, body: text, yes: 'Send now' })) return;
+      if (!await confirmDialog({ title: `Send to “${name()}” now?`, body: text, yes: 'Send now' })) return;
       sendBtn.disabled = true;
       const r = await post('/api/send', { id, message: text });
       sendBtn.disabled = false;
-      if (r.ok) { clearDraft(msg); toast(`Sent to ${id}`, 'ok'); setTimeout(refreshPeek, 600); }
-      else toast(`Send to ${id} failed: ${r.error || 'unknown error'}`, 'err');
+      if (r.ok) { clearDraft(msg); toast(`Sent to ${name()}`, 'ok'); setTimeout(refreshPeek, 600); }
+      else toast(`Send to ${name()} failed: ${r.error || 'unknown error'}`, 'err');
     });
     d.msgWrap = h('section', { class: 'drawer-sec' },
       h('h3', { text: 'Message the worker' }),
-      h('p', { class: 'hint', text: 'Types one line into its tmux window via fm-send. Use sparingly: it bypasses the first mate.' }),
+      h('p', { class: 'hint', text: 'Types one line straight into its terminal. Use sparingly: it bypasses the first mate.' }),
       form);
 
     // Live terminal peek.
@@ -923,7 +932,7 @@
   function renderTaskOrders(t) {
     const mine = ((snap.orders && snap.orders.list) || []).filter((o) => o.target === t.id || (o.targets && o.targets.includes(t.id)));
     if (unchanged('drawer-orders', t.id, mine)) return;
-    td.ordersList.replaceChildren(...(mine.length ? mine.slice(0, 8).map(orderRow) : [emptyRow('No orders about this worker yet.')]));
+    td.ordersList.replaceChildren(...(mine.length ? mine.slice(0, 8).map(orderRow) : [emptyRow('No messages about this worker yet.')]));
   }
 
   // ---------- terminal peek ----------
@@ -1009,58 +1018,58 @@
 
   function renderBacklogDrawer() {
     const b = backlogItem();
-    const sectionName = { captain: "Captain's Call", inFlight: 'In flight', queued: 'Queued', done: 'Done', other: 'Backlog' }[selected.section] || 'Backlog';
-    ui.drawerKicker.replaceChildren(`Backlog · ${sectionName}${b && b.captainCall ? " · Captain's Call" : ''}`);
-    ui.drawerTitle.textContent = selected.id;
-    if (!b) { ui.drawerBody.replaceChildren(h('p', { text: 'This backlog item is no longer listed.' })); return; }
+    const sectionName = { captain: 'Needs you', inFlight: 'In progress', queued: 'Waiting', done: 'Done', other: 'Other' }[selected.section] || 'Other';
+    ui.drawerKicker.replaceChildren(`Queue · ${sectionName}${b && b.captainCall && selected.section !== 'captain' ? ' · Needs you' : ''}`, b && b.id ? h('span', { class: 'mono', text: ' · ' + b.id }) : '');
+    ui.drawerTitle.textContent = (b && b.title) || selected.id;
+    if (!b) { ui.drawerBody.replaceChildren(h('p', { text: 'This item is no longer in the queue.' })); return; }
     if (unchanged('drawer-backlog', selected.id, selected.section, b, (snap.orders && snap.orders.list || []).filter((o) => o.item === b.id))) return;
-    const kids = [h('p', { class: 'brief', text: b.title })];
+    const kids = [];
     const call = (snap.backlog.calls || []).find((c) => c.id && c.id === b.id);
     if (b.id && call) {
       kids.push(h('section', { class: 'drawer-sec decision-sec' },
-        h('h3', { text: "Captain's Call: your answer" }),
+        h('h3', { text: 'Needs you: your answer' }),
         b.tags.hold ? h('div', { class: 'decision-note', text: b.tags.hold }) : null,
         answerPanel({
           options: call.options,
           draftKey: 'call.' + b.id,
           placeholder: call.options.length ? 'Optional note or your own answer…' : 'Your answer…',
           send: (opt, extra) => queueOrder({ kind: 'backlog-answer', item: b.id, option: opt ? opt.letter : null, text: answerText(opt, extra) }, {
-            title: opt ? `Answer ${b.id} with option ${opt.letter}?` : `Send this answer on ${b.id}?`, body: answerText(opt, extra),
+            title: opt ? `Answer “${b.title || b.id}” with option ${opt.letter}?` : `Send this answer on “${b.title || b.id}”?`, body: answerText(opt, extra),
           }),
         })));
     } else if (b.id && selected.section === 'queued' && !b.checked) {
-      const note = persist(h('textarea', { rows: '2', maxlength: '2000', placeholder: 'Optional instructions for this job…', 'aria-label': 'Instructions' }), 'start.' + b.id);
+      const note = persist(h('textarea', { rows: '2', maxlength: '2000', placeholder: 'Optional instructions for this task…', 'aria-label': 'Instructions' }), 'start.' + b.id);
       kids.push(h('section', { class: 'drawer-sec' },
         h('h3', { text: 'Start this' }),
-        h('p', { class: 'hint', text: 'Queues an order asking the first mate to dispatch this backlog item.' }),
+        h('p', { class: 'hint', text: 'Asks the first mate to start a worker on this queue item.' }),
         h('div', { class: 'answer' }, note, h('div', { class: 'btn-row end' }, h('button', { class: 'act-btn primary', type: 'button', text: 'Start this', onclick: async () => {
           if (await startBacklog(b, note.value.trim() ? `Start ${b.id}: ${b.title}\n\n${note.value.trim()}` : null)) clearDraft(note);
         } })))));
     } else if (!b.id) {
-      kids.push(h('p', { class: 'hint', text: 'This item has no id, so it cannot be ordered from here. Mention it in the Bridge chat instead.' }));
+      kids.push(h('p', { class: 'hint', text: 'This item has no id, so it cannot be started from here. Mention it in the Bridge chat instead.' }));
     }
     const dl = h('dl', { class: 'facts' });
-    if (b.captainCall) fact(dl, 'Needs', 'captain decision');
+    if (b.captainCall) fact(dl, 'Needs', 'your decision');
     for (const [k, v] of Object.entries(b.tags || {})) if (!(call && k === 'hold')) fact(dl, k, v.length > 600 ? v.slice(0, 600) + '…' : v);
     kids.push(h('h3', { text: 'Details' }), dl);
     if (b.notes.length) kids.push(h('h3', { text: 'Notes' }), h('pre', { class: 'notes-block', text: b.notes.join('\n') }));
     const mine = ((snap.orders && snap.orders.list) || []).filter((o) => o.item === b.id);
-    if (mine.length) kids.push(h('h3', { text: 'Orders about this item' }), h('ul', { class: 'list orders compact' }, ...mine.slice(0, 6).map(orderRow)));
+    if (mine.length) kids.push(h('h3', { text: 'Messages about this item' }), h('ul', { class: 'list orders compact' }, ...mine.slice(0, 6).map(orderRow)));
     ui.drawerBody.replaceChildren(...kids);
     if (selected.focus) { selected.focus = false; const ta = ui.drawerBody.querySelector('textarea'); if (ta) ta.focus(); }
   }
 
   function renderSecondmateDrawer() {
     const r = (snap.secondmates.registry || []).find((x) => x.id === selected.id);
-    ui.drawerKicker.replaceChildren('Secondmate · registry');
+    ui.drawerKicker.replaceChildren('Secondmate');
     ui.drawerTitle.textContent = selected.id;
-    if (!r) { ui.drawerBody.replaceChildren(h('p', { text: 'Not in data/secondmates.md any more.' })); return; }
+    if (!r) { ui.drawerBody.replaceChildren(h('p', { text: 'No longer registered.' })); return; }
     const dl = h('dl', { class: 'facts' });
     fact(dl, 'About', r.description);
     fact(dl, 'Home', r.home, true);
     fact(dl, 'Scope', r.scope);
     fact(dl, 'Projects', r.projects);
-    ui.drawerBody.replaceChildren(dl, h('p', { class: 'empty', text: 'No live meta record: this secondmate is off watch.' }));
+    ui.drawerBody.replaceChildren(dl, h('p', { class: 'empty', text: 'Not running right now.' }));
   }
 
   function renderFirstMateDrawer() {
@@ -1070,8 +1079,8 @@
     if (unchanged('drawer-fm', sess, snap.watcher, snap.orders && snap.orders.pending)) return;
     const dl = h('dl', { class: 'facts' });
     fact(dl, 'Home', snap.home, true);
-    fact(dl, 'Watch', snap.watcher.lastBeat ? `${snap.watcher.healthy ? 'keeping' : 'stale'} · beat ${agoLong(snap.watcher.lastBeat)}` : 'no heartbeat');
-    fact(dl, 'Pending orders', String((snap.orders && snap.orders.pending) || 0));
+    fact(dl, 'Monitoring', snap.watcher.lastBeat ? `${snap.watcher.healthy ? 'on' : 'late'} · last check ${agoLong(snap.watcher.lastBeat)}` : 'has not checked in');
+    fact(dl, 'Unread messages', String((snap.orders && snap.orders.pending) || 0));
     ui.drawerBody.replaceChildren(dl,
       h('div', { class: 'btn-row' }, h('button', { class: 'act-btn primary', type: 'button', text: 'Open the Bridge chat', onclick: () => { closeDrawer(); showTab('bridge'); ui.chatText.focus(); } })),
       h('section', { class: 'drawer-sec' }, h('h3', { text: 'Resume in terminal' }),
@@ -1244,6 +1253,7 @@
     ui.fmPill.textContent = label;
     ui.fmPill.className = 'fm-pill ' + (act.working ? 'on' : 'off');
     ui.activityDot.hidden = !act.working;
+    renderHealth();
     ui.activityState.textContent = label;
     ui.activityState.className = 'fm-state ' + (act.working ? 'on' : 'off');
     ui.activitySub.textContent = has
@@ -1319,7 +1329,7 @@
         h('div', { class: 'msg-col' }, h('div', { class: 'msg-meta' }, h('strong', { text: 'First mate' }), stampEl), quote, x.text ? body : null, attachmentsBlock(x.attachments)));
     }
     const isChat = x.kind === 'chat';
-    const head = isChat ? null : h('div', { class: 'order-head' }, h('span', { class: 'o-kind', text: KIND_LABEL[x.kind] || x.kind }), x.target ? h('span', { class: 'mono', text: x.target }) : null,
+    const head = isChat ? null : h('div', { class: 'order-head' }, h('span', { class: 'o-kind', text: L.kindLabel(x.kind) }), x.target ? h('span', { text: titleOf(x.target), title: x.target }) : null,
       payloadText(x) ? h('span', { class: 'o-extra', text: payloadText(x) }) : null);
     return h('li', { class: 'msg captain' + (isChat ? '' : ' action'), 'data-id': x.id },
       h('div', { class: 'msg-col' },
@@ -1359,7 +1369,7 @@
     if (!thread.length) {
       kids.push(h('li', { class: 'thread-empty' },
         h('p', { text: 'No messages yet.' }),
-        h('p', { class: 'hint', text: 'Ask the first mate anything: “what needs me?”, “start the watcher fix”, “summarise PR 42”. Every message is queued as an order, and replies show up here.' })));
+        h('p', { class: 'hint', text: 'Ask the first mate anything: “what needs me?”, “start the monitoring fix”, “summarise PR 42”. Every message goes to the first mate, and replies show up here.' })));
     }
     ui.thread.replaceChildren(...kids);
     threadRendered = true;
@@ -1661,14 +1671,14 @@
     const p = Notification.permission;
     ui.notifyBtn.textContent = p === 'granted' ? 'Alerts on' : p === 'denied' ? 'Alerts blocked' : 'Enable alerts';
     ui.notifyBtn.setAttribute('aria-pressed', p === 'granted' ? 'true' : 'false');
-    ui.notifyBtn.title = p === 'denied' ? 'Notifications are blocked for this site in the browser settings' : 'Browser notifications for new replies and items needing the captain';
+    ui.notifyBtn.title = p === 'denied' ? 'Notifications are blocked for this site in the browser settings' : 'Browser notifications for new replies and items that need you';
   }
   ui.notifyBtn.addEventListener('click', async () => {
     if (!canNotify) return;
     if (Notification.permission === 'default') {
       try { await Notification.requestPermission(); } catch { /* ignore */ }
     } else if (Notification.permission === 'granted') {
-      notify('Ship Deck alerts are on', 'You will be told about new first mate replies and new items needing the captain.', 'shipdeck-test');
+      notify('Ship Deck alerts are on', 'You will be told about new first mate replies and new items that need you.', 'shipdeck-test');
     }
     renderNotifyBtn();
   });
@@ -1692,20 +1702,20 @@
     const r = fresh[fresh.length - 1];
     notify(fresh.length > 1 ? `First mate (${fresh.length} new)` : 'First mate', r.text, 'shipdeck-reply', () => showTab('bridge'));
   }
-  // New "needs the captain" items: crew entering decision/blocked/failed, or new Captain's Calls.
+  // New "needs you" items: workers entering decision/blocked/failed, or new queue decisions.
   function notifyNeeds() {
     const now = [
-      ...needsCaptain().map((t) => ({ key: `t:${t.id}:${t.state}:${t.statusCount}`, title: `${t.id} needs the captain`, body: lastNote(t), open: () => openDrawer({ type: 'task', id: t.id }) })),
-      ...(snap.backlog.calls || []).filter((b) => b.id).map((b) => ({ key: `c:${b.id}`, title: `Captain's Call: ${b.id}`, body: b.title, open: () => openDrawer({ type: 'backlog', id: b.id, section: b.section, index: b.index }) })),
+      ...needsCaptain().map((t) => ({ key: `t:${t.id}:${t.state}:${t.statusCount}`, title: `${t.title || t.id} needs you`, body: L.summary(t), open: () => openDrawer({ type: 'task', id: t.id }) })),
+      ...(snap.backlog.calls || []).filter((b) => b.id).map((b) => ({ key: `c:${b.id}`, title: `Needs you: ${b.title || b.id}`, body: b.id, open: () => openDrawer({ type: 'backlog', id: b.id, section: b.section, index: b.index }) })),
     ];
     const seen = store.json('seenNeeds', null);
     store.set('seenNeeds', JSON.stringify(now.map((x) => x.key)));
     if (!seen) return;
     const fresh = now.filter((x) => !seen.includes(x.key));
     if (!fresh.length) return;
-    toast(fresh.length > 1 ? `${fresh.length} new items need the captain` : fresh[0].title, 'ok');
+    toast(fresh.length > 1 ? `${fresh.length} new items need you` : fresh[0].title, 'ok');
     if (fresh.length === 1) notify(fresh[0].title, fresh[0].body, 'shipdeck-needs', fresh[0].open);
-    else notify(`${fresh.length} new items need the captain`, fresh.map((x) => x.title).join('\n'), 'shipdeck-needs', () => showTab('command'));
+    else notify(`${fresh.length} new items need you`, fresh.map((x) => x.title).join('\n'), 'shipdeck-needs', () => showTab('command'));
   }
 
   // ---------- sessions ----------
@@ -1725,16 +1735,17 @@
   function renderSessions() {
     if (!sessionEntries) return;
     const q = ui.sessionsFilter.value.trim().toLowerCase();
-    const list = sessionEntries.filter((e) => !q || [e.id, e.cwd, e.sessionId, e.harness, e.firstmate && 'first mate'].join(' ').toLowerCase().includes(q));
+    const list = sessionEntries.filter((e) => !q || [e.id, !e.firstmate && titleOf(e.id), e.cwd, e.sessionId, e.harness, e.firstmate && 'first mate'].join(' ').toLowerCase().includes(q));
     if (unchanged('sessions', list, q)) return;
     ui.sessionsList.replaceChildren(...(list.length ? list.map((e) => {
-      const name = e.firstmate ? 'First mate' : e.id;
+      const name = e.firstmate ? 'First mate' : titleOf(e.id);
       const tag = e.firstmate ? 'helm' : e.present ? 'aboard' : 'departed';
       return h('li', { class: 'session' + (e.present ? '' : ' departed') },
         h('div', { class: 'session-head' },
           e.present && !e.firstmate
             ? h('button', { class: 'linkish mono', type: 'button', text: name, onclick: () => openDrawer({ type: 'task', id: e.id }) })
             : h('span', { class: 'mono strong', text: name }),
+          !e.firstmate && name !== e.id ? h('span', { class: 'r-rid', text: e.id }) : null,
           h('span', { class: 'tag tag-' + tag, text: tag }),
           h('span', { class: 'r-age', text: e.lastSeen ? `seen ${ago(e.lastSeen)}` : '' })),
         resumeBlock(e));
@@ -1742,10 +1753,44 @@
   }
   ui.sessionsFilter.addEventListener('input', renderSessions);
 
+  // ---------- health strip ----------
+  // Deck running · First mate listening (transcript activity < 2 min) · Monitoring · Last update.
+  function setHealth(el, cls, text, title) {
+    el.classList.remove('ok', 'warn', 'err');
+    if (cls) el.classList.add(cls);
+    el.querySelector('.health-text').textContent = text;
+    if (title) el.title = title;
+  }
+  function renderHealth() {
+    if (!snap || snap.firstRun) return;
+    const fmAt = act.lastAt;
+    const listening = act.working || (fmAt && Date.now() - fmAt < LISTENING_MS);
+    setHealth(ui.healthFm, listening ? 'ok' : act.loaded && !act.sessionId ? 'err' : null,
+      listening ? 'First mate listening' : act.loaded && !act.sessionId ? 'First mate not found' : 'First mate quiet',
+      fmAt ? `Last first mate activity ${agoLong(fmAt)}` : 'No first mate activity seen yet');
+    const w = snap.watcher;
+    setHealth(ui.healthMon, w.lastBeat ? (w.healthy ? 'ok' : 'warn') : 'err',
+      w.lastBeat ? (w.healthy ? 'Monitoring' : 'Monitoring late') : 'Not monitoring',
+      w.lastBeat ? `Last monitoring check ${agoLong(w.lastBeat)}` : 'Monitoring has not checked in');
+    ui.healthTime.textContent = lastOkAt ? `Updated ${new Date(lastOkAt).toLocaleTimeString()}` : '';
+  }
+
+  // First run: the server found no firstmate home, so explain how to point it at one.
+  function renderFirstRun() {
+    document.body.classList.add('first-run-mode');
+    ui.firstRun.hidden = false;
+    ui.home.textContent = 'No firstmate home yet';
+    ui.firstRunChecked.replaceChildren(...['--home flag', 'FM_HOME', ...(snap.checked || [])].map((p) => h('li', { text: p })));
+    ui.healthFm.hidden = true;
+    ui.healthMon.hidden = true;
+  }
+
   // ---------- wiring ----------
   function renderAll() {
     if (!snap) return;
-    ui.home.textContent = snap.home;
+    if (snap.firstRun) return renderFirstRun();
+    ui.home.textContent = snap.homeLabel || snap.home;
+    ui.home.title = `Firstmate home (read-only): ${snap.home}`;
     renderBridge();
     renderDeck();
     renderCabins();
@@ -1783,9 +1828,12 @@
       snap = await res.json();
       lastOkAt = Date.now();
       if (failures) { toast('Reconnected to the Ship Deck server', 'ok'); ui.reconnect.hidden = true; clearInterval(countdown); }
+      if (!snap.firstRun && document.body.classList.contains('first-run-mode')) { location.reload(); return; } // restarted with a home
       failures = 0;
       renderAll();
-      setSync(true, `Live · ${new Date(lastOkAt).toLocaleTimeString()}`);
+      setSync(true, 'Deck running');
+      renderHealth();
+      if (snap.firstRun) { timer = setTimeout(poll, 10000); return; }
       if (snap.thread && snap.thread.sig !== threadSig) loadThread(snap.thread.sig);
       notifyNeeds();
       if (activeTab === 'sessions') loadSessions(false);
@@ -1794,7 +1842,8 @@
     } catch (e) {
       failures++;
       delay = Math.min(15000, POLL_MS * Math.pow(1.6, failures - 1));
-      setSync(false, lastOkAt ? `Offline · last ${new Date(lastOkAt).toLocaleTimeString()}` : 'Cannot reach server');
+      setSync(false, 'Deck offline');
+      ui.healthTime.textContent = lastOkAt ? `Last update ${new Date(lastOkAt).toLocaleTimeString()}` : '';
       showReconnect(delay);
     }
     timer = setTimeout(poll, delay);

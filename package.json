@@ -4,7 +4,19 @@
   "private": true,
   "description": "Live view of a firstmate fleet as an animated ship deck, and the captain's control surface",
   "license": "UNLICENSED",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "ship-deck": "bin/ship-deck.js"
+  },
+  "files": [
+    "server.js",
+    "lib/",
+    "public/",
+    "bin/",
+    "README.md"
+  ],
   "scripts": {
     "start": "node server.js",
     "test": "node --test test/*.test.js"

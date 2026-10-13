@@ -910,3 +910,15 @@ body.resizing .scene, body.resizing .pane { pointer-events: none; }
 .job-config label { display: grid; gap: 4px; font-weight: 600; min-width: 0; }
 .job-config select { max-width: none; width: 100%; background: var(--panel-2); }
 .job-config select:disabled { opacity: 0.55; }
+
+/* ---------- health strip and first run ---------- */
+.health { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: flex-end; }
+.sync.warn .sync-dot { background: var(--s-needs-decision); }
+.health-time { color: var(--ink-3); }
+.first-run { max-width: 640px; margin: 40px auto; padding: 24px 28px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; font-size: 14px; line-height: 1.5; }
+.first-run h2 { margin: 0 0 10px; font-size: 18px; }
+.first-run code, .first-run-checked { font-family: var(--font-mono); font-size: 12.5px; }
+.first-run-cmd { padding: 10px 12px; border-radius: 8px; background: var(--panel-2); font: 12.5px/1.6 var(--font-mono); overflow-x: auto; }
+body.first-run-mode .layout, body.first-run-mode .search, body.first-run-mode #library-btn { display: none; }
+.label .rid { display: block; margin-top: 1px; font: 9.5px/1.2 var(--font-mono); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list .r-rid { margin-left: 6px; font: 10.5px var(--font-mono); color: var(--ink-3); }

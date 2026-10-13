@@ -143,17 +143,17 @@ test('new order kinds validate their payloads', (t) => {
 
   const c = orders.createOrder(dir, { kind: 'cleanup-done', targets: ['beta-scout', 'beta-scout'] }, ctx);
   assert.deepEqual(c.targets, ['beta-scout'], 'deduplicated');
-  assert.equal(c.text, 'Clean up all finished crew');
+  assert.equal(c.text, 'Clean up all finished workers');
   assert.throws(() => orders.validateOrder({ kind: 'cleanup-done', targets: ['alpha-fix'] }, ctx), /alpha-fix is not done/);
-  assert.throws(() => orders.validateOrder({ kind: 'cleanup-done', targets: [] }, ctx), /no finished crew/);
+  assert.throws(() => orders.validateOrder({ kind: 'cleanup-done', targets: [] }, ctx), /no finished workers/);
   assert.throws(() => orders.validateOrder({ kind: 'cleanup-done', targets: ['../x'] }, ctx), /invalid target/);
-  assert.throws(() => orders.validateOrder({ kind: 'cleanup-done', targets: 'beta-scout' }, ctx), /no finished crew/);
+  assert.throws(() => orders.validateOrder({ kind: 'cleanup-done', targets: 'beta-scout' }, ctx), /no finished workers/);
 
   assert.equal(orders.createOrder(dir, { kind: 'backlog-start', item: 'tide-cache' }, ctx).item, 'tide-cache');
   const ba = orders.createOrder(dir, { kind: 'backlog-answer', item: 'drop-legacy-decision', option: 'A', text: 'keep it' }, ctx);
   assert.equal(ba.option, 'A');
-  assert.throws(() => orders.validateOrder({ kind: 'backlog-start', item: 'nope' }, ctx), /unknown backlog item/);
-  assert.throws(() => orders.validateOrder({ kind: 'backlog-start', item: '../../etc' }, ctx), /invalid backlog item/);
+  assert.throws(() => orders.validateOrder({ kind: 'backlog-start', item: 'nope' }, ctx), /unknown queue item/);
+  assert.throws(() => orders.validateOrder({ kind: 'backlog-start', item: '../../etc' }, ctx), /invalid queue item/);
   assert.throws(() => orders.validateOrder({ kind: 'backlog-answer', item: 'tide-cache' }, ctx), /pick an option/);
 
   assert.throws(() => orders.validateOrder({ kind: 'chat', text: '   ' }), /text is required/);
@@ -269,7 +269,7 @@ function writeTranscript(claudeDir, cwd, sessionId, { started, mtime, brief = ''
 }
 
 test('encodeCwd matches Claude project dir names', () => {
-  assert.ok(sessions.encodeCwd('/Users/aryanbhandari/.treehouse/ship-deck-aeac92/1/ship-deck').includes('-Users-aryanbhandari--treehouse-ship-deck-aeac92-1-ship-deck'));
+  assert.ok(sessions.encodeCwd('/Users/sample/.pool/ship-deck-ab12/1/ship-deck').includes('-Users-sample--pool-ship-deck-ab12-1-ship-deck'));
   assert.ok(sessions.encodeCwd('/tmp/a_b/c/').includes('-tmp-a-b-c'), 'other separators and a trailing slash');
 });
 
@@ -461,19 +461,17 @@ test('HTTP: chat, thread, sessions, skills and validated order kinds', async (t)
   assert.match(sk.text, /\| High \| 4.2 m \|/);
 });
 
-test('start.sh starts nothing when the port is already served', (t) => {
+test('start.sh starts nothing when Ship Deck already answers on the port', async (t) => {
   const http = require('node:http');
-  const srv = http.createServer((q, s) => s.end('busy'));
-  return new Promise((resolve, reject) => srv.listen(0, '127.0.0.1', () => {
-    t.after(() => srv.close());
-    const home = tempDir(t, 'ship-deck-home-');
-    try {
-      const out = execFileSync('/bin/sh', [path.join(ROOT, 'bin/start.sh'), '--port', String(srv.address().port)], { env: { PATH: process.env.PATH, HOME: home }, encoding: 'utf8' });
-      assert.match(out, /already running/);
-      assert.equal(fs.existsSync(path.join(home, '.ship-deck', 'server.log')), false, 'no server spawned');
-      resolve();
-    } catch (e) { reject(e); }
-  }));
+  const srv = http.createServer((q, s) => s.end(q.url === '/api/health' ? '{"app":"ship-deck","ok":true}' : 'busy'));
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  t.after(() => srv.close());
+  const home = tempDir(t, 'ship-deck-home-');
+  // Async: the stub must keep answering while start.sh probes it.
+  const out = await new Promise((resolve, reject) => require('node:child_process').execFile('/bin/sh', [path.join(ROOT, 'bin/start.sh'), '--port', String(srv.address().port), '--no-open'],
+    { env: { PATH: process.env.PATH, HOME: home, SHIP_DECK_NO_OPEN: '1' }, encoding: 'utf8' }, (err, stdout) => (err ? reject(err) : resolve(stdout))));
+  assert.match(out, /already running/);
+  assert.equal(fs.existsSync(path.join(home, '.ship-deck', 'server.log')), false, 'no server spawned');
 });
 
 // ---------- per-worker configuration (addendum 1) ----------

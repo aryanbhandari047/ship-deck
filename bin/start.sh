@@ -1,7 +1,8 @@
 #!/bin/sh
-# Starts Ship Deck in the background unless something already listens on its port.
-# For login auto-start (see the LaunchAgent example in README.md). Args go to server.js.
-#   sh bin/start.sh [--port 4747] [server.js flags...]
+# Starts Ship Deck in the background unless it already answers on its port range, and
+# prints its URL (the server takes the next free port if 4747 is busy and opens the browser
+# unless --no-open). For login auto-start too (see README.md). Args go to server.js.
+#   sh bin/start.sh [--port 4747] [--no-open] [server.js flags...]
 port=${SHIP_DECK_PORT:-4747}
 prev=
 for a in "$@"; do
@@ -10,13 +11,33 @@ for a in "$@"; do
   prev=$a
 done
 here=$(cd "$(dirname "$0")/.." && pwd)
-if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null || nc -z 127.0.0.1 "$port" 2>/dev/null \
-  || curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$port/" 2>/dev/null; then
-  echo "ship-deck: already running on 127.0.0.1:$port"
-  exit 0
-fi
+p=$port
+while [ "$p" -lt $((port + 20)) ]; do
+  if curl -s --max-time 1 "http://127.0.0.1:$p/api/health" 2>/dev/null | grep -q '"app":"ship-deck"'; then
+    echo "ship-deck: already running at http://127.0.0.1:$p/"
+    exit 0
+  fi
+  p=$((p + 1))
+done
 dir=${SHIP_DECK_ORDERS_DIR:-$HOME/.ship-deck}
 umask 077
 mkdir -p "$dir"
-nohup node "$here/server.js" "$@" >> "$dir/server.log" 2>&1 &
-echo "ship-deck: started on http://127.0.0.1:$port/ (pid $!, log $dir/server.log)"
+log=$dir/server.log
+from=$(($(wc -c < "$log" 2>/dev/null || echo 0) + 1))
+nohup node "$here/server.js" "$@" >> "$log" 2>&1 &
+pid=$!
+# Wait up to 5 s for the server to print its URL (the port may have moved).
+i=0
+url=
+while [ $i -lt 50 ]; do
+  url=$(tail -c +"$from" "$log" 2>/dev/null | sed -n 's/^Ship Deck: \(http[^ ]*\).*/\1/p' | head -n 1)
+  [ -n "$url" ] && break
+  kill -0 "$pid" 2>/dev/null || break
+  sleep 0.1
+  i=$((i + 1))
+done
+if [ -n "$url" ]; then
+  echo "ship-deck: started at $url (pid $pid, log $log)"
+else
+  echo "ship-deck: started (pid $pid); no URL yet, see $log"
+fi

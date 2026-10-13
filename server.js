@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 'use strict';
 // Ship Deck: a live view of a firstmate fleet and the captain's control surface.
-//   node server.js [--home <FM_HOME>] [--port 4747] [--stale-days 7] [--no-tmux]
+//   node server.js [--home <FM_HOME>] [--port 4747] [--stale-days 7] [--no-tmux] [--no-open]
 //                  [--orders-dir ~/.ship-deck] [--memory-dir <dir>] [--claude-dir ~/.claude]
+//                  [--captain-name <name>]
 // Binds to 127.0.0.1 only. Writes to FM_HOME only one wake line per order (lib/wake.js,
 // --no-wake); other file writes go to the orders dir (~/.ship-deck). The only commands run are tmux list-windows,
-// tmux capture-pane and <home>/bin/fm-send.sh (see lib/actions.js).
+// tmux capture-pane and <home>/bin/fm-send.sh (see lib/actions.js), plus the browser opener at startup.
 
 const http = require('node:http');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+const { execFile } = require('node:child_process');
 const { buildSnapshot, reportPath, readText, parseMeta, DEFAULT_STALE_DAYS } = require('./lib/fleet');
 const orders = require('./lib/orders');
 const wake = require('./lib/wake');
@@ -19,38 +22,47 @@ const sessions = require('./lib/sessions');
 const config = require('./lib/config');
 const attachments = require('./lib/attachments');
 const activity = require('./lib/activity');
+const homes = require('./lib/home');
 
-const DEFAULT_HOME = '/Users/aryanbhandari/Desktop/AI/firstmate';
+const DEFAULT_PORT = 4747;
+const PORT_TRIES = 20;
 const MAX_BODY = 16 * 1024;
 const ORDERS_IN_SNAPSHOT = 60;
 const THREAD_LIMIT = 300;
 const POST_ROUTES = new Set(['/api/send', '/api/orders', '/api/config']);
+const USAGE = 'usage: ship-deck [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--no-open] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR] [--captain-name NAME] [--no-wake]';
 
-function parseArgs(argv) {
+// env and cwd are injectable for tests; the home falls back per lib/home.js detectHome.
+function parseArgs(argv, { env = process.env, cwd = process.cwd() } = {}) {
   const opts = {
-    home: process.env.FM_HOME || DEFAULT_HOME,
-    port: Number(process.env.SHIP_DECK_PORT) || 4747,
+    home: null,
+    port: Number(env.SHIP_DECK_PORT) || DEFAULT_PORT,
     tmux: true,
-    staleDays: process.env.SHIP_DECK_STALE_DAYS !== undefined ? Number(process.env.SHIP_DECK_STALE_DAYS) : DEFAULT_STALE_DAYS,
-    ordersDir: orders.defaultDir(),
-    memoryDir: library.DEFAULT_MEMORY_DIR,
+    staleDays: env.SHIP_DECK_STALE_DAYS !== undefined ? Number(env.SHIP_DECK_STALE_DAYS) : DEFAULT_STALE_DAYS,
+    ordersDir: env.SHIP_DECK_ORDERS_DIR || orders.defaultDir(),
+    memoryDir: undefined, // derived from the home and claude dir below
     claudeDir: sessions.defaultClaudeDir(),
+    captainName: env.SHIP_DECK_CAPTAIN || undefined, // undefined = git config user.name
     wake: true,
+    open: !env.SHIP_DECK_NO_OPEN,
   };
+  let homeFlag = null;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const [flag, inline] = a.split('=', 2);
     const val = () => (inline !== undefined ? inline : argv[++i]);
-    if (flag === '--home') opts.home = val();
+    if (flag === '--home') homeFlag = val();
     else if (flag === '--port') opts.port = Number(val());
     else if (flag === '--no-tmux') opts.tmux = false;
     else if (flag === '--stale-days') opts.staleDays = Number(val());
     else if (flag === '--orders-dir') opts.ordersDir = val();
     else if (flag === '--memory-dir') opts.memoryDir = val();
     else if (flag === '--claude-dir') opts.claudeDir = val();
+    else if (flag === '--captain-name') opts.captainName = val();
     else if (flag === '--no-wake') opts.wake = false;
+    else if (flag === '--no-open') opts.open = false;
     else if (flag === '--help' || flag === '-h') {
-      console.log('usage: node server.js [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR] [--no-wake]');
+      console.log(USAGE);
       process.exit(0);
     } else {
       console.error('unknown argument: ' + a);
@@ -65,10 +77,14 @@ function parseArgs(argv) {
     console.error('invalid --stale-days (expected a positive number of days)');
     process.exit(2);
   }
-  opts.home = path.resolve(opts.home);
+  const found = homes.detectHome({ flag: homeFlag, env, cwd });
+  opts.home = found.home;
+  opts.homeSource = found.source;
+  opts.homeChecked = found.checked;
   opts.ordersDir = path.resolve(opts.ordersDir);
-  if (opts.memoryDir) opts.memoryDir = path.resolve(opts.memoryDir);
   opts.claudeDir = path.resolve(opts.claudeDir);
+  if (opts.memoryDir) opts.memoryDir = path.resolve(opts.memoryDir);
+  else if (opts.memoryDir === undefined && opts.home) opts.memoryDir = homes.memoryDirFor(opts.claudeDir, opts.home);
   return opts;
 }
 
@@ -160,18 +176,52 @@ async function orderContext(home) {
   };
 }
 
+// The home path for display, with the user's home dir shortened to ~.
+function tildePath(p) {
+  const h = os.homedir();
+  return p === h ? '~' : p.startsWith(h + path.sep) ? '~' + p.slice(h.length) : p;
+}
+
 // Session info for one crew member or the first mate, as the UI shows it.
 function sessionView(entry, harness) {
   if (harness && harness !== 'claude') return { harness, sessionId: null, resume: null, note: `resume id unknown (${harness})` };
-  if (!entry) return { harness: harness || 'claude', sessionId: null, resume: null, note: 'no Claude session found for this worktree yet' };
+  if (!entry) return { harness: harness || 'claude', sessionId: null, resume: null, note: 'no Claude session found for this workspace yet' };
   return { harness: entry.harness || 'claude', sessionId: entry.sessionId, cwd: entry.cwd, firstSeen: entry.firstSeen || null, lastSeen: entry.lastSeen || null, resume: sessions.resumeCommand(entry.cwd, entry.sessionId), note: null };
+}
+
+function serveStatic(url, res) {
+  let rel;
+  try { rel = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname).replace(/^\/+/, ''); } catch { return send(res, 400, 'bad path', 'text/plain'); }
+  const file = path.join(PUBLIC, path.normalize(rel));
+  if (!file.startsWith(PUBLIC + path.sep)) return send(res, 403, 'forbidden', 'text/plain');
+  fs.readFile(file, (err, buf) => {
+    if (err) return send(res, 404, 'not found', 'text/plain');
+    send(res, 200, buf, TYPES[path.extname(file)] || 'application/octet-stream');
+  });
+}
+
+// First run, no firstmate home: /api/fleet says so (with the places checked) and the
+// page explains how to point Ship Deck at a home. Nothing else is served from /api.
+function firstRunServer(opts) {
+  return http.createServer((req, res) => {
+    if (!hostOk(req)) return send(res, 421, 'misdirected request', 'text/plain');
+    const url = new URL(req.url, 'http://127.0.0.1');
+    if (req.method !== 'GET' && req.method !== 'HEAD') { req.resume(); return json(res, 503, { ok: false, error: 'no firstmate home configured' }); }
+    if (url.pathname === '/api/health') return json(res, 200, { app: 'ship-deck', ok: true, home: null });
+    if (url.pathname === '/api/fleet') return json(res, 200, { firstRun: true, checked: opts.homeChecked || [] });
+    if (url.pathname.startsWith('/api/')) return json(res, 503, { error: 'no firstmate home configured' });
+    serveStatic(url, res);
+  });
 }
 
 function createServer(opts) {
   const exec = opts.exec || actions.defaultExec;
   const ordersDir = opts.ordersDir || orders.defaultDir();
-  const memoryDir = opts.memoryDir === undefined ? library.DEFAULT_MEMORY_DIR : opts.memoryDir;
   const claudeDir = opts.claudeDir || sessions.defaultClaudeDir();
+  const memoryDir = opts.memoryDir === undefined ? (opts.home ? homes.memoryDirFor(claudeDir, opts.home) : null) : opts.memoryDir;
+  const captain = opts.captainName !== undefined ? (opts.captainName || null) : homes.captainName(opts.home);
+  // No home found: serve the page (it shows the first-run screen) and refuse the fleet APIs.
+  if (!opts.home) return firstRunServer(opts);
   const libOpts = { captainSkills: path.join(claudeDir, 'skills') };
   const tracker = sessions.createTracker({ home: opts.home, claudeDir, ordersDir });
   const feed = activity.createActivity({ home: opts.home, claudeDir });
@@ -202,7 +252,7 @@ function createServer(opts) {
     if (url.pathname === '/api/send') {
       const id = body.id;
       if (!actions.validId(id)) return json(res, 400, { ok: false, error: 'invalid id' });
-      if (!knownIds(opts.home).has(id)) return json(res, 404, { ok: false, error: 'unknown crew id' });
+      if (!knownIds(opts.home).has(id)) return json(res, 404, { ok: false, error: 'unknown worker' });
       const r = await actions.sendMessage(opts.home, id, body.message, exec);
       return json(res, r.ok ? 200 : 502, { ...r, error: r.ok ? null : r.output || `fm-send exited ${r.code}` });
     }
@@ -212,7 +262,7 @@ function createServer(opts) {
       const id = body.id;
       if (!actions.validId(id)) return json(res, 400, { ok: false, error: 'invalid id' });
       const known = knownIds(opts.home);
-      if (!known.has(id)) return json(res, 404, { ok: false, error: 'unknown crew id' });
+      if (!known.has(id)) return json(res, 404, { ok: false, error: 'unknown worker' });
       const harness = parseMeta(readText(path.join(opts.home, 'state', id + '.meta'))).harness || 'claude';
       let v;
       try { v = config.checkConfig(harness, body.field, body.value); } catch (e) { return json(res, 400, { ok: false, error: e.message }); }
@@ -246,6 +296,7 @@ function createServer(opts) {
       if (req.method === 'POST' && url.pathname === '/api/attachments') return await handleUpload(req, res, url);
       if (req.method === 'POST' && POST_ROUTES.has(url.pathname)) return await handlePost(req, res, url);
       if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'method not allowed', 'text/plain');
+      if (url.pathname === '/api/health') return json(res, 200, { app: 'ship-deck', ok: true, home: opts.home });
       if (url.pathname === '/api/fleet') {
         const snap = await buildSnapshot(opts.home, { tmux: opts.tmux, staleDays: opts.staleDays });
         const list = orders.listOrders(ordersDir);
@@ -258,6 +309,8 @@ function createServer(opts) {
           t.config = config.currentConfig(t, list);
         }
         snap.configOptions = config.options();
+        snap.captain = { name: captain };
+        snap.homeLabel = tildePath(opts.home);
         snap.firstmate = { session: sessionView(known[sessions.FIRST_MATE_KEY], 'claude') };
         return json(res, 200, snap);
       }
@@ -280,7 +333,7 @@ function createServer(opts) {
       const pm = /^\/api\/peek\/([^/]+)$/.exec(url.pathname);
       if (pm) {
         const id = decodeURIComponent(pm[1]);
-        if (!knownIds(opts.home).has(id)) return json(res, 404, { error: 'unknown crew id' });
+        if (!knownIds(opts.home).has(id)) return json(res, 404, { error: 'unknown worker' });
         return json(res, 200, await actions.peekPane(opts.home, id, exec));
       }
       const am = /^\/api\/attachments\/([^/]+)$/.exec(url.pathname);
@@ -307,13 +360,7 @@ function createServer(opts) {
         if (text === null || text === undefined) return send(res, 404, 'no report', 'text/plain; charset=utf-8');
         return send(res, 200, text, 'text/plain; charset=utf-8');
       }
-      let rel = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname).replace(/^\/+/, '');
-      const file = path.join(PUBLIC, path.normalize(rel));
-      if (!file.startsWith(PUBLIC + path.sep)) return send(res, 403, 'forbidden', 'text/plain');
-      fs.readFile(file, (err, buf) => {
-        if (err) return send(res, 404, 'not found', 'text/plain');
-        send(res, 200, buf, TYPES[path.extname(file)] || 'application/octet-stream');
-      });
+      serveStatic(url, res);
     } catch (e) {
       if (e instanceof actions.ActionError) return json(res, e.status, { ok: false, error: e.message });
       send(res, 500, String(e && e.message || e), 'text/plain');
@@ -321,16 +368,56 @@ function createServer(opts) {
   });
 }
 
-if (require.main === module) {
-  const opts = parseArgs(process.argv.slice(2));
-  if (!fs.existsSync(path.join(opts.home, 'state'))) {
-    console.warn(`warning: ${opts.home}/state not found; the deck will be empty`);
-  }
-  createServer(opts).listen(opts.port, '127.0.0.1', () => {
-    console.log(`Ship Deck reading ${opts.home} (read-only, stale after ${opts.staleDays} d)`);
-    console.log(`  orders: ${opts.ordersDir}   library memory: ${opts.memoryDir || '(none)'}   claude: ${opts.claudeDir}`);
-    console.log(`  http://127.0.0.1:${opts.port}/`);
+// Listens on port, or the next free one (up to PORT_TRIES); resolves with the bound port.
+function listen(server, port, { host = '127.0.0.1', tries = PORT_TRIES } = {}) {
+  return new Promise((resolve, reject) => {
+    let p = port;
+    const attempt = () => {
+      const onError = (e) => {
+        server.removeListener('listening', onListening);
+        if (e.code === 'EADDRINUSE' && p < port + tries - 1 && p < 65535) { p++; attempt(); } else reject(e);
+      };
+      const onListening = () => { server.removeListener('error', onError); resolve(server.address().port); };
+      server.once('error', onError);
+      server.once('listening', onListening);
+      server.listen(p, host);
+    };
+    attempt();
   });
 }
 
-module.exports = { createServer, parseArgs, postGuard, knownIds, orderContext };
+// Opens url in the default browser: fixed argv, our own URL, startup only.
+function openBrowser(url) {
+  const [cmd, args] = process.platform === 'darwin' ? ['open', [url]]
+    : process.platform === 'win32' ? ['cmd', ['/c', 'start', '""', url]] : ['xdg-open', [url]];
+  try { execFile(cmd, args, { timeout: 10000 }, () => { /* no browser: the URL is printed */ }).unref(); } catch { /* ignore */ }
+}
+
+async function main(argv) {
+  const opts = parseArgs(argv);
+  if (!opts.home) {
+    console.warn('No firstmate home found (checked --home, FM_HOME, ' + opts.homeChecked.join(', ') + ').');
+    console.warn('The page explains how to point Ship Deck at one: ship-deck --home /path/to/firstmate');
+  } else if (!fs.existsSync(path.join(opts.home, 'state'))) {
+    console.warn(`warning: ${opts.home}/state not found; the deck will be empty`);
+  }
+  let port;
+  try {
+    port = await listen(createServer(opts), opts.port);
+  } catch (e) {
+    console.error(`Ship Deck could not listen on 127.0.0.1:${opts.port}-${opts.port + PORT_TRIES - 1}: ${e.message}`);
+    process.exit(1);
+  }
+  const url = `http://127.0.0.1:${port}/`;
+  if (opts.home) {
+    console.log(`Ship Deck reading ${opts.home} (${opts.homeSource === 'flag' ? '--home' : opts.homeSource === 'env' ? 'FM_HOME' : 'auto-detected'}; read-only, quiet after ${opts.staleDays} d)`);
+    console.log(`  messages: ${opts.ordersDir}   library memory: ${opts.memoryDir || '(none)'}   claude: ${opts.claudeDir}`);
+  }
+  if (port !== opts.port) console.log(`  port ${opts.port} is taken; using ${port}`);
+  console.log(`Ship Deck: ${url}`);
+  if (opts.open) openBrowser(url);
+}
+
+if (require.main === module) main(process.argv.slice(2));
+
+module.exports = { createServer, parseArgs, postGuard, knownIds, orderContext, listen, main, DEFAULT_PORT };

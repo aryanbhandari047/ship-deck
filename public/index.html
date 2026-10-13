@@ -29,20 +29,35 @@
       </div>
     </div>
     <label class="search">
-      <span class="sr-only">Filter crew by id, project or state</span>
+      <span class="sr-only">Filter workers by task, project or state</span>
       <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M13 13l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-      <input id="search" type="search" placeholder="Filter by id, project, state…  ( / )" autocomplete="off" spellcheck="false">
+      <input id="search" type="search" placeholder="Filter by task, project, state…  ( / )" autocomplete="off" spellcheck="false">
     </label>
     <button class="head-btn" id="library-btn" type="button" title="The first mate's permanent context files (read-only)">
       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3.5h3.5v13H3zM7.5 3.5H11v13H7.5zM12.2 4.3l3.3-.9 3 12.4-3.3.9z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
       Ship's Library
     </button>
-    <div class="sync" id="sync" aria-live="polite"><span class="sync-dot"></span><span id="sync-text">Connecting…</span></div>
+    <div class="health" id="health" aria-label="Health">
+      <span class="sync" id="sync" aria-live="polite"><span class="sync-dot"></span><span id="sync-text">Connecting…</span></span>
+      <span class="sync" id="health-fm" title="First mate activity in the last 2 minutes"><span class="sync-dot"></span><span class="health-text">First mate…</span></span>
+      <span class="sync" id="health-mon" title="Monitoring heartbeat"><span class="sync-dot"></span><span class="health-text">Monitoring…</span></span>
+      <span class="sync health-time" id="health-time"></span>
+    </div>
   </header>
+  <section class="first-run" id="first-run" hidden aria-labelledby="first-run-title">
+    <h2 id="first-run-title">Point Ship Deck at your firstmate home</h2>
+    <p>Ship Deck shows a firstmate fleet, but it did not find a firstmate home. It looked here:</p>
+    <ul class="first-run-checked" id="first-run-checked"></ul>
+    <p>A firstmate home is the folder with <code>AGENTS.md</code>, <code>bin/fm-spawn.sh</code> and <code>state/</code>. Stop this server (Ctrl+C) and start it again with one of:</p>
+    <pre class="first-run-cmd">npx ship-deck --home /path/to/firstmate
+FM_HOME=/path/to/firstmate npx ship-deck
+cd /path/to/firstmate &amp;&amp; npx ship-deck   # run from inside the home</pre>
+    <p class="hint">Or keep your home at <code>~/firstmate</code> and Ship Deck finds it on its own. This page reloads when the server comes back.</p>
+  </section>
   <div class="banner" id="reconnect" role="status" hidden>
     <span class="banner-dot"></span>
     <span id="reconnect-text">Reconnecting to the Ship Deck server…</span>
-    <span class="banner-sub">Drafts are kept. Run <code>sh bin/start.sh</code> if it stopped.</span>
+    <span class="banner-sub">Drafts are kept. Run <code>npx ship-deck</code> (or <code>sh bin/start.sh</code>) if it stopped.</span>
     <button class="act-btn" id="reconnect-now" type="button">Retry now</button>
   </div>
 
@@ -62,10 +77,10 @@
             <div class="bridge-floor">
               <figure class="officer captain" id="captain">
                 <svg viewBox="0 0 40 48" class="sailor" aria-hidden="true"></svg>
-                <figcaption>Captain</figcaption>
+                <figcaption id="captain-name">Captain</figcaption>
               </figure>
               <div class="away-sign" id="away-sign" hidden>
-                <span>Captain</span><strong>ashore</strong>
+                <span id="away-name">Captain</span><strong>ashore</strong>
               </div>
               <div class="helm" aria-hidden="true">
                 <svg viewBox="0 0 64 64" class="wheel" id="wheel">
@@ -83,7 +98,7 @@
               </figure>
               <div class="lamp-post" id="lamp-post">
                 <span class="lamp" id="lamp"></span>
-                <span class="lamp-label" id="lamp-label">Watch</span>
+                <span class="lamp-label" id="lamp-label">Monitoring</span>
               </div>
             </div>
           </div>
@@ -101,8 +116,8 @@
           <div class="cabin-row" id="cabin-row"></div>
         </section>
 
-        <section class="hold" id="hold" aria-label="Cargo hold: queued backlog">
-          <h2 class="plaque">Cargo hold <span class="plaque-sub" id="hold-sub"></span></h2>
+        <section class="hold" id="hold" aria-label="Queue">
+          <h2 class="plaque">Queue <span class="plaque-sub" id="hold-sub"></span></h2>
           <div class="crates" id="crates"></div>
         </section>
       </div>
@@ -112,7 +127,7 @@
       <div class="panel-resize" id="panel-resize" role="separator" aria-orientation="vertical" aria-controls="panel" aria-label="Resize side panel (arrow keys; double-click to reset)" tabindex="0"></div>
       <div class="tabs" role="tablist" aria-label="Command Center">
         <button class="tab" role="tab" type="button" id="tab-bridge" aria-controls="pane-bridge" aria-selected="true">Bridge <span class="badge zero" id="unread-count" title="Unread replies from the first mate" hidden>0</span></button>
-        <button class="tab" role="tab" type="button" id="tab-command" aria-controls="pane-command" aria-selected="false" tabindex="-1">Command <span class="badge zero" id="needs-tab-count" title="Needs the captain" hidden>0</span></button>
+        <button class="tab" role="tab" type="button" id="tab-command" aria-controls="pane-command" aria-selected="false" tabindex="-1">Command <span class="badge zero" id="needs-tab-count" title="Needs you" hidden>0</span></button>
         <button class="tab" role="tab" type="button" id="tab-activity" aria-controls="pane-activity" aria-selected="false" tabindex="-1">Activity <span class="live-dot" id="activity-dot" title="The first mate is working" hidden></span></button>
         <button class="tab" role="tab" type="button" id="tab-sessions" aria-controls="pane-sessions" aria-selected="false" tabindex="-1">Sessions</button>
       </div>
@@ -123,10 +138,10 @@
             <span class="fm-avatar" aria-hidden="true"><svg viewBox="0 0 40 48" class="sailor"></svg></span>
             <div>
               <h2>First mate</h2>
-              <p class="bridge-sub" id="bridge-sub">Messages are queued as orders; replies arrive here.</p>
+              <p class="bridge-sub" id="bridge-sub">Your messages go to the first mate; replies arrive here.</p>
             </div>
           </div>
-          <button class="act-btn" id="notify-btn" type="button" title="Browser notifications for new replies and items needing the captain">Enable alerts</button>
+          <button class="act-btn" id="notify-btn" type="button" title="Browser notifications for new replies and items that need you">Enable alerts</button>
         </div>
         <ol class="thread" id="thread" aria-live="polite" aria-label="Conversation with the first mate"></ol>
         <button class="jump" id="thread-jump" type="button" hidden>New messages ↓</button>
@@ -149,44 +164,39 @@
         <div class="card watch-card" id="watch-card"></div>
 
         <div class="card attention">
-          <h3>Needs the captain <span class="badge" id="needs-count">0</span></h3>
-          <ul class="list" id="needs-list"></ul>
+          <h3>Needs you <span class="badge" id="needs-count">0</span></h3>
+          <ul class="list actions" id="needs-list"></ul>
         </div>
 
         <div class="card">
-          <h3>Captain's Call <span class="badge" id="calls-count">0</span></h3>
-          <ul class="list compact actions" id="calls-list"></ul>
-        </div>
-
-        <div class="card">
-          <h3>Crew by state</h3>
+          <h3>Workers by state</h3>
           <div class="counts" id="counts"></div>
         </div>
 
         <details class="card new-job" id="new-job">
-          <summary><h3>New job</h3></summary>
+          <summary><h3>New task</h3></summary>
           <form class="job-form" id="job-form">
             <label>Project
               <select id="job-project" required></select>
             </label>
-            <fieldset class="seg" aria-label="Kind of job">
+            <fieldset class="seg" aria-label="Kind of task">
               <label><input type="radio" name="job-kind" value="ship" checked> <span><strong>Ship</strong> make the change</span></label>
               <label><input type="radio" name="job-kind" value="scout"> <span><strong>Scout</strong> diagnose and report only</span></label>
             </fieldset>
             <div class="job-config">
-              <label>Harness <select id="job-harness"></select></label>
+              <label title="The coding agent that runs the task">Tool <select id="job-harness"></select></label>
               <label title="Default: the first mate's usual model">Model <select id="job-model"></select></label>
               <label title="Auto: the first mate decides">Effort <select id="job-effort"></select></label>
             </div>
-            <label>What should the crew do?
-              <textarea id="job-text" rows="4" maxlength="2000" placeholder="Describe the job: goal, links, constraints…"></textarea>
+            <label>What should the worker do?
+              <textarea id="job-text" rows="4" maxlength="2000" placeholder="Describe the task: goal, links, constraints…"></textarea>
             </label>
-            <button class="act-btn primary" type="submit">Queue new job</button>
+            <button class="act-btn primary" type="submit">Send new task</button>
           </form>
         </details>
 
         <div class="card">
-          <h3>Backlog: queued <span class="badge muted" id="queued-count">0</span></h3>
+          <h3>Queue <span class="badge muted" id="queued-count">0</span></h3>
           <ul class="list compact actions" id="queued-list"></ul>
         </div>
 
@@ -196,7 +206,7 @@
         </div>
 
         <div class="card orders-card">
-          <h3>Orders <span class="badge zero" id="orders-count" title="Pending orders">0</span></h3>
+          <h3>Messages <span class="badge zero" id="orders-count" title="Messages the first mate has not picked up yet">0</span></h3>
           <ul class="list orders" id="orders-list"></ul>
         </div>
 
@@ -215,7 +225,7 @@
       </section>
 
       <section class="pane" id="pane-sessions" role="tabpanel" aria-labelledby="tab-sessions" hidden>
-        <p class="hint pane-hint">Every Claude Code session Ship Deck has matched to the first mate or a crew member, kept after cleanup. Paste a command into a terminal to resume.</p>
+        <p class="hint pane-hint">Every Claude Code session Ship Deck has matched to the first mate or a worker, kept after cleanup. Paste a command into a terminal to resume.</p>
         <input id="sessions-filter" class="pane-filter" type="search" placeholder="Filter sessions…" autocomplete="off" spellcheck="false" aria-label="Filter sessions">
         <ul class="list sessions" id="sessions-list"></ul>
       </section>
@@ -263,7 +273,7 @@
     <p class="confirm-warn" id="confirm-warn" hidden></p>
     <div class="btn-row confirm-actions">
       <button class="act-btn" id="confirm-no" type="button">Cancel</button>
-      <button class="act-btn primary" id="confirm-yes" type="button">Queue order</button>
+      <button class="act-btn primary" id="confirm-yes" type="button">Send</button>
     </div>
   </section>
 
@@ -276,6 +286,7 @@
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
   <script src="markdown.js"></script>
+  <script src="labels.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
