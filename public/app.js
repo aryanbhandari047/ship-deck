@@ -1,11 +1,10 @@
 'use strict';
-// Ship Deck frontend: polls /api/fleet, reconciles the deck in place, and runs
-// the captain's control surface (Bridge chat, orders, sessions, library).
+// Ship Deck frontend: polls /api/fleet, renders the Board (default) or the Ship view in
+// place, and runs the captain's control surface (chat, orders, drawers, library).
 
 (() => {
   const POLL_MS = 3000;
   const STATE_ORDER = ['needs-decision', 'blocked', 'failed', 'working', 'paused', 'unknown', 'done'];
-  const COUNT_ORDER = ['working', 'needs-decision', 'blocked', 'paused', 'done', 'failed', 'stale'];
   const ATTENTION = new Set(['needs-decision', 'blocked', 'failed']);
   const L = window.ShipDeckLabels;
   const STATE_LABEL = L.STATE_LABEL;
@@ -23,24 +22,22 @@
     captain: $('captain'), firstmate: $('firstmate'), awaySign: $('away-sign'), lamp: $('lamp'), lampLabel: $('lamp-label'), wheel: $('wheel'),
     areas: $('areas'), cabins: $('cabins'), cabinRow: $('cabin-row'),
     hold: $('hold'), holdSub: $('hold-sub'), crates: $('crates'),
-    tabs: { bridge: $('tab-bridge'), command: $('tab-command'), activity: $('tab-activity'), sessions: $('tab-sessions') },
-    panes: { bridge: $('pane-bridge'), command: $('pane-command'), activity: $('pane-activity'), sessions: $('pane-sessions') },
+    tabs: { bridge: $('tab-bridge'), activity: $('tab-activity') },
+    panes: { bridge: $('pane-bridge'), activity: $('pane-activity') },
+    board: $('board'), scene: $('scene'), cols: $('cols'), mates: $('mates'), projectFilters: $('project-filters'), boardTitle: $('board-title'),
+    viewBoard: $('view-board'), viewShip: $('view-ship'), chatJump: $('chat-jump'),
+    fmWho: $('fm-who'), fmLive: $('fm-live'), fmNowText: $('fm-now-text'),
+    newJobBtn: $('new-job-btn'), jobSheet: $('job-sheet'), jobScrim: $('job-scrim'), jobClose: $('job-close'), jobCancel: $('job-cancel'),
     layout: document.querySelector('.layout'), panel: $('panel'), panelResize: $('panel-resize'),
-    feed: $('feed'), activityState: $('activity-state'), activitySub: $('activity-sub'), activityDot: $('activity-dot'),
+    feed: $('feed'), activitySub: $('activity-sub'), activityDot: $('activity-dot'),
     ticker: $('ticker'), tickerIcon: $('ticker-icon'), tickerText: $('ticker-text'), tickerAge: $('ticker-age'), fmPill: $('fm-pill'),
-    unread: $('unread-count'), needsTab: $('needs-tab-count'),
+    unread: $('unread-count'),
     thread: $('thread'), threadJump: $('thread-jump'), chatForm: $('chat-form'), chatText: $('chat-text'), chatSend: $('chat-send'),
     notifyBtn: $('notify-btn'), bridgeSub: $('bridge-sub'), chatHint: $('chat-hint'),
     attTray: $('att-tray'), attachBtn: $('attach-btn'), attachInput: $('attach-input'),
     lightbox: $('lightbox'), lightboxImg: $('lightbox-img'), lightboxCap: $('lightbox-cap'), lightboxClose: $('lightbox-close'),
-    watch: $('watch-card'), counts: $('counts'),
-    needsCount: $('needs-count'), needsList: $('needs-list'),
-    queuedCount: $('queued-count'), queuedList: $('queued-list'),
-    jobForm: $('job-form'), jobProject: $('job-project'), jobText: $('job-text'), newJob: $('new-job'),
+    jobForm: $('job-form'), jobProject: $('job-project'), jobText: $('job-text'),
     jobHarness: $('job-harness'), jobModel: $('job-model'), jobEffort: $('job-effort'),
-    doneList: $('done-list'), cleanupDone: $('cleanup-done'), prList: $('pr-list'),
-    ordersCount: $('orders-count'), ordersList: $('orders-list'),
-    sessionsList: $('sessions-list'), sessionsFilter: $('sessions-filter'),
     drawer: $('drawer'), scrim: $('scrim'), drawerKicker: $('drawer-kicker'), drawerTitle: $('drawer-title'),
     drawerBody: $('drawer-body'), drawerClose: $('drawer-close'),
     libraryBtn: $('library-btn'), library: $('library'), libraryScrim: $('library-scrim'), libraryClose: $('library-close'),
@@ -52,7 +49,6 @@
 
   let snap = null;
   let query = '';
-  let stateFilter = null;
   let selected = null; // { type: 'task' | 'backlog' | 'secondmate' | 'firstmate', id }
   let lastOkAt = 0;
   const stations = new Map(); // id -> element
@@ -188,15 +184,13 @@
 
   // ---------- filtering ----------
   function matchesTask(t) {
-    if (stateFilter && bucket(t) !== stateFilter) return false;
     if (!query) return true;
-    const hay = [t.id, t.title, t.project, t.state, STATE_LABEL[t.state], t.stale && 'stale quiet', t.kind, t.mode, t.brief, L.summary(t)].join(' ').toLowerCase();
+    const hay = [t.id, t.title, t.project, t.state, STATE_LABEL[t.state], taskStatus(t).label, B.TONES[taskStatus(t).tone].word, t.stale && 'stale quiet', t.kind, t.mode, t.brief, L.summary(t)].join(' ').toLowerCase();
     return query.split(/\s+/).every((q) => hay.includes(q));
   }
   function matchesCrate(item) {
-    if (stateFilter) return false;
     if (!query) return true;
-    const hay = [item.id, item.title, item.tags && item.tags.repo, 'queued backlog queue'].join(' ').toLowerCase();
+    const hay = [item.id, item.title, item.tags && item.tags.repo, item.captainCall ? 'needs you question' : '', 'queued backlog queue'].join(' ').toLowerCase();
     return query.split(/\s+/).every((q) => hay.includes(q));
   }
 
@@ -365,7 +359,7 @@
     const shown = queued.filter(matchesCrate);
     const calls = queued.filter((q) => q.captainCall).length;
     ui.holdSub.textContent = `${queued.length} waiting${calls ? ` · ${calls} need${calls === 1 ? 's' : ''} you` : ''}`;
-    ui.hold.classList.toggle('hidden-by-filter', !!(query || stateFilter) && !shown.length);
+    ui.hold.classList.toggle('hidden-by-filter', !!query && !shown.length);
     if (unchanged('hold', queued, shown.length, snap.backlog.present)) return;
     const kids = shown.slice(0, MAX_CRATES).map((q, i) => {
       const key = q.id || `item-${i}`;
@@ -520,111 +514,239 @@
       : h('div', attrs, ...inner));
   }
 
-  // ---------- command center ----------
-  // A worker row: its title, then a one-sentence summary with the raw id beside it.
-  function listRow(t, onclick) {
-    return h('li', null, h('button', { class: 'row', type: 'button', onclick },
-      flagEl(taskStatus(t).flag), h('span', { class: 'r-id', text: t.title || t.id, title: t.title || t.id }), h('span', { class: 'r-age', text: ago(t.lastActivity) }),
-      h('span', { class: 'r-note' }, L.summary(t), t.title && t.title !== t.id ? h('span', { class: 'r-rid', text: t.id }) : null),
-      t.options && t.options.length ? h('span', { class: 'r-opts', text: `options ${t.options.map((o) => o.letter).join(' / ')}` }) : null));
-  }
-  // A queue item row: its title, with the raw id as the secondary label.
-  function itemRow(b, flag, onclick) {
-    return h('button', { class: 'row', type: 'button', onclick },
-      flagEl(flag), h('span', { class: 'r-id', text: b.title || b.id || '(untitled)', title: b.title || '' }),
-      h('span', { class: 'r-age', text: (b.tags && b.tags.since) || '' }), h('span', { class: 'r-note' }, b.id ? h('span', { class: 'r-rid', text: b.id, style: 'margin-left:0' }) : null));
-  }
+  // ---------- the Board (default view) ----------
+  // Needs you / Working / Waiting (+ quiet and the queue) / Done. Cards are keyed and rebuilt
+  // only when their content changes, so typing in a card's reply box survives polling.
   function emptyRow(text) { return h('li', null, h('div', { class: 'empty', text })); }
-  // A list row with an inline action button beside the clickable row.
-  function actionRow(row, label, onclick) {
-    return h('li', { class: 'with-action' }, row, h('button', { class: 'btn sm', type: 'button', text: label, onclick }));
-  }
   function itemKey(b) { return b.id || b.title; }
+  let boardProject = store.get('boardProject');
+  const cards = new Map(); // key -> { sig, el, age }
+  const colEls = new Map(); // column key -> { root, head, body }
 
-  function renderPanel() {
-    const w = snap.watcher;
-    const lampCls = w.lastBeat ? (w.healthy ? 'on' : 'amber') : '';
-    ui.watch.replaceChildren(
-      h('div', { class: 'head' }, h('span', { class: 'lamp ' + lampCls }),
-        w.lastBeat ? (w.healthy ? 'Monitoring is on' : 'Monitoring is late') : 'Monitoring has not checked in'),
-      h('span', { class: 'row-label', text: 'Last check' }), h('span', { class: 'row-val', text: agoLong(w.lastBeat) }),
-      h('span', { class: 'row-label', text: 'Captain' }), h('span', { class: 'row-val', text: `${(snap.captain && snap.captain.name) || 'you'} · ${snap.afk ? 'away' : 'here'}` }),
-      h('span', { class: 'row-label', text: 'Workers' }), h('span', { class: 'row-val', text: `${snap.tasks.length} active` }),
-      h('span', { class: 'row-label', text: 'Quiet after' }), h('span', { class: 'row-val', text: `${snap.staleDays} days without activity` }),
-      h('span', { class: 'row-label', text: 'Terminals' }), h('span', { class: 'row-val', text: snap.tmux.available ? `${snap.tmux.windows} open` : 'not available' }),
-      h('span', { class: 'row-label', text: 'Updated' }), h('span', { class: 'row-val', text: new Date(snap.generatedAt).toLocaleTimeString() }),
-    );
+  function answerText(opt, extra) {
+    return opt ? `(${opt.letter}) ${opt.text}${extra ? '\n\n' + extra : ''}` : extra;
+  }
+  // A one-line answer box kept as a draft; send(text) resolves true when sent.
+  function replyRow(draftKey, placeholder, label, send) {
+    const input = persist(h('input', { class: 'input', type: 'text', maxlength: '2000', placeholder, 'aria-label': placeholder, autocomplete: 'off' }), draftKey);
+    const form = h('form', { class: 'reply-row' }, input, h('button', { class: 'btn sm', type: 'submit', text: label }));
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) { input.focus(); return; }
+      if (await send(text)) clearDraft(input);
+    });
+    return form;
+  }
+  function optionButtons(options, onPick) {
+    return h('div', { class: 'opts', role: 'group', 'aria-label': 'Answer with an option' }, ...options.map((o) =>
+      h('button', { class: 'opt' + (o.recommended ? ' rec' : ''), type: 'button', 'data-letter': o.letter, title: `Answer with option ${o.letter}`, onclick: () => onPick(o) },
+        h('b', { text: o.letter }), h('span', null, o.text, o.recommended ? h('span', { class: 'rec-tag', text: 'Recommended' }) : null))));
+  }
+  function answerTask(t, opt, text) {
+    const name = t.title || t.id;
+    const body = answerText(opt, text);
+    return queueOrder({ kind: 'decision', target: t.id, option: opt ? opt.letter : null, text: body }, {
+      title: opt ? `Answer “${name}” with option ${opt.letter}?` : `Send this answer to “${name}”?`, body,
+    });
+  }
+  function answerCall(b, opt, text) {
+    const name = b.title || b.id;
+    const body = answerText(opt, text);
+    return queueOrder({ kind: 'backlog-answer', item: b.id, option: opt ? opt.letter : null, text: body }, {
+      title: opt ? `Answer “${name}” with option ${opt.letter}?` : `Send this answer on “${name}”?`, body,
+    });
+  }
+  function cleanupTask(t) {
+    return queueOrder({ kind: 'cleanup', target: t.id }, { title: `Ask the first mate to clean up “${t.title || t.id}”?`, body: 'Closes its terminal and workspace once its work is safe.' });
+  }
+  function openReport(t) { openDrawer({ type: 'task', id: t.id }); openDataFile(t.id, 'report.md'); }
 
-    const states = [...COUNT_ORDER];
-    if (snap.counts.unknown) states.push('unknown');
-    if (!unchanged('counts', snap.counts, stateFilter)) ui.counts.replaceChildren(...states.map((s) => {
-      const n = snap.counts[s] || 0;
-      return h('button', {
-        class: `count tone-${bucketStatus(s).tone}` + (n ? '' : ' zero'), type: 'button',
-        'aria-pressed': stateFilter === s ? 'true' : 'false',
-        title: `Show only ${bucketStatus(s).label.toLowerCase()}`,
-        onclick: () => { stateFilter = stateFilter === s ? null : s; renderAll(); },
-      }, h('span', { class: 'n', text: n }), h('span', { class: 'l' }, flagEl(bucketStatus(s).flag), s === 'unknown' ? 'Starting' : s === 'paused' ? 'Paused' : bucketStatus(s).label));
-    }));
+  // A card: status pill and age, title (opens the drawer), id and project, summary, then actions.
+  function cardShell(key, tone, hoist, pill, title, onOpen, meta, summary, ...rest) {
+    const age = h('span', { class: 'age' });
+    const el = h('article', { class: `bcard tone-${tone}` + (hoist ? ' hoist' : ''), 'data-key': key },
+      h('div', { class: 'card-top' }, pill, age),
+      h('h3', { class: 'card-title' }, h('button', { class: 'card-link', type: 'button', onclick: onOpen }, title)),
+      h('div', { class: 'card-meta' }, ...meta),
+      summary ? h('p', { class: 'card-summary', text: summary }) : null,
+      ...rest);
+    return { el, age };
+  }
+  function cached(key, sig, build) {
+    const c = cards.get(key);
+    if (c && c.sig === sig) return c;
+    const made = { sig, ...build() };
+    cards.set(key, made);
+    return made;
+  }
+  function taskCard(t, col) {
+    const st = taskStatus(t);
+    const summary = B.cardSummary(t);
+    const sig = JSON.stringify([col, st, t.title, t.project, summary, t.options, t.pr, t.hasReport, t.state, B.toolText(t)]);
+    const c = cached('t:' + t.id, sig, () => {
+      const name = t.title || t.id;
+      let ask = null;
+      if (t.state === 'needs-decision' || t.state === 'blocked') {
+        ask = !t.stale && t.options.length
+          ? optionButtons(t.options, (o) => answerTask(t, o, ''))
+          : !t.stale ? replyRow('card.' + t.id, t.state === 'blocked' ? 'Reply to unblock…' : 'Your answer…', 'Send', (text) => answerTask(t, null, text)) : null;
+      }
+      const foot = [
+        t.pr ? h('a', { class: 'chip', href: t.pr, target: '_blank', rel: 'noopener noreferrer', title: 'Open the pull request' }, icon('i-pr'), prNumber(t.pr)) : null,
+        t.state === 'done' && t.hasReport ? h('button', { class: 'chip', type: 'button', onclick: () => openReport(t) }, icon('i-file'), 'Read report') : null,
+        t.state === 'failed' ? h('button', { class: 'btn sm', type: 'button', text: 'Ask for status', onclick: () => queueOrder({ kind: 'status', target: t.id }) }) : null,
+        t.state === 'done' ? h('button', { class: 'btn sm ghost', type: 'button', text: 'Clean up', onclick: () => cleanupTask(t) }) : null,
+        h('span', { class: 'tool', text: B.toolText(t) }),
+      ].filter(Boolean);
+      return cardShell('t:' + t.id, st.tone, col === 'needs', pillEl(st), name, () => openDrawer({ type: 'task', id: t.id }),
+        [name !== t.id ? h('code', { text: t.id }) : null, h('span', { text: t.project })], summary,
+        ask, h('div', { class: 'card-foot' }, ...foot));
+    });
+    c.el.classList.toggle('selected', !!selected && selected.type === 'task' && selected.id === t.id);
+    c.age.textContent = t.lastActivity ? agoLong(t.lastActivity) : '';
+    return c.el;
+  }
+  function callCard(b) {
+    const key = 'c:' + itemKey(b);
+    const hold = b.tags && b.tags.hold ? B.cardSummary({ options: b.options, lastStatus: [{ note: b.tags.hold }] }, 200) : '';
+    const sig = JSON.stringify([b.id, b.title, hold, b.options, b.section, b.index, b.tags && b.tags.repo]);
+    const c = cached(key, sig, () => {
+      const open = (focus) => openDrawer({ type: 'backlog', id: itemKey(b), section: b.section, index: b.index, focus });
+      const ask = !b.id ? h('p', { class: 'hint', text: 'No id, so answer it in the chat.' })
+        : b.options && b.options.length ? optionButtons(b.options, (o) => answerCall(b, o, ''))
+          : replyRow('call.' + b.id, 'Your answer…', 'Answer', (text) => answerCall(b, null, text));
+      return cardShell(key, 'needs', true, pillEl(B.callStatus()), b.title || b.id, () => open(false),
+        [b.id ? h('code', { text: b.id }) : null, h('span', { text: (b.tags && b.tags.repo) || 'Queue' })], hold, ask);
+    });
+    c.age.textContent = b.tags && b.tags.since ? `since ${shortDate(b.tags.since)}` : '';
+    return c.el;
+  }
+  function queueRow({ b, index }) {
+    const key = 'q:' + itemKey(b);
+    const after = b.tags && b.tags.after;
+    const sub = after ? `after ${titleOf(after)}` : (b.tags && b.tags.repo) || (b.id ? '' : 'No id: ask in the chat to start it');
+    const c = cached(key, JSON.stringify([b.id, b.title, sub, index]), () => {
+      const el = h('div', { class: 'row-card', 'data-key': key },
+        h('div', { class: 't' },
+          h('button', { class: 'card-link', type: 'button', text: b.title || b.id, onclick: () => openDrawer({ type: 'backlog', id: itemKey(b), section: 'queued', index }) }),
+          sub ? h('span', { text: sub }) : null),
+        b.id ? h('button', { class: 'btn sm', type: 'button', text: 'Start', onclick: () => startBacklog(b) }) : null);
+      return { el, age: null };
+    });
+    return c.el;
+  }
+  function emptyCard(title, text) { return h('div', { class: 'empty-card' }, h('h3', { text: title }), text ? h('p', { text }) : null); }
+  function subHead(text, n) { return h('div', { class: 'sub-head' }, text, h('span', { class: 'count', text: n })); }
+  // "2026-01-03" -> "3 Jan" (year kept when it differs).
+  function shortDate(s) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || ''));
+    if (!m) return s;
+    const d = new Date(+m[1], m[2] - 1, +m[3]);
+    return d.toLocaleDateString([], { day: 'numeric', month: 'short', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
+  }
+  function setKids(el, kids) {
+    const now = [...el.children];
+    if (now.length === kids.length && now.every((k, i) => k === kids[i])) return;
+    const focused = el.contains(document.activeElement) ? document.activeElement : null;
+    el.replaceChildren(...kids);
+    if (focused && focused.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true });
+  }
+  function column(key) {
+    let c = colEls.get(key);
+    if (!c) {
+      const head = h('div', { class: 'col-head' });
+      const body = h('div', { class: 'col-body' });
+      c = { root: h('section', { class: 'col', 'data-col': key, 'aria-label': B.COLUMNS.find((x) => x.key === key).title }, head, body), head, body };
+      colEls.set(key, c);
+    }
+    return c;
+  }
 
-    const needs = needsCaptain();
-    const calls = snap.backlog.calls || [];
-    const sigOf = (list) => list.map((t) => [t.id, t.title, t.state, t.stale, ago(t.lastActivity), lastNote(t)]);
-    // Needs you: workers waiting on a call, then queue items waiting on one.
-    ui.needsCount.textContent = needs.length + calls.length;
-    ui.needsCount.classList.toggle('zero', needs.length + calls.length === 0);
-    ui.needsTab.textContent = needs.length + calls.length;
-    ui.needsTab.hidden = needs.length + calls.length === 0;
-    if (!unchanged('needs', sigOf(needs), calls.map((b) => [b.id, b.title, b.section, b.index]))) ui.needsList.replaceChildren(...(needs.length + calls.length ? [
-      ...needs.map((t) => listRow(t, () => openDrawer({ type: 'task', id: t.id }))),
-      ...calls.map((b) => {
-        const open = (focus) => openDrawer({ type: 'backlog', id: itemKey(b), section: b.section, index: b.index, focus });
-        const row = itemRow(b, 'k', () => open(false));
-        return b.id ? actionRow(row, 'Answer', () => open(true)) : h('li', null, row);
-      }),
-    ] : [emptyRow('Nothing needs you right now.')]));
+  function renderBoard() {
+    const g = B.groupBoard(snap, { project: boardProject, match: matchesTask, matchItem: matchesCrate });
+    if (boardProject && !g.projects.some((p) => p.toLowerCase() === boardProject.toLowerCase())) { boardProject = null; store.set('boardProject', null); return renderBoard(); }
+    ui.boardTitle.textContent = boardProject || 'All work';
+    if (!unchanged('board-filters', g.projects, boardProject)) {
+      const chipBtn = (name, label) => h('button', { class: 'filter', type: 'button', 'aria-pressed': String((boardProject || null) === name), text: label,
+        onclick: () => { boardProject = name; store.set('boardProject', name); renderAll(); } });
+      ui.projectFilters.replaceChildren(...(g.projects.length > 1 ? [chipBtn(null, 'All projects'), ...g.projects.map((p) => chipBtn(p, p))] : []));
+    }
+    const filtered = !!(query || boardProject);
+    const nothing = !snap.tasks.length && !(snap.backlog.queued || []).length;
+    const bodies = {
+      needs: g.needs.length ? g.needs.map((x) => (x.type === 'task' ? taskCard(x.t, 'needs') : callCard(x.b)))
+        : [emptyCard('Nothing needs you', nothing ? 'No workers yet. Ask the first mate for work in the chat, or start a New job.'
+          : filtered ? 'Nothing here matches the filter.' : 'Workers are moving. A flag goes up here, with an alert if you turn them on, when one needs your call.')],
+      working: g.working.length ? g.working.map((t) => taskCard(t, 'working')) : [h('p', { class: 'col-note', text: 'No one is working right now.' })],
+      waiting: [
+        ...g.waiting.map((t) => taskCard(t, 'waiting')),
+        ...(g.quiet.length ? [subHead('Quiet for a while', g.quiet.length), ...g.quiet.map((t) => taskCard(t, 'quiet'))] : []),
+        ...(g.queue.length ? [subHead('Up next in the queue', g.queue.length), ...g.queue.map(queueRow)] : []),
+      ],
+      done: [...g.done.map((t) => taskCard(t, 'done')), h('p', { class: 'col-note', text: g.done.length ? 'Finished work stays here until you clean it up.' : 'Nothing finished yet.' })],
+    };
+    if (!bodies.waiting.length) bodies.waiting.push(h('p', { class: 'col-note', text: 'Nothing is waiting.' }));
+    const counts = { needs: g.counts.needs, working: g.counts.working, waiting: g.counts.waiting, done: g.counts.done };
+    const roots = B.COLUMNS.map((def) => {
+      const c = column(def.key);
+      if (!unchanged('col-head-' + def.key, counts[def.key], def.key === 'done' && g.done.map((t) => t.id))) {
+        c.head.replaceChildren(...[flagEl(def.flag), h('h2', { text: def.title }),
+          h('span', { class: 'count' + (def.key === 'needs' && counts.needs ? ' needs' : ''), text: counts[def.key], title: `${counts[def.key]} in ${def.title}` }),
+          h('span', { class: 'spacer' }),
+          def.key === 'done' && g.done.length ? h('button', { class: 'btn sm ghost', type: 'button', text: g.done.length === 1 ? 'Clean up' : 'Clean up all', onclick: () => cleanupDone(g.done) }) : null].filter(Boolean));
+      }
+      setKids(c.body, bodies[def.key]);
+      return c.root;
+    });
+    setKids(ui.cols, roots);
+    // Forget cards that left the board.
+    const live = new Set([...ui.cols.querySelectorAll('[data-key]')].map((el) => el.dataset.key));
+    for (const k of cards.keys()) if (!live.has(k)) cards.delete(k);
+    renderMates(g);
+  }
 
-    const queued = (snap.backlog.queued || []).map((b, index) => ({ b, index })).filter((x) => !x.b.captainCall && !x.b.checked);
-    ui.queuedCount.textContent = queued.length;
-    if (!unchanged('queued', queued.map((x) => [x.b.id, x.b.title, x.index]))) ui.queuedList.replaceChildren(...(queued.length ? queued.map(({ b, index }) => {
-      const row = itemRow(b, 'x', () => openDrawer({ type: 'backlog', id: itemKey(b), section: 'queued', index }));
-      return b.id ? actionRow(row, 'Start', () => startBacklog(b)) : h('li', null, row);
-    }) : [emptyRow('Nothing in the queue.')]));
-
-    const doneAll = snap.tasks.filter((t) => t.state === 'done' && t.kind !== 'secondmate');
-    const done = doneAll.slice().sort((a, b) => (b.statusMtime || 0) - (a.statusMtime || 0)).slice(0, 6);
-    ui.cleanupDone.hidden = doneAll.length === 0;
-    ui.cleanupDone.textContent = `Clean up all finished (${doneAll.length})`;
-    if (!unchanged('done', sigOf(done), doneAll.length)) ui.doneList.replaceChildren(...(done.length
-      ? done.map((t) => listRow(t, () => openDrawer({ type: 'task', id: t.id })))
-      : [emptyRow('Nothing finished yet.')]));
-
-    const prs = snap.tasks.filter((t) => t.pr).sort(sortTasks);
-    if (!unchanged('prs', sigOf(prs).map((x, i) => [...x, prs[i].pr]))) ui.prList.replaceChildren(...(prs.length ? prs.map((t) => h('li', null,
-      h('a', { class: 'row', href: t.pr, target: '_blank', rel: 'noopener noreferrer' },
-        flagEl(taskStatus(t).flag), h('span', { class: 'r-id', text: t.title || t.id, title: t.id }), h('span', { class: 'r-age', text: prNumber(t.pr) })))) : [emptyRow('No pull requests yet.')]));
-
-    const ord = snap.orders || { pending: 0, list: [] };
-    ui.ordersCount.textContent = ord.pending;
-    ui.ordersCount.classList.toggle('zero', !ord.pending);
-    if (!unchanged('orders', ord.list, ord.pending)) ui.ordersList.replaceChildren(...(ord.list.length
-      ? ord.list.slice(0, 20).map(orderRow)
-      : [emptyRow('No messages yet.')]));
-
-    renderJobProjects();
-    renderJobConfig();
+  // Second mates: one chip each, vacant ones dashed.
+  function renderMates(g) {
+    ui.mates.hidden = !g.mates.length && !g.vacant.length;
+    if (ui.mates.hidden || unchanged('mates', g.mates.map((t) => [t.id, t.title, taskStatus(t), lastNote(t)]), g.vacant)) return;
+    ui.mates.replaceChildren(h('h3', { text: 'Second mates' }),
+      ...g.mates.map((t) => h('button', { class: 'mate-chip', type: 'button', title: L.summary(t), onclick: () => openDrawer({ type: 'task', id: t.id }) },
+        h('span', { class: 'fm-avatar' }, icon('i-helm')), h('span', { class: 'strong', text: t.title || t.id }), pillEl(taskStatus(t), 'sm'))),
+      ...g.vacant.map((r) => h('button', { class: 'mate-chip vacant', type: 'button', onclick: () => openDrawer({ type: 'secondmate', id: r.id }) },
+        h('span', { text: r.id }), h('span', { class: 'muted', text: 'not running' }))));
   }
 
   function needsCaptain() { return snap.tasks.filter((t) => ATTENTION.has(t.state) && !t.stale).sort(sortTasks); }
 
-  ui.cleanupDone.addEventListener('click', () => {
-    const ids = snap.tasks.filter((t) => t.state === 'done' && t.kind !== 'secondmate').map((t) => t.id).sort();
+  function cleanupDone(done) {
+    const ids = done.map((t) => t.id).sort();
     if (!ids.length) return;
+    const one = ids.length === 1;
     queueOrder({ kind: 'cleanup-done', targets: ids }, {
-      title: `Clean up all ${ids.length} finished worker${ids.length === 1 ? '' : 's'}?`,
-      body: h('div', null, h('p', { class: 'confirm-text', text: 'One message listing every finished worker:' }), h('ul', { class: 'confirm-list' }, ...ids.map((id) => h('li', { text: titleOf(id) === id ? id : `${titleOf(id)} (${id})` })))),
+      title: one ? `Clean up the finished worker “${titleOf(ids[0])}”?` : `Clean up all ${ids.length} finished workers?`,
+      body: h('div', null, h('p', { class: 'confirm-text', text: one ? 'Closes its terminal and workspace once its work is safe.' : 'One message listing every finished worker:' }),
+        one ? null : h('ul', { class: 'confirm-list' }, ...ids.map((id) => h('li', { text: titleOf(id) })))),
     });
-  });
+  }
+
+  // ---------- new job (a sheet over the board) ----------
+  function openJobSheet() {
+    ui.jobSheet.hidden = false;
+    ui.jobScrim.hidden = false;
+    renderJobProjects();
+    renderJobConfig();
+    (ui.jobProject.value ? ui.jobText : ui.jobProject).focus();
+  }
+  function closeJobSheet() {
+    ui.jobSheet.hidden = true;
+    ui.jobScrim.hidden = true;
+    ui.newJobBtn.focus({ preventScroll: true });
+  }
+  ui.newJobBtn.addEventListener('click', openJobSheet);
+  ui.jobClose.addEventListener('click', closeJobSheet);
+  ui.jobCancel.addEventListener('click', closeJobSheet);
+  ui.jobScrim.addEventListener('click', closeJobSheet);
 
   // ---------- new job ----------
   function renderJobProjects() {
@@ -660,7 +782,6 @@
     if (savedKind && r.value === savedKind) r.checked = true;
     r.addEventListener('change', () => store.set('draft.job.kind', r.value));
   }
-  if (store.get('draft.job.text')) ui.newJob.open = true;
   ui.jobForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const project = ui.jobProject.value;
@@ -673,9 +794,9 @@
     const effort = ui.jobEffort.disabled ? 'auto' : ui.jobEffort.value;
     const setup = `${harness} · ${model || 'first mate default model'} · effort ${effort}`;
     const ok = await queueOrder({ kind: 'new-task', project, taskKind, harness, model, effort, text }, {
-      title: `Send a new ${taskKind} task in ${project}?`, body: `${text}\n\n(${setup})`,
+      title: `Send a new ${taskKind} job in ${project}?`, body: `${text}\n\n(${setup})`,
     });
-    if (ok) { clearDraft(ui.jobText); }
+    if (ok) { clearDraft(ui.jobText); closeJobSheet(); }
   });
 
   async function startBacklog(b, note) {
@@ -743,7 +864,7 @@
       td = null;
       ui.drawerKicker.replaceChildren('Cleaned up');
       ui.drawerTitle.textContent = selected.id;
-      ui.drawerBody.replaceChildren(h('p', { text: 'This worker has been cleaned up. Its session stays listed under Sessions.' }));
+      ui.drawerBody.replaceChildren(h('p', { text: 'This worker has been cleaned up. Its session stays listed under the first mate’s past sessions.' }));
       return;
     }
     ui.drawerKicker.replaceChildren(pillEl(taskStatus(t)), h('span', { text: t.lastActivity ? `Last update ${agoLong(t.lastActivity)}` : 'No update yet' }));
@@ -752,7 +873,7 @@
     td.task = t;
     if (!unchanged('drawer-info', t, snap.tmux.available)) td.info.replaceChildren(...taskInfo(t));
     if (!unchanged('drawer-decision', t.id, t.state, lastNote(t), t.options)) renderDecision(t);
-    if (!unchanged('drawer-resume', t.id, t.session)) td.resume.replaceChildren(h('h3', { text: 'Resume in terminal' }), resumeBlock(t.session));
+    if (!unchanged('drawer-resume', t.id, t.session)) td.resume.replaceChildren(h('h3', { text: 'Open in terminal' }), h('p', { class: 'hint', text: 'Copy this into a terminal to pick up the worker’s Claude Code session.' }), resumeBlock(t.session));
     if (!unchanged('drawer-config', t.id, t.config, t.window, snap.configOptions)) renderConfig(t);
     renderTaskOrders(t);
     td.peekWrap.hidden = !t.window;
@@ -822,9 +943,6 @@
       opts.length ? h('div', { class: 'options', role: 'group', 'aria-label': 'Options' }, ...opts) : null,
       opts.length ? h('p', { class: 'hint', text: 'Click an option to answer with it; anything in the box below is sent along with it.' }) : null,
       text, h('div', { class: 'btn-row end' }, sendBtn));
-  }
-  function answerText(opt, extra) {
-    return opt ? `(${opt.letter}) ${opt.text}${extra ? '\n\n' + extra : ''}` : extra;
   }
 
   function renderDecision(t) {
@@ -914,6 +1032,7 @@
       h('p', { class: 'hint', text: 'Sent to the first mate to act on; Ship Deck does not do these itself.' }),
       h('div', { class: 'btn-row' },
         h('button', { class: 'btn', type: 'button', text: 'Ask for status', onclick: () => queueOrder({ kind: 'status', target: id }) }),
+        h('button', { class: 'btn', type: 'button', onclick: () => { d.resume.scrollIntoView({ block: 'start', behavior: 'smooth' }); const b = d.resume.querySelector('.resume-row .btn'); if (b) b.focus({ preventScroll: true }); } }, icon('i-term'), 'Open in terminal'),
         d.mergeBtn,
         h('button', { class: 'btn', type: 'button', text: 'Clean up this worker', onclick: () => queueOrder({ kind: 'cleanup', target: id }, { title: `Ask the first mate to clean up “${name()}”?`, body: 'Closes its terminal and workspace once its work is safe.' }) })),
       d.ordersList);
@@ -1128,20 +1247,33 @@
     ui.drawerBody.replaceChildren(dl, h('p', { class: 'empty', text: 'Not running right now.' }));
   }
 
+  // The first mate: monitoring, its own session, and every past worker session (Sessions
+  // used to be a tab; now it lives here and in each worker's "Open in terminal").
+  let fmSess = null; // { filter, list } while the first mate drawer is open
   function renderFirstMateDrawer() {
-    ui.drawerKicker.replaceChildren('At the helm');
+    ui.drawerKicker.replaceChildren(h('span', { class: 'pill plain' }, icon('i-helm'), 'At the helm'));
     ui.drawerTitle.textContent = 'First mate';
     const sess = snap.firstmate && snap.firstmate.session;
-    if (unchanged('drawer-fm', sess, snap.watcher, snap.orders && snap.orders.pending)) return;
+    if (unchanged('drawer-fm', sess, snap.watcher.healthy, !!snap.watcher.lastBeat, snap.orders && snap.orders.pending, snap.homeLabel) && fmSess && fmSess.list.isConnected) return;
     const dl = h('dl', { class: 'facts' });
-    fact(dl, 'Home', snap.home, true);
-    fact(dl, 'Monitoring', snap.watcher.lastBeat ? `${snap.watcher.healthy ? 'on' : 'late'} · last check ${agoLong(snap.watcher.lastBeat)}` : 'has not checked in');
-    fact(dl, 'Unread messages', String((snap.orders && snap.orders.pending) || 0));
+    fact(dl, 'Fleet home', snap.homeLabel || snap.home, true);
+    fact(dl, 'Monitoring', snap.watcher.lastBeat ? `${snap.watcher.healthy ? 'On' : 'Late'}, last check ${agoLong(snap.watcher.lastBeat)}` : 'Has not checked in');
+    fact(dl, 'Not picked up yet', `${(snap.orders && snap.orders.pending) || 0} message${(snap.orders && snap.orders.pending) === 1 ? '' : 's'}`);
+    const filter = h('input', { class: 'input pane-filter', type: 'search', placeholder: 'Filter sessions…', 'aria-label': 'Filter sessions', autocomplete: 'off', spellcheck: 'false' });
+    if (fmSess) filter.value = fmSess.filter.value;
+    fmSess = { filter, list: h('ul', { class: 'list sessions' }) };
+    filter.addEventListener('input', () => renderSessions(true));
     ui.drawerBody.replaceChildren(dl,
-      h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', type: 'button', text: 'Open the Bridge chat', onclick: () => { closeDrawer(); showTab('bridge'); ui.chatText.focus(); } })),
-      h('section', { class: 'drawer-sec' }, h('h3', { text: 'Resume in terminal' }),
-        h('p', { class: 'hint', text: 'The newest Claude Code session started in the fleet home.' }), resumeBlock(sess)));
+      h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', type: 'button', onclick: () => { closeDrawer(); showTab('bridge'); ui.chatText.focus(); } }, icon('i-chat'), 'Open the chat')),
+      h('section', { class: 'drawer-sec' }, h('h3', { text: 'Open in terminal' }),
+        h('p', { class: 'hint', text: 'The newest Claude Code session started in the fleet home.' }), resumeBlock(sess)),
+      h('section', { class: 'drawer-sec' }, h('h3', { text: 'Past sessions' }),
+        h('p', { class: 'hint', text: 'Every Claude Code session Ship Deck has matched to a worker, kept after cleanup. Copy a command into a terminal to resume it.' }),
+        filter, fmSess.list));
+    renderSessions(true);
+    loadSessions(false);
   }
+
 
   function openDrawer(sel) {
     if (!selected || selected.type !== sel.type || selected.id !== sel.id) { stopPeek(); td = null; }
@@ -1187,7 +1319,6 @@
     }
     store.set('tab', name);
     if (name === 'bridge') { scrollThread(true); markSeen(); }
-    if (name === 'sessions') loadSessions(true);
     if (name === 'activity') renderActivity();
   }
   for (const [k, tab] of Object.entries(ui.tabs)) {
@@ -1203,10 +1334,31 @@
     });
   }
 
+  // ---------- views: Board (default) or Ship, remembered per viewer ----------
+  let view = store.get('view') === 'ship' ? 'ship' : 'board';
+  function setView(name) {
+    view = name === 'ship' ? 'ship' : 'board';
+    store.set('view', view);
+    ui.board.hidden = view !== 'board';
+    ui.scene.hidden = view !== 'ship';
+    ui.viewBoard.setAttribute('aria-pressed', String(view === 'board'));
+    ui.viewShip.setAttribute('aria-pressed', String(view === 'ship'));
+    if (snap && !snap.firstRun) renderAll();
+  }
+  ui.viewBoard.addEventListener('click', () => setView('board'));
+  ui.viewShip.addEventListener('click', () => setView('ship'));
+  ui.fmWho.addEventListener('click', () => openFirstMate());
+  // On narrow screens the panel sits under the board: jump down to the chat.
+  ui.chatJump.addEventListener('click', () => {
+    showTab('bridge');
+    ui.panel.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    ui.chatText.focus({ preventScroll: true });
+  });
+
   // ---------- resizable side panel ----------
   // The panel width lives in --panel-w on .layout; CSS clamps it to 320px..70vw.
   const PANEL_MIN = 320;
-  const PANEL_DEFAULT = 400;
+  const PANEL_DEFAULT = 420;
   const panelMax = () => Math.max(PANEL_MIN, Math.floor(window.innerWidth * 0.7));
   const panelWidth = () => Math.round(ui.panel.getBoundingClientRect().width) || PANEL_DEFAULT;
   function setPanelWidth(w, save) {
@@ -1311,13 +1463,16 @@
     ui.fmPill.className = 'fm-pill ' + (act.working ? 'on' : 'off');
     ui.activityDot.hidden = !act.working;
     renderHealth();
-    ui.activityState.textContent = label;
-    ui.activityState.className = 'fm-state ' + (act.working ? 'on' : 'off');
     ui.activitySub.textContent = has
       ? `Live from the first mate's transcript (read-only) · last line ${act.lastAt ? agoLong(act.lastAt) : 'unknown'}`
       : act.loaded ? 'No first mate Claude Code transcript found yet.' : 'Loading…';
     const list = [...act.events.values()].sort((a, b) => b.seq - a.seq);
     const latest = list.find((e) => e.kind === 'tool' || e.kind === 'text');
+    // Panel head: what the first mate is doing right now.
+    ui.fmLive.classList.toggle('off', !act.working);
+    ui.fmNowText.textContent = !has ? (act.loaded ? 'No session found' : 'Loading…')
+      : act.working ? `Working: ${latest && latest.kind === 'tool' ? latest.label.charAt(0).toLowerCase() + latest.label.slice(1) : 'thinking'}`
+        : `Idle, last active ${act.lastAt ? agoLong(act.lastAt) : 'a while ago'}`;
     ui.ticker.hidden = !latest;
     if (latest) {
       ui.tickerIcon.replaceChildren(icon(actIcon(latest)));
@@ -1766,7 +1921,7 @@
     if (!fresh.length) return;
     toast(fresh.length > 1 ? `${fresh.length} new items need you` : fresh[0].title, 'ok');
     if (fresh.length === 1) notify(fresh[0].title, fresh[0].body, 'shipdeck-needs', fresh[0].open);
-    else notify(`${fresh.length} new items need you`, fresh.map((x) => x.title).join('\n'), 'shipdeck-needs', () => showTab('command'));
+    else notify(`${fresh.length} new items need you`, fresh.map((x) => x.title).join('\n'), 'shipdeck-needs', () => setView('board'));
   }
 
   // ---------- sessions ----------
@@ -1783,26 +1938,24 @@
     }
     renderSessions();
   }
-  function renderSessions() {
-    if (!sessionEntries) return;
-    const q = ui.sessionsFilter.value.trim().toLowerCase();
-    const list = sessionEntries.filter((e) => !q || [e.id, !e.firstmate && titleOf(e.id), e.cwd, e.sessionId, e.harness, e.firstmate && 'first mate'].join(' ').toLowerCase().includes(q));
-    if (unchanged('sessions', list, q)) return;
-    ui.sessionsList.replaceChildren(...(list.length ? list.map((e) => {
-      const name = e.firstmate ? 'First mate' : titleOf(e.id);
-      const tag = e.firstmate ? 'helm' : e.present ? 'aboard' : 'departed';
+  function renderSessions(force) {
+    if (!sessionEntries || !fmSess || !fmSess.list.isConnected) return;
+    const q = fmSess.filter.value.trim().toLowerCase();
+    const list = sessionEntries.filter((e) => !e.firstmate && (!q || [e.id, titleOf(e.id), e.sessionId, e.harness].join(' ').toLowerCase().includes(q)));
+    if (unchanged('sessions', list, q) && !force) return;
+    fmSess.list.replaceChildren(...(list.length ? list.map((e) => {
+      const name = titleOf(e.id);
       return h('li', { class: 'session' + (e.present ? '' : ' departed') },
         h('div', { class: 'session-head' },
-          e.present && !e.firstmate
-            ? h('button', { class: 'linkish mono', type: 'button', text: name, onclick: () => openDrawer({ type: 'task', id: e.id }) })
-            : h('span', { class: 'mono strong', text: name }),
-          !e.firstmate && name !== e.id ? h('span', { class: 'r-rid', text: e.id }) : null,
-          h('span', { class: 'tag tag-' + tag, text: tag }),
-          h('span', { class: 'r-age', text: e.lastSeen ? `seen ${ago(e.lastSeen)}` : '' })),
+          e.present
+            ? h('button', { class: 'linkish', type: 'button', text: name, onclick: () => openDrawer({ type: 'task', id: e.id }) })
+            : h('span', { class: 'strong', text: name }),
+          name !== e.id ? h('code', { class: 'muted', text: e.id }) : null,
+          h('span', { class: 'pill sm ' + (e.present ? 'tone-working' : 'plain'), text: e.present ? 'Aboard' : 'Cleaned up' }),
+          h('span', { class: 'r-age', text: e.lastSeen ? `Seen ${agoLong(e.lastSeen)}` : '' })),
         resumeBlock(e));
     }) : [emptyRow(sessionEntries.length ? 'No sessions match.' : 'No sessions recorded yet. Ship Deck records Claude Code sessions as it finds them.')]));
   }
-  ui.sessionsFilter.addEventListener('input', renderSessions);
 
   // ---------- health strip ----------
   // Deck running · First mate listening (transcript activity < 2 min) · Monitoring · Last update.
@@ -1842,13 +1995,15 @@
     if (snap.firstRun) return renderFirstRun();
     ui.home.textContent = snap.homeLabel || snap.home;
     ui.home.title = `Firstmate home (read-only): ${snap.home}`;
-    renderBridge();
-    renderDeck();
-    renderCabins();
-    renderHold();
-    renderPanel();
+    if (view === 'board') renderBoard();
+    else {
+      renderBridge();
+      renderDeck();
+      renderCabins();
+      renderHold();
+      firstRender = false;
+    }
     renderDrawer();
-    firstRender = false;
   }
 
   function setSync(ok, text) {
@@ -1887,10 +2042,10 @@
       if (snap.firstRun) { timer = setTimeout(poll, 10000); return; }
       if (snap.thread && snap.thread.sig !== threadSig) loadThread(snap.thread.sig);
       notifyNeeds();
-      if (activeTab === 'sessions') loadSessions(false);
       loadActivity();
       if (firstHash) { const id = firstHash; firstHash = null; if (snap.tasks.some((t) => t.id === id)) openDrawer({ type: 'task', id }); }
     } catch (e) {
+      if (!(e instanceof TypeError && /fetch|network/i.test(e.message)) && !/^HTTP /.test(e.message)) console.error('Ship Deck render failed:', e);
       failures++;
       delay = Math.min(15000, POLL_MS * Math.pow(1.6, failures - 1));
       setSync(false, 'Deck offline');
@@ -1917,7 +2072,6 @@
       else if (selected && closeDataFile()) { /* back to the crew details */ }
       else if (selected) closeDrawer();
       else if (document.activeElement === ui.search && ui.search.value) { ui.search.value = ''; query = ''; renderAll(); }
-      else if (stateFilter) { stateFilter = null; renderAll(); }
     } else if (e.key === 'Enter' && confirmResolve && !editable(document.activeElement) && document.activeElement !== ui.confirmNo) {
       e.preventDefault();
       confirmResolve(true);
@@ -2005,5 +2159,6 @@
   // Notifications button, remembered tab, then the first poll.
   renderNotifyBtn();
   showTab(store.get('tab', 'bridge'));
+  setView(view);
   poll();
 })();

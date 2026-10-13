@@ -74,25 +74,30 @@
   <header class="topbar">
     <div class="brand">
       <span class="brand-mark" aria-hidden="true"><svg class="flag"><use href="#flag-k"/></svg><svg class="flag"><use href="#flag-p"/></svg><svg class="flag"><use href="#flag-c"/></svg></span>
-      <div>
+      <div class="brand-text">
         <h1>Ship Deck</h1>
         <p class="home" id="home-path" title="Fleet home (read-only)">…</p>
       </div>
     </div>
+    <div class="switch" role="group" aria-label="View">
+      <button type="button" id="view-board" aria-pressed="true" title="Board: work grouped by what it needs (G then B)"><svg class="ico"><use href="#i-board"/></svg><span class="lbl">Board</span></button>
+      <button type="button" id="view-ship" aria-pressed="false" title="Ship: the fleet drawn as a chart (G then S)"><svg class="ico"><use href="#i-ship"/></svg><span class="lbl">Ship</span></button>
+    </div>
     <label class="search">
-      <span class="sr-only">Filter workers by task, project or state</span>
-      <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M13 13l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-      <input id="search" type="search" placeholder="Filter by task, project, state…  ( / )" autocomplete="off" spellcheck="false">
+      <span class="sr-only">Filter work by title, project or state</span>
+      <svg class="ico" aria-hidden="true"><use href="#i-search"/></svg>
+      <input id="search" type="search" placeholder="Filter work…" autocomplete="off" spellcheck="false">
+      <span class="kbd" aria-hidden="true">/</span>
     </label>
-    <button class="btn ghost" id="library-btn" type="button" title="The first mate's permanent context files (read-only)">
-      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3.5h3.5v13H3zM7.5 3.5H11v13H7.5zM12.2 4.3l3.3-.9 3 12.4-3.3.9z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
-      Ship's Library
-    </button>
     <div class="health" id="health" aria-label="Health">
       <span class="sync" id="sync" aria-live="polite"><span class="sync-dot"></span><span id="sync-text">Connecting…</span></span>
       <span class="sync" id="health-fm" title="First mate activity in the last 2 minutes"><span class="sync-dot"></span><span class="health-text">First mate…</span></span>
       <span class="sync" id="health-mon" title="Monitoring heartbeat"><span class="sync-dot"></span><span class="health-text">Monitoring…</span></span>
-      <span class="sync health-time" id="health-time"></span>
+      <span class="health-time" id="health-time"></span>
+    </div>
+    <div class="top-actions">
+      <button class="btn ghost icon-btn chat-jump" id="chat-jump" type="button" aria-label="Chat with the first mate" title="Chat with the first mate"><svg><use href="#i-chat"/></svg></button>
+      <button class="btn ghost icon-btn" id="library-btn" type="button" aria-label="Ship's Library" title="Ship's Library: the first mate's permanent context (read-only)"><svg><use href="#i-book"/></svg></button>
     </div>
   </header>
   <section class="first-run" id="first-run" hidden aria-labelledby="first-run-title">
@@ -113,7 +118,18 @@ cd /path/to/firstmate &amp;&amp; npx ship-deck   # run from inside the home</pre
   </div>
 
   <main class="layout">
-    <section class="scene" id="scene" aria-label="Ship deck">
+    <section class="board" id="board" aria-label="Board">
+      <div class="board-head">
+        <h2 class="board-title" id="board-title">All work</h2>
+        <div class="filters" id="project-filters" role="group" aria-label="Project"></div>
+        <span class="spacer"></span>
+        <button class="btn primary" id="new-job-btn" type="button"><svg><use href="#i-plus"/></svg>New job</button>
+      </div>
+      <div class="cols" id="cols"></div>
+      <div class="mates" id="mates" hidden></div>
+    </section>
+
+    <section class="scene" id="scene" aria-label="Ship view" hidden>
       <div class="sea" aria-hidden="true"></div>
       <div class="ship" id="ship">
         <svg class="bow" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
@@ -174,114 +190,73 @@ cd /path/to/firstmate &amp;&amp; npx ship-deck   # run from inside the home</pre
       </div>
     </section>
 
-    <aside class="panel" id="panel" aria-label="Command Center">
+    <aside class="panel" id="panel" aria-label="First mate">
       <div class="panel-resize" id="panel-resize" role="separator" aria-orientation="vertical" aria-controls="panel" aria-label="Resize side panel (arrow keys; double-click to reset)" tabindex="0"></div>
-      <div class="tabs" role="tablist" aria-label="Command Center">
-        <button class="tab" role="tab" type="button" id="tab-bridge" aria-controls="pane-bridge" aria-selected="true">Bridge <span class="badge zero" id="unread-count" title="Unread replies from the first mate" hidden>0</span></button>
-        <button class="tab" role="tab" type="button" id="tab-command" aria-controls="pane-command" aria-selected="false" tabindex="-1">Command <span class="badge zero" id="needs-tab-count" title="Needs you" hidden>0</span></button>
+      <div class="panel-head">
+        <button class="fm-who" id="fm-who" type="button" title="First mate: session and monitoring">
+          <span class="fm-avatar" aria-hidden="true"><svg><use href="#i-helm"/></svg></span>
+          <span class="fm-who-text">
+            <span class="fm-name">First mate</span>
+            <span class="fm-now"><span class="live off" id="fm-live"></span><span id="fm-now-text">…</span></span>
+          </span>
+        </button>
+        <button class="btn sm" id="notify-btn" type="button" title="Browser notifications for new replies and items that need you">Enable alerts</button>
+      </div>
+      <div class="tabs" role="tablist" aria-label="First mate">
+        <button class="tab" role="tab" type="button" id="tab-bridge" aria-controls="pane-bridge" aria-selected="true">Chat <span class="badge alert" id="unread-count" title="Unread replies from the first mate" hidden>0</span></button>
         <button class="tab" role="tab" type="button" id="tab-activity" aria-controls="pane-activity" aria-selected="false" tabindex="-1">Activity <span class="live-dot" id="activity-dot" title="The first mate is working" hidden></span></button>
-        <button class="tab" role="tab" type="button" id="tab-sessions" aria-controls="pane-sessions" aria-selected="false" tabindex="-1">Sessions</button>
       </div>
 
       <section class="pane bridge-pane" id="pane-bridge" role="tabpanel" aria-labelledby="tab-bridge">
-        <div class="bridge-head">
-          <div class="bridge-who">
-            <span class="fm-avatar" aria-hidden="true"><svg class="ico"><use href="#i-helm"/></svg></span>
-            <div>
-              <h2>First mate</h2>
-              <p class="bridge-sub" id="bridge-sub">Your messages go to the first mate; replies arrive here.</p>
-            </div>
-          </div>
-          <button class="btn" id="notify-btn" type="button" title="Browser notifications for new replies and items that need you">Enable alerts</button>
-        </div>
+        <p class="sr-only" id="bridge-sub">Your messages go to the first mate; replies arrive here.</p>
         <ol class="thread" id="thread" aria-live="polite" aria-label="Conversation with the first mate"></ol>
-        <button class="jump" id="thread-jump" type="button" hidden>New messages ↓</button>
+        <button class="btn sm jump" id="thread-jump" type="button" hidden><svg><use href="#i-down"/></svg>New messages</button>
         <form class="composer" id="chat-form">
           <ul class="att-tray" id="att-tray" aria-label="Attachments to send" hidden></ul>
           <label class="sr-only" for="chat-text">Message to the first mate</label>
-          <textarea id="chat-text" rows="2" maxlength="4000" placeholder="Message the first mate… (paste or drop screenshots and recordings)" spellcheck="true"></textarea>
+          <textarea id="chat-text" rows="2" maxlength="4000" placeholder="Message the first mate. Paste screenshots or drop recordings." spellcheck="true"></textarea>
           <div class="composer-foot">
-            <button class="btn attach-btn" id="attach-btn" type="button" title="Attach screenshots or screen recordings (or paste / drop them)" aria-label="Attach images or videos">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </button>
+            <button class="btn ghost icon-btn" id="attach-btn" type="button" title="Attach screenshots or screen recordings (or paste or drop them)" aria-label="Attach images or videos"><svg><use href="#i-clip"/></svg></button>
             <input id="attach-input" type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm,.png,.jpg,.jpeg,.gif,.webp,.mp4,.mov,.webm" hidden>
-            <span class="hint" id="chat-hint">Enter to send · Shift+Enter for a new line</span>
+            <span class="hint" id="chat-hint">Enter to send, Shift+Enter for a new line</span>
             <button class="btn primary" id="chat-send" type="submit">Send</button>
           </div>
         </form>
       </section>
 
-      <section class="pane" id="pane-command" role="tabpanel" aria-labelledby="tab-command" hidden>
-        <div class="card watch-card" id="watch-card"></div>
-
-        <div class="card attention">
-          <h3>Needs you <span class="badge" id="needs-count">0</span></h3>
-          <ul class="list actions" id="needs-list"></ul>
-        </div>
-
-        <div class="card">
-          <h3>Workers by state</h3>
-          <div class="counts" id="counts"></div>
-        </div>
-
-        <details class="card new-job" id="new-job">
-          <summary><h3>New task</h3></summary>
-          <form class="job-form" id="job-form">
-            <label>Project
-              <select id="job-project" required></select>
-            </label>
-            <fieldset class="kind-seg" aria-label="Kind of task">
-              <label><input type="radio" name="job-kind" value="ship" checked> <span><strong>Ship</strong> make the change</span></label>
-              <label><input type="radio" name="job-kind" value="scout"> <span><strong>Scout</strong> diagnose and report only</span></label>
-            </fieldset>
-            <div class="job-config">
-              <label title="The coding agent that runs the task">Tool <select id="job-harness"></select></label>
-              <label title="Default: the first mate's usual model">Model <select id="job-model"></select></label>
-              <label title="Auto: the first mate decides">Effort <select id="job-effort"></select></label>
-            </div>
-            <label>What should the worker do?
-              <textarea id="job-text" rows="4" maxlength="2000" placeholder="Describe the task: goal, links, constraints…"></textarea>
-            </label>
-            <button class="btn primary" type="submit">Send new task</button>
-          </form>
-        </details>
-
-        <div class="card">
-          <h3>Queue <span class="badge muted" id="queued-count">0</span></h3>
-          <ul class="list compact actions" id="queued-list"></ul>
-        </div>
-
-        <div class="card">
-          <h3>Recently done <button class="btn sm" id="cleanup-done" type="button" hidden></button></h3>
-          <ul class="list" id="done-list"></ul>
-        </div>
-
-        <div class="card orders-card">
-          <h3>Messages <span class="badge zero" id="orders-count" title="Messages the first mate has not picked up yet">0</span></h3>
-          <ul class="list orders" id="orders-list"></ul>
-        </div>
-
-        <div class="card">
-          <h3>Pull requests</h3>
-          <ul class="list" id="pr-list"></ul>
-        </div>
-      </section>
-
       <section class="pane" id="pane-activity" role="tabpanel" aria-labelledby="tab-activity" hidden>
-        <div class="activity-head">
-          <span class="fm-state" id="activity-state">…</span>
-          <p class="hint" id="activity-sub">Live from the first mate's Claude Code transcript (read-only).</p>
-        </div>
+        <p class="hint activity-sub" id="activity-sub">Live from the first mate's Claude Code transcript (read-only).</p>
         <ol class="feed" id="feed" aria-live="polite" aria-label="First mate activity, newest first"></ol>
-      </section>
-
-      <section class="pane" id="pane-sessions" role="tabpanel" aria-labelledby="tab-sessions" hidden>
-        <p class="hint pane-hint">Every Claude Code session Ship Deck has matched to the first mate or a worker, kept after cleanup. Paste a command into a terminal to resume.</p>
-        <input id="sessions-filter" class="pane-filter" type="search" placeholder="Filter sessions…" autocomplete="off" spellcheck="false" aria-label="Filter sessions">
-        <ul class="list sessions" id="sessions-list"></ul>
       </section>
     </aside>
   </main>
+
+  <div class="sheet-scrim" id="job-scrim" hidden></div>
+  <section class="sheet job-sheet" id="job-sheet" role="dialog" aria-modal="true" aria-labelledby="job-title" hidden tabindex="-1">
+    <header class="sheet-head">
+      <h2 id="job-title">New job</h2>
+      <button class="btn ghost icon-btn" id="job-close" type="button" aria-label="Close"><svg><use href="#i-x"/></svg></button>
+    </header>
+    <form class="job-form" id="job-form">
+      <p class="hint">Sent to the first mate, who starts a worker on it. Ship Deck does not start workers itself.</p>
+      <label>Project
+        <select id="job-project" required></select>
+      </label>
+      <fieldset class="kind-seg" aria-label="Kind of job">
+        <label><input type="radio" name="job-kind" value="ship" checked> <span><strong>Ship</strong> Make the change and open a pull request</span></label>
+        <label><input type="radio" name="job-kind" value="scout"> <span><strong>Scout</strong> Diagnose and write a report only</span></label>
+      </fieldset>
+      <div class="job-config">
+        <label title="The coding agent that runs the job">Tool <select id="job-harness"></select></label>
+        <label title="Default: the first mate's usual model">Model <select id="job-model"></select></label>
+        <label title="Auto: the first mate decides">Effort <select id="job-effort"></select></label>
+      </div>
+      <label>What should the worker do?
+        <textarea id="job-text" rows="5" maxlength="2000" placeholder="The goal, links and anything it must not do…"></textarea>
+      </label>
+      <div class="btn-row end"><button class="btn" type="button" id="job-cancel">Cancel</button><button class="btn primary" type="submit">Send to the first mate</button></div>
+    </form>
+  </section>
 
   <div class="drawer-scrim" id="scrim" hidden></div>
   <aside class="drawer" id="drawer" aria-hidden="true" aria-labelledby="drawer-title" tabindex="-1">
