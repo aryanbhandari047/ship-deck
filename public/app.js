@@ -21,8 +21,11 @@
     captain: $('captain'), firstmate: $('firstmate'), awaySign: $('away-sign'), lamp: $('lamp'), lampLabel: $('lamp-label'), wheel: $('wheel'),
     areas: $('areas'), cabins: $('cabins'), cabinRow: $('cabin-row'),
     hold: $('hold'), holdSub: $('hold-sub'), crates: $('crates'),
-    tabs: { bridge: $('tab-bridge'), command: $('tab-command'), sessions: $('tab-sessions') },
-    panes: { bridge: $('pane-bridge'), command: $('pane-command'), sessions: $('pane-sessions') },
+    tabs: { bridge: $('tab-bridge'), command: $('tab-command'), activity: $('tab-activity'), sessions: $('tab-sessions') },
+    panes: { bridge: $('pane-bridge'), command: $('pane-command'), activity: $('pane-activity'), sessions: $('pane-sessions') },
+    layout: document.querySelector('.layout'), panel: $('panel'), panelResize: $('panel-resize'),
+    feed: $('feed'), activityState: $('activity-state'), activitySub: $('activity-sub'), activityDot: $('activity-dot'),
+    ticker: $('ticker'), tickerIcon: $('ticker-icon'), tickerText: $('ticker-text'), tickerAge: $('ticker-age'), fmPill: $('fm-pill'),
     unread: $('unread-count'), needsTab: $('needs-tab-count'),
     thread: $('thread'), threadJump: $('thread-jump'), chatForm: $('chat-form'), chatText: $('chat-text'), chatSend: $('chat-send'),
     notifyBtn: $('notify-btn'), bridgeSub: $('bridge-sub'), chatHint: $('chat-hint'),
@@ -1120,6 +1123,7 @@
     store.set('tab', name);
     if (name === 'bridge') { scrollThread(true); markSeen(); }
     if (name === 'sessions') loadSessions(true);
+    if (name === 'activity') renderActivity();
   }
   for (const [k, tab] of Object.entries(ui.tabs)) {
     tab.addEventListener('click', () => showTab(k));
@@ -1133,6 +1137,131 @@
       }
     });
   }
+
+  // ---------- resizable side panel ----------
+  // The panel width lives in --panel-w on .layout; CSS clamps it to 320px..70vw.
+  const PANEL_MIN = 320;
+  const PANEL_DEFAULT = 400;
+  const panelMax = () => Math.max(PANEL_MIN, Math.floor(window.innerWidth * 0.7));
+  const panelWidth = () => Math.round(ui.panel.getBoundingClientRect().width) || PANEL_DEFAULT;
+  function setPanelWidth(w, save) {
+    if (w === null) ui.layout.style.removeProperty('--panel-w');
+    else ui.layout.style.setProperty('--panel-w', Math.round(Math.min(panelMax(), Math.max(PANEL_MIN, w))) + 'px');
+    if (save) store.set('panelWidth', w === null ? null : Math.round(Math.min(panelMax(), Math.max(PANEL_MIN, w))));
+    syncResizeAria();
+  }
+  function syncResizeAria() {
+    ui.panelResize.setAttribute('aria-valuemin', PANEL_MIN);
+    ui.panelResize.setAttribute('aria-valuemax', panelMax());
+    ui.panelResize.setAttribute('aria-valuenow', panelWidth());
+  }
+  ui.panelResize.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    ui.panelResize.focus();
+    document.body.classList.add('resizing');
+    const right = ui.panel.getBoundingClientRect().right;
+    const move = (ev) => setPanelWidth(right - ev.clientX, false);
+    // Window listeners keep the drag going even when the pointer outruns the handle.
+    const up = () => {
+      for (const [ev, fn] of [['pointermove', move], ['pointerup', up], ['pointercancel', up]]) window.removeEventListener(ev, fn);
+      document.body.classList.remove('resizing');
+      store.set('panelWidth', panelWidth());
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  });
+  ui.panelResize.addEventListener('dblclick', () => setPanelWidth(null, true));
+  ui.panelResize.addEventListener('keydown', (e) => {
+    const step = e.shiftKey ? 64 : 16;
+    const w = panelWidth();
+    if (e.key === 'ArrowLeft') setPanelWidth(w + step, true);
+    else if (e.key === 'ArrowRight') setPanelWidth(w - step, true);
+    else if (e.key === 'Home') setPanelWidth(PANEL_MIN, true);
+    else if (e.key === 'End') setPanelWidth(panelMax(), true);
+    else if (e.key === 'Enter') setPanelWidth(null, true);
+    else return;
+    e.preventDefault();
+  });
+  window.addEventListener('resize', syncResizeAria);
+  { const saved = Number(store.get('panelWidth')); if (saved >= PANEL_MIN) setPanelWidth(saved, false); else syncResizeAria(); }
+
+  // ---------- first mate activity (read-only, from its own transcript) ----------
+  const ACT_ICON = { shell: '⌨️', browser: '🧭', read: '📖', edit: '✏️', write: '📝', agent: '👥', publish: '📤', tool: '🔧', text: '💬', session: '⚓' };
+  const ACT_MAX = 200;
+  const act = { epoch: null, rev: null, events: new Map(), working: false, running: false, lastAt: null, sessionId: null, loaded: false };
+  const expanded = new Set(); // seqs of Bash events showing their command
+  let actLoading = false;
+  async function loadActivity() {
+    if (actLoading) return;
+    actLoading = true;
+    try {
+      const q = act.epoch ? `?since=${act.rev}&epoch=${encodeURIComponent(act.epoch)}` : '';
+      const res = await fetch('/api/activity' + q, { cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const r = await res.json();
+      if (r.full) act.events.clear();
+      for (const e of r.events || []) act.events.set(e.seq, e);
+      const seqs = [...act.events.keys()].sort((a, b) => a - b);
+      for (const k of seqs.slice(0, Math.max(0, seqs.length - ACT_MAX))) act.events.delete(k);
+      Object.assign(act, { epoch: r.epoch, rev: r.rev, working: r.working, running: r.running, lastAt: r.lastAt, sessionId: r.sessionId, loaded: true });
+    } catch { /* the fleet poll shows connectivity */ }
+    actLoading = false;
+    renderActivity();
+  }
+  function clock(ms) { return ms ? new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''; }
+  function dur(ms) {
+    if (ms === null || ms === undefined) return '';
+    if (ms < 1000) return ms + 'ms';
+    if (ms < 60000) return (ms / 1000).toFixed(ms < 10000 ? 1 : 0) + 's';
+    return Math.floor(ms / 60000) + 'm' + String(Math.round((ms % 60000) / 1000)).padStart(2, '0') + 's';
+  }
+  function evStatus(e) {
+    if (e.kind !== 'tool') return null;
+    const text = { running: 'running…', done: '✓ ' + dur(e.duration), failed: '✗ failed ' + dur(e.duration), unknown: '—' }[e.status] || '';
+    return h('span', { class: 'ev-status st-' + e.status, title: e.status === 'unknown' ? 'No result recorded (session changed)' : e.status, text: text.trim() });
+  }
+  function evRow(e) {
+    if (e.kind === 'session') return h('li', { class: 'ev ev-session' }, h('span', { text: `${ACT_ICON.session} ${e.label}` }));
+    let main;
+    if (e.detail) {
+      const d = h('details', { class: 'ev-cmd', ontoggle: () => (d.open ? expanded.add(e.seq) : expanded.delete(e.seq)) },
+        h('summary', { title: 'Show the command', text: e.label }), h('pre', { class: 'mono', text: e.detail }));
+      d.open = expanded.has(e.seq);
+      main = d;
+    } else main = h('span', { class: 'ev-label', text: e.kind === 'text' ? `“${e.label}”` : e.label });
+    return h('li', { class: `ev ev-${e.kind}` + (e.status ? ' st-' + e.status : '') },
+      h('time', { class: 'ev-time mono', text: clock(e.ts) }),
+      h('span', { class: 'ev-icon', 'aria-hidden': 'true', text: ACT_ICON[e.kind === 'text' ? 'text' : e.icon] || ACT_ICON.tool }),
+      h('div', { class: 'ev-main' }, main),
+      evStatus(e));
+  }
+  function renderActivity() {
+    const has = act.loaded && !!act.sessionId;
+    const label = !has ? 'no session' : act.working ? 'working…' : 'idle';
+    ui.fmPill.hidden = !has;
+    ui.fmPill.textContent = label;
+    ui.fmPill.className = 'fm-pill ' + (act.working ? 'on' : 'off');
+    ui.activityDot.hidden = !act.working;
+    ui.activityState.textContent = label;
+    ui.activityState.className = 'fm-state ' + (act.working ? 'on' : 'off');
+    ui.activitySub.textContent = has
+      ? `Live from the first mate's transcript (read-only) · last line ${act.lastAt ? agoLong(act.lastAt) : 'unknown'}`
+      : act.loaded ? 'No first mate Claude Code transcript found yet.' : 'Loading…';
+    const list = [...act.events.values()].sort((a, b) => b.seq - a.seq);
+    const latest = list.find((e) => e.kind === 'tool' || e.kind === 'text');
+    ui.ticker.hidden = !latest;
+    if (latest) {
+      ui.tickerIcon.textContent = ACT_ICON[latest.kind === 'text' ? 'text' : latest.icon] || ACT_ICON.tool;
+      ui.tickerText.textContent = latest.kind === 'text' ? `“${latest.label}”` : latest.label;
+      ui.tickerAge.textContent = latest.status === 'running' ? 'running…' : latest.status === 'failed' ? 'failed · ' + ago(latest.ts) : ago(latest.ts);
+      ui.ticker.classList.toggle('on', act.working);
+    }
+    if (activeTab !== 'activity' || unchanged('feed', act.epoch, act.rev, list.length)) return;
+    ui.feed.replaceChildren(...(list.length ? list.map(evRow) : [emptyRow(has ? 'No tool calls in the transcript yet.' : 'Nothing to show until the first mate has a Claude Code session in its home.')]));
+  }
+  ui.ticker.addEventListener('click', () => showTab('activity'));
 
   // ---------- bridge chat ----------
   let threadSig = null;
@@ -1660,6 +1789,7 @@
       if (snap.thread && snap.thread.sig !== threadSig) loadThread(snap.thread.sig);
       notifyNeeds();
       if (activeTab === 'sessions') loadSessions(false);
+      loadActivity();
       if (firstHash) { const id = firstHash; firstHash = null; if (snap.tasks.some((t) => t.id === id)) openDrawer({ type: 'task', id }); }
     } catch (e) {
       failures++;

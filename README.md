@@ -39,6 +39,8 @@ writes there.
 
 ![Bridge attachments: a pasted screenshot and a recording with extracted stills, and a reply carrying an image](docs/attachments.png)
 
+![The Activity tab: the first mate's tool calls and replies, live from its transcript, with the side panel widened](docs/activity.png)
+
 *(Screenshots use the fabricated fixture home in `test/fixtures/home`.)*
 
 ## Run
@@ -251,6 +253,40 @@ crew member leaves. Drawers and the Sessions tab show
 `cd '<cwd>' && claude --resume <sessionId>` with a Copy button; other harnesses
 show "resume id unknown (<harness>)".
 
+## First mate activity
+
+The **Activity** tab answers "what is the first mate doing right now". It
+reads, and never writes, the first mate's own Claude Code transcript: the
+newest verified `~/.claude/projects/<encoded FM_HOME>/<uuid>.jsonl` (the same
+discovery the Sessions view uses, rechecked every 5 s, so a new first mate
+session takes over the feed with a "New first mate session" marker). The
+server (`lib/activity.js`) tails it incrementally: it remembers a byte offset,
+starts at most 1 MB from the end on a first look, leaves a half-written last
+line for the next poll, and starts over if the file shrinks. Sidechain lines
+are skipped.
+
+Each assistant `tool_use` becomes one event; its `tool_result` marks it done or
+failed (`is_error`) with the duration. Short text replies (first 140 chars)
+appear inline. Summaries:
+
+| tool | shown as |
+| --- | --- |
+| `Bash` | its `description`; click to expand the command (inline credentials masked) |
+| `mcp__claude-in-chrome__*` | `Browser: navigate <url>`, `Browser: find "<query>"`, `Browser: click/screenshot/key…`; `type` shows `Browser: typing…`, never the text |
+| `Read` / `Edit` / `Write` | `Reading/Editing/Writing <basename>` |
+| `Agent` / `Task` | `Delegated: <description>` |
+| `Artifact` | `Publishing <title or file name>` |
+| anything else | the tool name only |
+
+Input fields whose name looks like a password, token, secret, key, cookie,
+authorization, credential or session are dropped before any summary is built.
+`GET /api/activity?since=<rev>&epoch=<epoch>` returns only events changed since
+the previous response (`full:true` with everything when the cursor is unknown);
+the page asks after every fleet poll and keeps the last 200 events. The First
+mate avatar on the bridge wears a **working…** / **idle** pill (working = a
+tool call without its result, under 10 min old, or a transcript line in the last
+20 s), and a ticker under the bridge shows the latest event (click opens the tab).
+
 ## Security
 
 - Binds `127.0.0.1` only; every request must carry `Host: 127.0.0.1:<port>` or
@@ -289,6 +325,11 @@ the exact fm-send argv, and `bin/start.sh`.
 traversal (ids, frame names, tampered metadata, symlinks), size limits, the
 upload guards, Range serving, video stills, chat orders with attachments,
 `reply --attach` and the `list` output, with fabricated bytes only.
+`test/activity.test.js` covers the activity feed against a fabricated
+transcript (`test/fixtures/transcript/firstmate.jsonl`): tool summaries,
+redaction, a partial last line, `is_error` results and durations, rotation to
+a newer session, the 200-event cap, tail-only reads, the read-only fingerprint
+and `GET /api/activity`.
 `test/parsers.test.js` covers the parsers against the fabricated fixtures.
 `test/snapshot.test.js` builds a snapshot from a temp copy of the fixture home,
 checks missing files and an empty home, proves no file under the home changes
@@ -315,6 +356,7 @@ All paths are relative to the fleet home. Missing files are fine.
 | Ship's Library | `AGENTS.md`, `data/captain.md`, `data/captain-shared.md`, `data/learnings.md`, `data/projects.md`, `data/secondmates.md`, `data/backlog.md`, every `*.md` in `--memory-dir` (MEMORY.md first), and the skills; missing files are shown as missing |
 | `state/<id>.status` last line (needs-decision/blocked) | Lettered options `(A) ...`, `(B, recommended) ...`, `Options: A) ...`, `option A, ...` become decision buttons |
 | `~/.claude/projects/*/<uuid>.jsonl` (head only) | Session discovery for resume commands |
+| `~/.claude/projects/<encoded FM_HOME>/<uuid>.jsonl` (tail, newest session) | The first mate activity feed |
 | `~/.claude/skills/*/SKILL.md`, `<home>/.agents/skills/*/SKILL.md` | Skills in the Ship's Library (name and description from the frontmatter) |
 | `tmux list-windows -a` | Optional: marks whether a crew member's window is open. Skipped if tmux is missing. |
 
@@ -344,6 +386,13 @@ All paths are relative to the fleet home. Missing files are fine.
   counts by state plus Stale (click to filter), New job form, queued backlog
   (Start), recently done with "Clean up all finished", every order with its
   lifecycle, and PR links.
+- **Activity tab**: the first mate's live tool calls and replies, newest
+  first ([First mate activity](#first-mate-activity)).
+- **Side panel width**: drag the handle on the panel's left edge (or focus it
+  and use the arrow keys, Shift for bigger steps, Home/End for min/max,
+  Enter or double-click to reset to 400 px). 320 px to 70% of the window; the
+  width is remembered in `localStorage`. Below 900 px the panel stacks under
+  the deck and the handle is hidden.
 - **Sessions tab**: every recorded session with its resume command, including
   departed crew.
 - **Detail drawer**: click any crew member, crate or the first mate.
@@ -369,6 +418,7 @@ lib/orders.js      Orders queue in ~/.ship-deck
 lib/attachments.js Bridge attachments: magic bytes, storage, stills, Range serving
 lib/library.js     Ship's Library allow-list (home files, memory, skills)
 lib/sessions.js    Claude session discovery and ~/.ship-deck/sessions.json
+lib/activity.js    First mate activity feed: read-only transcript tail
 lib/config.js      Per-harness model/effort allow-list and slash commands
 bin/orders.js      Orders, replies, thread and sessions CLI for the first mate
 bin/orders-check.sh  Watcher wake check (POSIX sh)

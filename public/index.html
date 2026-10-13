@@ -79,6 +79,7 @@
               <figure class="officer firstmate" id="firstmate" role="button" tabindex="0" title="First mate: session and Bridge chat">
                 <svg viewBox="0 0 40 48" class="sailor" aria-hidden="true"></svg>
                 <figcaption>First mate</figcaption>
+                <span class="fm-pill" id="fm-pill" hidden></span>
               </figure>
               <div class="lamp-post" id="lamp-post">
                 <span class="lamp" id="lamp"></span>
@@ -86,6 +87,11 @@
               </div>
             </div>
           </div>
+          <button class="ticker" id="ticker" type="button" title="What the first mate is doing (from its transcript, read-only)" hidden>
+            <span class="ticker-icon" id="ticker-icon" aria-hidden="true"></span>
+            <span class="ticker-text" id="ticker-text"></span>
+            <span class="ticker-age" id="ticker-age"></span>
+          </button>
         </div>
 
         <div id="areas"></div>
@@ -103,9 +109,11 @@
     </section>
 
     <aside class="panel" id="panel" aria-label="Command Center">
+      <div class="panel-resize" id="panel-resize" role="separator" aria-orientation="vertical" aria-controls="panel" aria-label="Resize side panel (arrow keys; double-click to reset)" tabindex="0"></div>
       <div class="tabs" role="tablist" aria-label="Command Center">
         <button class="tab" role="tab" type="button" id="tab-bridge" aria-controls="pane-bridge" aria-selected="true">Bridge <span class="badge zero" id="unread-count" title="Unread replies from the first mate" hidden>0</span></button>
         <button class="tab" role="tab" type="button" id="tab-command" aria-controls="pane-command" aria-selected="false" tabindex="-1">Command <span class="badge zero" id="needs-tab-count" title="Needs the captain" hidden>0</span></button>
+        <button class="tab" role="tab" type="button" id="tab-activity" aria-controls="pane-activity" aria-selected="false" tabindex="-1">Activity <span class="live-dot" id="activity-dot" title="The first mate is working" hidden></span></button>
         <button class="tab" role="tab" type="button" id="tab-sessions" aria-controls="pane-sessions" aria-selected="false" tabindex="-1">Sessions</button>
       </div>
 
@@ -196,6 +204,14 @@
           <h3>Pull requests</h3>
           <ul class="list" id="pr-list"></ul>
         </div>
+      </section>
+
+      <section class="pane" id="pane-activity" role="tabpanel" aria-labelledby="tab-activity" hidden>
+        <div class="activity-head">
+          <span class="fm-state" id="activity-state">…</span>
+          <p class="hint" id="activity-sub">Live from the first mate's Claude Code transcript (read-only).</p>
+        </div>
+        <ol class="feed" id="feed" aria-live="polite" aria-label="First mate activity, newest first"></ol>
       </section>
 
       <section class="pane" id="pane-sessions" role="tabpanel" aria-labelledby="tab-sessions" hidden>

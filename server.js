@@ -18,6 +18,7 @@ const library = require('./lib/library');
 const sessions = require('./lib/sessions');
 const config = require('./lib/config');
 const attachments = require('./lib/attachments');
+const activity = require('./lib/activity');
 
 const DEFAULT_HOME = '/Users/aryanbhandari/Desktop/AI/firstmate';
 const MAX_BODY = 16 * 1024;
@@ -173,6 +174,7 @@ function createServer(opts) {
   const claudeDir = opts.claudeDir || sessions.defaultClaudeDir();
   const libOpts = { captainSkills: path.join(claudeDir, 'skills') };
   const tracker = sessions.createTracker({ home: opts.home, claudeDir, ordersDir });
+  const feed = activity.createActivity({ home: opts.home, claudeDir });
 
   // POST /api/attachments?name=<file name>: raw body, stored after a magic-byte check.
   // POST /api/attachments?parent=<id>&name=frame-0001.jpg|index.json: a video's extracted stills.
@@ -261,6 +263,11 @@ function createServer(opts) {
       }
       if (url.pathname === '/api/thread') {
         return json(res, 200, { sig: orders.threadSignature(ordersDir), items: orders.buildThread(ordersDir, { limit: THREAD_LIMIT }) });
+      }
+      if (url.pathname === '/api/activity') {
+        // ?since=<rev>&epoch=<epoch> from the previous response: only changed events.
+        const since = url.searchParams.has('since') ? Number(url.searchParams.get('since')) : NaN;
+        return json(res, 200, feed.view(since, url.searchParams.get('epoch')));
       }
       if (url.pathname === '/api/sessions') {
         const present = knownIds(opts.home);
