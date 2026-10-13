@@ -64,12 +64,6 @@
       <symbol id="i-rose" viewBox="0 0 100 100" fill="none" stroke="currentColor"><circle cx="50" cy="50" r="40" stroke-width="1"/><circle cx="50" cy="50" r="31" stroke-width=".6" stroke-dasharray="1 3"/><path d="M50 4L56 44L96 50L56 56L50 96L44 56L4 50L44 44Z" stroke-width="1"/><path d="M50 4L56 44L50 50Z" fill="currentColor" stroke="none"/></symbol>
     </defs>
   </svg>
-  <!-- Shared SVG defs referenced by every sailor. -->
-  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
-    <defs>
-      <clipPath id="torso-clip"><path d="M12 21h16a3 3 0 0 1 3 3v15H9V24a3 3 0 0 1 3-3z"/></clipPath>
-    </defs>
-  </svg>
 
   <header class="topbar">
     <div class="brand">
@@ -98,22 +92,32 @@
     <div class="top-actions">
       <button class="btn ghost icon-btn chat-jump" id="chat-jump" type="button" aria-label="Chat with the first mate" title="Chat with the first mate"><svg><use href="#i-chat"/></svg></button>
       <button class="btn ghost icon-btn" id="library-btn" type="button" aria-label="Ship's Library" title="Ship's Library: the first mate's permanent context (read-only)"><svg><use href="#i-book"/></svg></button>
+      <button class="btn ghost icon-btn" id="help-btn" type="button" aria-label="Keyboard shortcuts and what the flags mean (?)" title="Keyboard shortcuts and what the flags mean (?)"><svg><use href="#i-help"/></svg></button>
     </div>
   </header>
-  <section class="first-run" id="first-run" hidden aria-labelledby="first-run-title">
-    <h2 id="first-run-title">Point Ship Deck at your firstmate home</h2>
-    <p>Ship Deck shows a firstmate fleet, but it did not find a firstmate home. It looked here:</p>
-    <ul class="first-run-checked" id="first-run-checked"></ul>
-    <p>A firstmate home is the folder with <code>AGENTS.md</code>, <code>bin/fm-spawn.sh</code> and <code>state/</code>. Stop this server (Ctrl+C) and start it again with one of:</p>
-    <pre class="first-run-cmd">npx ship-deck --home /path/to/firstmate
-FM_HOME=/path/to/firstmate npx ship-deck
-cd /path/to/firstmate &amp;&amp; npx ship-deck   # run from inside the home</pre>
-    <p class="hint">Or keep your home at <code>~/firstmate</code> and Ship Deck finds it on its own. This page reloads when the server comes back.</p>
-  </section>
+  <main class="first-run" id="first-run" hidden aria-labelledby="first-run-title">
+    <div class="fr-col">
+      <div class="fr-hoist" aria-hidden="true"><span class="line"></span><svg class="flag"><use href="#flag-k"/></svg><svg class="flag"><use href="#flag-p"/></svg><svg class="flag"><use href="#flag-c"/></svg></div>
+      <h1 id="first-run-title">Connect Ship Deck to your first mate</h1>
+      <p class="lede">Ship Deck shows the work your first mate is running: what needs you, what is moving and what is done. It reads your firstmate folder and never changes it.</p>
+      <section class="box" aria-labelledby="fr-looked">
+        <h2 id="fr-looked">No firstmate folder found yet</h2>
+        <p class="fine">A firstmate folder has <code>AGENTS.md</code>, <code>bin/fm-spawn.sh</code> and <code>state/</code>. Ship Deck looked here:</p>
+        <ul class="checks" id="first-run-checked"></ul>
+      </section>
+      <section class="box" aria-labelledby="fr-point">
+        <h2 id="fr-point">Point it at your folder</h2>
+        <p class="fine">Stop this server (Ctrl+C) and start it again with your folder:</p>
+        <div class="cmd"><code id="fr-cmd">npx ship-deck --home ~/path/to/firstmate</code><button class="btn sm" id="fr-copy" type="button"><svg><use href="#i-copy"/></svg><span class="lbl">Copy</span></button></div>
+        <p class="fine">Or set <code>FM_HOME=/path/to/firstmate</code>, or run <code>npx ship-deck</code> from inside the folder. Keep it at <code>~/firstmate</code> and Ship Deck finds it on its own. This page reloads when the server comes back.</p>
+      </section>
+      <p class="fine"><svg class="ico" aria-hidden="true"><use href="#i-lock"/></svg>Ship Deck runs only on this computer at 127.0.0.1. Nothing is shared.</p>
+    </div>
+  </main>
   <div class="banner" id="reconnect" role="status" hidden>
     <span class="banner-dot"></span>
     <span id="reconnect-text">Reconnecting to the Ship Deck server…</span>
-    <span class="banner-sub">Drafts are kept. Run <code>npx ship-deck</code> (or <code>sh bin/start.sh</code>) if it stopped.</span>
+    <span class="banner-sub">Your drafts are kept and this page reconnects on its own. If you stopped Ship Deck, start it again the same way.</span>
     <button class="btn" id="reconnect-now" type="button">Retry now</button>
   </div>
 
@@ -130,61 +134,28 @@ cd /path/to/firstmate &amp;&amp; npx ship-deck   # run from inside the home</pre
     </section>
 
     <section class="scene" id="scene" aria-label="Ship view" hidden>
-      <div class="sea" aria-hidden="true"></div>
-      <div class="ship" id="ship">
+      <svg class="rose" aria-hidden="true"><use href="#i-rose"/></svg>
+      <span class="sounding" style="left:5%;top:30%" aria-hidden="true">14</span><span class="sounding" style="left:8%;top:52%" aria-hidden="true">17</span><span class="sounding" style="left:4%;top:74%" aria-hidden="true">21</span>
+      <span class="sounding" style="right:6%;top:36%" aria-hidden="true">12</span><span class="sounding" style="right:4%;top:58%" aria-hidden="true">16</span><span class="sounding" style="right:8%;top:82%" aria-hidden="true">19</span>
+      <div class="legend" id="legend" aria-label="What the flags mean"></div>
+      <div class="vessel" id="ship">
         <svg class="bow" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
-          <path class="bow-hull" d="M0 40 C 6 30, 32 8, 50 0 C 68 8, 94 30, 100 40 Z"/>
-          <path class="bow-deck" d="M2.4 40 C 9 31, 34 11, 50 4 C 66 11, 91 31, 97.6 40 Z"/>
-          <path class="bow-rail" d="M5.5 40 C 12 32, 36 14, 50 8 C 64 14, 88 32, 94.5 40" fill="none"/>
+          <path class="outer" d="M0 40 C 6 28, 30 6, 50 0 C 70 6, 94 28, 100 40"/>
+          <rect class="cover" x="0.4" y="39" width="99.2" height="2"/>
+          <path class="rail" d="M2.2 40 C 9 30, 32 9, 50 3.2 C 68 9, 91 30, 97.8 40"/>
         </svg>
-
-        <div class="bridge" id="bridge">
-          <div class="bridge-house">
-            <div class="windows" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
-            <div class="bridge-floor">
-              <figure class="officer captain" id="captain">
-                <svg viewBox="0 0 40 48" class="sailor" aria-hidden="true"></svg>
-                <figcaption id="captain-name">Captain</figcaption>
-              </figure>
-              <div class="away-sign" id="away-sign" hidden>
-                <span id="away-name">Captain</span><strong>ashore</strong>
-              </div>
-              <div class="helm" aria-hidden="true">
-                <svg viewBox="0 0 64 64" class="wheel" id="wheel">
-                  <g stroke="currentColor" stroke-linecap="round">
-                    <path stroke-width="3" d="M32 4v12M32 48v12M4 32h12M48 32h12M12.2 12.2l8.5 8.5M43.3 43.3l8.5 8.5M51.8 12.2l-8.5 8.5M20.7 43.3l-8.5 8.5"/>
-                    <circle cx="32" cy="32" r="17" fill="none" stroke-width="4"/>
-                    <circle cx="32" cy="32" r="5" fill="currentColor" stroke="none"/>
-                  </g>
-                </svg>
-              </div>
-              <figure class="officer firstmate" id="firstmate" role="button" tabindex="0" title="First mate: session and Bridge chat">
-                <svg viewBox="0 0 40 48" class="sailor" aria-hidden="true"></svg>
-                <figcaption>First mate</figcaption>
-                <span class="fm-pill" id="fm-pill" hidden></span>
-              </figure>
-              <div class="lamp-post" id="lamp-post">
-                <span class="lamp" id="lamp"></span>
-                <span class="lamp-label" id="lamp-label">Monitoring</span>
-              </div>
-            </div>
-          </div>
-          <button class="ticker" id="ticker" type="button" title="What the first mate is doing (from its transcript, read-only)" hidden>
-            <span class="ticker-icon" id="ticker-icon" aria-hidden="true"></span>
-            <span class="ticker-text" id="ticker-text"></span>
-            <span class="ticker-age" id="ticker-age"></span>
-          </button>
+        <div class="bridge" id="bridge" aria-label="Bridge">
+          <div class="officer" id="captain"><span class="token"><svg><use href="#i-crew"/></svg></span><span><b id="captain-name">Captain</b><span class="muted" id="captain-state">On the bridge</span></span></div>
+          <svg class="helm-mark" aria-hidden="true"><use href="#i-helm"/></svg>
+          <button class="officer fm" id="firstmate" type="button" title="First mate: session and monitoring"><span class="token"><svg><use href="#i-helm"/></svg></span><span><b>First mate</b><span class="muted" id="fm-ship-now">…</span></span></button>
+          <div class="officer"><span class="lamp off" id="lamp"></span><span><b>Monitoring</b><span class="muted" id="lamp-label">…</span></span></div>
         </div>
-
         <div id="areas"></div>
-
-        <section class="cabins" id="cabins" hidden aria-label="Secondmate cabins">
-          <h2 class="plaque">Officers' cabins</h2>
+        <section class="cabins" id="cabins" hidden aria-label="Second mates">
           <div class="cabin-row" id="cabin-row"></div>
         </section>
-
         <section class="hold" id="hold" aria-label="Queue">
-          <h2 class="plaque">Queue <span class="plaque-sub" id="hold-sub"></span></h2>
+          <div class="hold-head"><h2>Queue</h2><span class="muted" id="hold-sub"></span></div>
           <div class="crates" id="crates"></div>
         </section>
       </div>
@@ -211,6 +182,12 @@ cd /path/to/firstmate &amp;&amp; npx ship-deck   # run from inside the home</pre
         <p class="sr-only" id="bridge-sub">Your messages go to the first mate; replies arrive here.</p>
         <ol class="thread" id="thread" aria-live="polite" aria-label="Conversation with the first mate"></ol>
         <button class="btn sm jump" id="thread-jump" type="button" hidden><svg><use href="#i-down"/></svg>New messages</button>
+        <p class="working-now" id="working-now" hidden><span class="live"></span><span id="working-now-text"></span></p>
+        <div class="suggest" id="suggest" role="group" aria-label="Suggested messages">
+          <button type="button" data-text="What needs me right now?">What needs me?</button>
+          <button type="button" data-text="Give me the status of everything in flight.">Status of everything</button>
+          <button type="button" data-text="Clean up the finished workers.">Clean up finished work</button>
+        </div>
         <form class="composer" id="chat-form">
           <ul class="att-tray" id="att-tray" aria-label="Attachments to send" hidden></ul>
           <label class="sr-only" for="chat-text">Message to the first mate</label>
@@ -261,13 +238,12 @@ cd /path/to/firstmate &amp;&amp; npx ship-deck   # run from inside the home</pre
   <div class="drawer-scrim" id="scrim" hidden></div>
   <aside class="drawer" id="drawer" aria-hidden="true" aria-labelledby="drawer-title" tabindex="-1">
     <header class="drawer-head">
-      <div>
+      <div class="drawer-top">
         <p class="drawer-kicker" id="drawer-kicker"></p>
-        <h2 id="drawer-title"></h2>
+        <button class="btn ghost icon-btn" type="button" id="drawer-close" aria-label="Close (Esc)" title="Close (Esc)"><svg><use href="#i-x"/></svg></button>
       </div>
-      <button class="btn ghost icon-btn" type="button" id="drawer-close" aria-label="Close details">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-      </button>
+      <h2 id="drawer-title"></h2>
+      <div class="drawer-sub" id="drawer-sub"></div>
     </header>
     <div class="drawer-body" id="drawer-body"></div>
   </aside>
@@ -276,7 +252,7 @@ cd /path/to/firstmate &amp;&amp; npx ship-deck   # run from inside the home</pre
   <section class="library" id="library" role="dialog" aria-modal="true" aria-labelledby="library-title" hidden tabindex="-1">
     <header class="library-head">
       <div>
-        <p class="drawer-kicker">Read-only · the first mate's permanent context</p>
+        <p class="drawer-kicker">Read-only: the first mate's permanent context</p>
         <h2 id="library-title">Ship's Library</h2>
       </div>
       <button class="btn ghost icon-btn" type="button" id="library-close" aria-label="Close library">
@@ -285,7 +261,7 @@ cd /path/to/firstmate &amp;&amp; npx ship-deck   # run from inside the home</pre
     </header>
     <div class="library-main">
       <nav class="library-nav" aria-label="Library files">
-        <input id="library-filter" type="search" placeholder="Filter files…" autocomplete="off" spellcheck="false" aria-label="Filter library files">
+        <input id="library-filter" type="search" placeholder="Filter the library…" autocomplete="off" spellcheck="false" aria-label="Filter library files">
         <div id="library-list"></div>
       </nav>
       <article class="library-doc" id="library-doc" aria-live="polite"></article>
@@ -301,6 +277,16 @@ cd /path/to/firstmate &amp;&amp; npx ship-deck   # run from inside the home</pre
       <button class="btn" id="confirm-no" type="button">Cancel</button>
       <button class="btn primary" id="confirm-yes" type="button">Send</button>
     </div>
+  </section>
+
+  <div class="sheet-scrim" id="shortcuts-scrim" hidden></div>
+  <section class="sheet shortcuts" id="shortcuts" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title" hidden tabindex="-1">
+    <header class="sheet-head">
+      <h2 id="shortcuts-title">Keyboard shortcuts</h2>
+      <span class="hint">Press <span class="kbd">?</span> any time</span>
+      <button class="btn ghost icon-btn" id="shortcuts-close" type="button" aria-label="Close"><svg><use href="#i-x"/></svg></button>
+    </header>
+    <div class="sheet-body" id="shortcuts-body"></div>
   </section>
 
   <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Attachment" hidden>

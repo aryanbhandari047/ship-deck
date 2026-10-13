@@ -429,6 +429,7 @@ test('HTTP: chat, thread, sessions, skills and validated order kinds', async (t)
   assert.match(s.thread.lastReplyId, /^r-/);
   assert.equal(s.firstmate.session.sessionId, UUID(11));
   assert.equal(s.firstmate.session.resume, `cd '${home}' && claude --resume ${UUID(11)}`);
+  assert.ok(s.firstmate.session.cwdLabel && !s.firstmate.session.cwdLabel.startsWith(os.homedir() + '/'), 'the display label shortens the home dir');
   assert.equal(s.tasks.find((x) => x.id === 'beta-scout').session.note, 'resume id unknown (codex)');
   assert.match(s.tasks.find((x) => x.id === 'alpha-fix').session.note, /no Claude session found/);
   assert.equal(s.backlog.callCount, 2);

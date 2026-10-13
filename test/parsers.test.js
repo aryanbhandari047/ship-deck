@@ -72,6 +72,9 @@ test('parseBacklog splits sections loosely and flags captain calls', () => {
   assert.equal(drop.captainCall, true);
   assert.equal(drop.tags.hold, 'waiting on captain (see gamma)');
   assert.equal(drop.title, 'Keep or drop the legacy endpoint (diagnose only)');
+  assert.equal(drop.tags.diagnose, undefined, 'prose in parentheses is not a tag');
+  assert.deepEqual(Object.keys(drop.tags).sort(), ['hold', 'hold-kind', 'kind']);
+  assert.deepEqual(f.parseTags('x (sincere thanks) (since 2026-01-03) (after alpha-fix)'), { since: '2026-01-03', after: 'alpha-fix' }, 'only date words skip the colon');
   assert.deepEqual(drop.notes, ['Origin: gamma-decision', 'Decision key: keep-or-drop']);
   assert.equal(free.id, null);
   assert.equal(free.title, 'free text item without an id');
@@ -93,7 +96,7 @@ test('parseProjects reads name, mode and description', () => {
   const p = f.parseProjects(read('data/projects.md'));
   assert.deepEqual(p.map((x) => x.name), ['harbor-app', 'lighthouse-api']);
   assert.equal(p[0].mode, 'no-mistakes');
-  assert.match(p[0].description, /harbor scheduling/);
+  assert.equal(p[0].description, 'Sample harbor scheduling app', 'the (added ...) date is not part of the description');
   assert.equal(p[1].mode, 'local-only');
 });
 

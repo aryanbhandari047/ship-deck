@@ -182,11 +182,12 @@ function tildePath(p) {
   return p === h ? '~' : p.startsWith(h + path.sep) ? '~' + p.slice(h.length) : p;
 }
 
-// Session info for one crew member or the first mate, as the UI shows it.
+// Session info for one crew member or the first mate, as the UI shows it (cwdLabel: the folder
+// with the user's home as ~, for display; resume keeps the full path for copying).
 function sessionView(entry, harness) {
   if (harness && harness !== 'claude') return { harness, sessionId: null, resume: null, note: `resume id unknown (${harness})` };
   if (!entry) return { harness: harness || 'claude', sessionId: null, resume: null, note: 'no Claude session found for this workspace yet' };
-  return { harness: entry.harness || 'claude', sessionId: entry.sessionId, cwd: entry.cwd, firstSeen: entry.firstSeen || null, lastSeen: entry.lastSeen || null, resume: sessions.resumeCommand(entry.cwd, entry.sessionId), note: null };
+  return { harness: entry.harness || 'claude', sessionId: entry.sessionId, cwd: entry.cwd, cwdLabel: tildePath(entry.cwd), firstSeen: entry.firstSeen || null, lastSeen: entry.lastSeen || null, resume: sessions.resumeCommand(entry.cwd, entry.sessionId), note: null };
 }
 
 function serveStatic(url, res) {

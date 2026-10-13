@@ -1,23 +1,34 @@
 # Ship Deck
 
-A local, live view of your [firstmate](#what-is-a-firstmate-home) fleet, drawn
-as a ship deck, and the place where you talk to your first mate. Every worker
-is a sailor at a deck station with its task title and a one-line summary
-("Working", "Waiting on your call", "Blocked: the staging database is
-unreachable"); the bridge shows you (the captain), the first mate at the helm
-and the monitoring lamp; the queue sits below as crates. Inspired by
+A local, live view of your [firstmate](#what-is-a-firstmate-home) fleet, and
+the place where you talk to your first mate. The **Board** (the default view)
+groups every worker by what it needs from you: **Needs you**, **Working**,
+**Waiting** (with quiet workers and the queue's next items) and **Done**.
+Ticket titles come first, and decisions are answered right on the card. The
+**Ship** view, one click away, draws the same fleet as a nautical chart: the
+bridge with you, the first mate and the monitoring lamp, one berth per worker
+flying its status flag, and the queue in the hold. Inspired by
 [Munder Difflin](https://github.com/HarnessMD/munder-difflin).
+
+Status is always a real International Code of Signals flag, a colour and a
+word ([Flags](#flags)), so it reads without colour too.
 
 Any engineer running their own firstmate can use it: there is nothing to
 configure, no dependencies and no build step.
 
-![Ship Deck with the Bridge chat, on the sample fixture fleet](docs/screenshot.png)
+![The Board: Needs you, Working, Waiting and Done, with the chat beside it, on the sample fixture fleet](docs/screenshot.png)
 
-![A worker that needs you: lettered options become buttons](docs/decision.png)
+![The Board at night: the navy night-watch theme follows the OS dark mode](docs/board-dark.png)
 
-![Bridge attachments: a pasted screenshot and a recording with extracted stills, and a reply carrying an image](docs/attachments.png)
+![The Ship view: the same fleet as a nautical chart, each worker flying its flag](docs/ship.png)
+
+![A worker that needs you: the drawer with the decision on top and the live terminal first](docs/decision.png)
+
+![Chat attachments: a pasted screenshot and a recording with extracted stills, and a reply carrying an image](docs/attachments.png)
 
 ![The Activity tab: the first mate's tool calls and replies, live from its transcript](docs/activity.png)
+
+![Keyboard shortcuts and what the flags mean (press ?)](docs/shortcuts.png)
 
 ![First run: no firstmate home found yet](docs/first-run.png)
 
@@ -139,11 +150,16 @@ names, so nothing changes for the first mate:
 | On screen | In firstmate / the API |
 | --- | --- |
 | Message | order (`orders.jsonl`, `POST /api/orders`) |
+| Chat | the Bridge: your messages and the first mate's replies (`replies.jsonl`) |
 | Worker | crew member / task (`state/<id>.meta`) |
+| Job (New job) | a new task (`new-task` order) |
 | Task title, with the id beside it | the queue entry title, else the brief's first line, else the id |
-| One-line summary ("Blocked: ...") | the last status line (shown in full under "Latest update" in the details) |
-| Needs you | needs-decision / blocked / failed workers and Captain's Call queue items |
-| Queue | backlog (`data/backlog.md`) |
+| Card summary | the last status line, without its lettered options (in full under Updates in the drawer) |
+| Your call / Needs you | needs-decision / blocked / failed workers and Captain's Call queue items |
+| Queued question | a Captain's Call queue item |
+| Queue, Up next in the queue | backlog (`data/backlog.md`) |
+| Second mates | secondmates (`data/secondmates.md`) |
+| Past sessions, Open in terminal | the recorded Claude Code sessions (`~/.ship-deck/sessions.json`) |
 | Quiet for N days | stale (no activity for `--stale-days`) |
 | Tool | harness (claude, codex, ...) |
 | Workspace (details only) | worktree |
@@ -156,20 +172,43 @@ finished workers (`cleanup-done`), New task (`new-task`), Start from queue
 (`backlog-start`), Settings change (`config`). The mapping lives in
 `public/labels.js`.
 
-The header's health strip reads: **Deck running** (the page reaches the
-server) · **First mate listening** (its transcript moved in the last 2
-minutes, or a tool call is in progress) · **Monitoring** (watcher heartbeat
-under 2 minutes; "late" otherwise) · the last update time.
+The header's health strip reads: **First mate listening** (its transcript
+moved in the last 2 minutes, or a tool call is in progress), **Monitoring on**
+(watcher heartbeat under 2 minutes; "late" otherwise) and the last update
+time; **Deck offline** appears only when the page cannot reach the server.
+Queue tags show in words (Project, Waiting since, Starts after); parser
+bookkeeping (`kind`, `hold-kind`) stays hidden, and no screen prints an
+absolute path (folders show with your home as `~`).
+
+### Flags
+
+Every status is an International Code of Signals flag (inline SVG), a colour
+and a word, chosen for its meaning at sea (`public/board.js`):
+
+| Flag | Meaning at sea | On screen | firstmate state |
+| --- | --- | --- | --- |
+| K | I wish to communicate with you | Needs you ("Your call") | needs-decision |
+| V | I require assistance | Blocked | blocked |
+| P (Blue Peter) | Under way | Working | working, resolved |
+| X | Watch for my signals | Waiting ("Paused", "No update yet") | paused, no status yet |
+| C | Affirmative | Done ("Report ready" for a scout with a report) | done |
+| O | Man overboard | Failed | failed |
+| Struck (dashed) | | Quiet for N days | stale, whatever the state |
+
+The palette ("Chart room": chart-water canvas, white surfaces, deep-water ink,
+signal blue for actions, signal yellow only for "needs you"; a navy night watch
+in dark mode) passes WCAG AA for every text pair in both themes,
+checked by `test/contrast.test.js` against the tokens in `public/style.css`.
 
 ## What you can do
 
-- **Bridge chat**: free-text messages to the first mate; its replies (via
+- **Chat**: free-text messages to the first mate; its replies (via
   `bin/orders.js reply`) render in the same thread (safe markdown, PR links
   open in a new tab). Paste, drop or attach screenshots and screen recordings
   ([Attachments](#attachments)).
-- **Ask the first mate**: answer a worker's question, check status, merge,
-  clean up, start a new task, start something from the queue, clean up all
-  finished workers, change settings. Each is a message the first mate acts on;
+- **Ask the first mate**: answer a worker's question (on its card or in its
+  drawer), check status, merge, clean up, start a New job, start something
+  from the queue, clean up all finished workers, change settings. Each is a message the first mate acts on;
   Ship Deck never does these itself.
 - **Terminal peek**: a worker's details show the last 80 lines of its
   terminal (`tmux capture-pane -p -e -J -t <window> -S -80`), refreshed every 2 s,
@@ -344,16 +383,17 @@ spawned (meta birth time) most recently before the session started. The first
 mate is the newest verified session in FM_HOME. Matches are merged into
 `~/.ship-deck/sessions.json` (0600) as `{id: {sessionId, cwd, harness,
 firstSeen, lastSeen}}` (the first mate under `_firstmate`) and kept after the
-crew member leaves. Drawers and the Sessions tab show
-`cd '<cwd>' && claude --resume <sessionId>` with a Copy button; other harnesses
-show "resume id unknown (<harness>)".
+crew member leaves. A worker's **Open in terminal** and the first mate drawer's
+**Past sessions** show the folder (home as `~`) and `claude --resume
+<sessionId>`; Copy copies the full `cd '<cwd>' && claude --resume <sessionId>`.
+Other harnesses show "Resume id unknown (<harness>)".
 
 ## First mate activity
 
-The **Activity** tab answers "what is the first mate doing right now". It
+The side panel's **Activity** tab answers "what is the first mate doing right now". It
 reads, and never writes, the first mate's own Claude Code transcript: the
 newest verified `~/.claude/projects/<encoded FM_HOME>/<uuid>.jsonl` (the same
-discovery the Sessions view uses, rechecked every 5 s, so a new first mate
+discovery the past sessions use, rechecked every 5 s, so a new first mate
 session takes over the feed with a "New first mate session" marker). The
 server (`lib/activity.js`) tails it incrementally: it remembers a byte offset,
 starts at most 1 MB from the end on a first look, leaves a half-written last
@@ -377,10 +417,11 @@ Input fields whose name looks like a password, token, secret, key, cookie,
 authorization, credential or session are dropped before any summary is built.
 `GET /api/activity?since=<rev>&epoch=<epoch>` returns only events changed since
 the previous response (`full:true` with everything when the cursor is unknown);
-the page asks after every fleet poll and keeps the last 200 events. The First
-mate avatar on the bridge wears a **working…** / **idle** pill (working = a
-tool call without its result, under 10 min old, or a transcript line in the last
-20 s), and a ticker under the bridge shows the latest event (click opens the tab).
+the page asks after every fleet poll and keeps the last 200 events. The panel
+head (and the first mate on the Ship view's bridge) reads **Working: <latest
+event>** or **Idle, last active …** (working = a tool call without its result,
+under 10 min old, or a transcript line in the last 20 s), and the chat shows
+"First mate is …" under the newest message while it works.
 
 ## Security
 
@@ -428,7 +469,14 @@ transcript (`test/fixtures/transcript/firstmate.jsonl`): tool summaries,
 redaction, a partial last line, `is_error` results and durations, rotation to
 a newer session, the 200-event cap, tail-only reads, the read-only fingerprint
 and `GET /api/activity`.
-`test/parsers.test.js` covers the parsers against the fabricated fixtures.
+`test/parsers.test.js` covers the parsers against the fabricated fixtures
+(including prose in parentheses not being read as a queue tag).
+`test/board.test.js` covers the status flag mapping (every state to its tone,
+flag and word) and the Board grouping on the fixture fleet: columns, sort
+order, quiet workers, queued questions and next items, project and search
+filters, and the card summary.
+`test/contrast.test.js` checks every text colour pair the UI uses for WCAG AA
+(4.5:1) in the light and dark tokens of `public/style.css`.
 `test/snapshot.test.js` builds a snapshot from a temp copy of the fixture home,
 checks missing files and an empty home, proves no file under the home changes
 (size + mtime fingerprint), and runs the HTTP server to confirm a `.status`
@@ -448,75 +496,76 @@ All paths are relative to the fleet home. Missing files are fine.
 | `state/<id>.meta` | One crew member per file: `project`, `kind` (ship/scout/secondmate), `mode`, `harness`, `model`, `effort`, `window`, `worktree`, `pr`, `pr_head` |
 | `state/<id>.status` | Last line is the displayed state (`resolved` shows as working); the last 5 lines feed the detail drawer. An optional `YYYY-MM-DD HH:MM` prefix and `[key=...]` are parsed; stray non-status lines are skipped. Only the last 64 KB is read. |
 | `state/<id>.turn-ended` and file mtimes | "Last activity" and "turn ended" times |
-| `state/.afk` | Present means the captain is ashore (away sign on the bridge) |
+| `state/.afk` | Present means the captain is ashore (shown on the Ship view's bridge) |
 | `state/.last-watcher-beat` mtime | Monitoring lamp and health strip: green under 2 min, amber ("late") otherwise |
-| `data/backlog.md` | Loose parse of Captain's Call / In flight / Queued / Done; unknown sections are tolerated. Queued items become crates. Captain's Call = every open item in the Captain's Call section or tagged `(kind: captain)` / `(hold-kind: captain)` in any open section (the real file keeps them in Queued); options in its `(hold: ...)` become answer buttons. |
-| `data/projects.md` | Project display names and delivery modes for deck areas |
-| `data/secondmates.md` | Officers' cabins (registry entries without a live meta show as vacant) |
+| `data/backlog.md` | Loose parse of Captain's Call / In flight / Queued / Done; unknown sections are tolerated. Queued items become "Up next in the queue" rows (and crates in the Ship view's hold). Captain's Call = every open item in the Captain's Call section or tagged `(kind: captain)` / `(hold-kind: captain)` in any open section (the real file keeps them in Queued); options in its `(hold: ...)` become answer buttons. |
+| `data/projects.md` | Project names (Board filter chips, Ship view zones), delivery modes and descriptions |
+| `data/secondmates.md` | Second mates (registry entries without a live meta show as not running) |
 | `data/<id>/brief.md` | The task title when the queue has no entry for the id (a leading `# Title`, else the first line under `# Task`), and the first paragraph under `# Task` as the summary in the details |
-| `data/<id>/report.md` | Existence adds a "Scout report" link (served as plain text by `/api/report/<id>`) |
+| `data/<id>/report.md` | Existence makes a done scout "Report ready" with a Read report link (served as plain text by `/api/report/<id>`) |
 | `data/<id>/*` | Listed in the drawer; click opens a read-only text view (`/api/file/<id>/<name>`) |
 | `<home>/.git/config`, `~/.gitconfig`, `~/.config/git/config` | `user.name` for the captain's name on the bridge (unless `--captain-name`) |
-| Ship's Library | `AGENTS.md`, `data/captain.md`, `data/captain-shared.md`, `data/learnings.md`, `data/projects.md`, `data/secondmates.md`, `data/backlog.md`, every `*.md` in the first mate's memory dir (`~/.claude/projects/<encoded home>/memory`, or `--memory-dir`; MEMORY.md first), and the skills; missing files are shown as missing |
+| Ship's Library | `AGENTS.md`, `data/captain.md`, `data/captain-shared.md`, `data/learnings.md`, `data/projects.md`, `data/secondmates.md`, `data/backlog.md`, every `*.md` in the first mate's memory dir (`~/.claude/projects/<encoded home>/memory`, or `--memory-dir`; MEMORY.md first), and the skills, each with a plain title (Captain's preferences, Memory index) and its short location; files not written yet say so |
 | `state/<id>.status` last line (needs-decision/blocked) | Lettered options `(A) ...`, `(B, recommended) ...`, `Options: A) ...`, `option A, ...` become decision buttons |
 | `~/.claude/projects/*/<uuid>.jsonl` (head only) | Session discovery for resume commands |
 | `~/.claude/projects/<encoded FM_HOME>/<uuid>.jsonl` (tail, newest session) | The first mate activity feed |
 | `~/.claude/skills/*/SKILL.md`, `<home>/.agents/skills/*/SKILL.md` | Skills in the Ship's Library (name and description from the frontmatter) |
 | `tmux list-windows -a` | Optional: marks whether a crew member's window is open. Skipped if tmux is missing. |
 
-## The deck
+## The views
 
-- **Bridge**: you (your name; faded with an "ashore" sign when `state/.afk`
-  exists), the first mate at the wheel, and the monitoring lamp.
-- **Deck areas**: one per project, largest first, with a state tally. Within an
-  area, workers that need you come first. Each station shows the task title,
-  the raw id underneath in small type, a state pill and the time since its
-  last activity; hover for the one-line summary.
-- **Worker states**: working (hauling a line), paused (seated, dozing), needs
-  you (amber flag, pulsing beacon), blocked (red flag and ringing bell),
-  done (sea chest packed, ready for cleanup), failed (red, slumped), starting
-  (no update yet, faded). A small dot shows whether its terminal is open.
-- **Quiet workers**: a worker that is not done and has had no activity
-  (newest mtime of its `.status`, `.turn-ended` or `.meta`) for more than
-  `--stale-days` (default 7) gets a greyed, still avatar and a `quiet Nd` tag,
-  and its summary starts with "Quiet for N days". It moves out of its state's
-  count into a separate **Quiet** count and is left out of "Needs you". Done
-  workers are never quiet. A new status line makes it active again.
-- **Officers' cabins**: secondmates, behind portholes.
-- **Queue**: waiting queue items as crates (title first); items that need
-  your decision carry a red tag.
-- **Bridge tab**: the chat with the first mate (newest at the bottom, day
-  separators, message status chips: waiting, seen, done, declined; unread
-  badge; "Enable alerts" for browser notifications, only requested from that
-  button).
-- **Command tab**: monitoring status, **Needs you** (workers waiting on your
-  call, blocked or failed, then queue items waiting on a decision, with
-  Answer), workers by state plus Quiet (click to filter), the New task form,
-  the queue (Start), recently done with "Clean up all finished", every message
-  with its lifecycle, and pull requests.
-- **Activity tab**: the first mate's live tool calls and replies, newest
-  first ([First mate activity](#first-mate-activity)).
-- **Side panel width**: drag the handle on the panel's left edge (or focus it
-  and use the arrow keys, Shift for bigger steps, Home/End for min/max,
-  Enter or double-click to reset to 400 px). 320 px to 70% of the window; the
-  width is remembered in `localStorage`. Below 900 px the panel stacks under
-  the deck and the handle is hidden.
-- **Sessions tab**: every recorded session with its resume command, including
-  workers that have been cleaned up.
-- **Details drawer**: click any worker, crate or the first mate.
-  `#task=<id>` deep-links. Answer buttons and a free answer at the top, then
-  pull request and `data/<id>/` file links, facts (summary, id, tool,
-  terminal, workspace), **Latest update** (the worker's last status line in
-  full) and earlier updates, "Resume in terminal", Settings, "Ask the first
-  mate" buttons, the live terminal peek and the direct message box.
-- **Ship's Library** (header button): the first mate's permanent context files
-  and the skills (name + description), rendered as safe markdown.
-- **Keyboard**: Enter sends a chat message, Shift+Enter adds a line, Cmd+V
-  pastes a screenshot as an attachment; `/`
-  focuses the search box (or the library filter); `Esc` closes the image
-  lightbox, the confirm dialog, the file view, the library or the drawer, or clears the filter.
+- **Board** (default): four columns. **Needs you** (flag K): workers waiting
+  on your call, blocked or failed, then queued questions; each card answers
+  in place, with lettered option buttons or a one-line reply (the same
+  messages and confirm step as the drawer). **Working** (P). **Waiting** (X):
+  paused workers and workers with no update yet, then **Quiet for a while**
+  (no activity for `--stale-days`, default 7; done workers are never quiet)
+  and **Up next in the queue** with Start. **Done** (C): finished workers with
+  Read report and Clean up, and "Clean up all" in the column head. Project
+  chips filter the board; **New job** opens the job form. Second mates sit
+  under the columns. Cards show the title first, then the id and project,
+  the latest note, the pull request and the tool.
+- **Ship**: the same fleet as a nautical chart. The bridge shows you (Ashore
+  when `state/.afk` exists), the first mate with what it is doing, and the
+  monitoring lamp. One zone per project with a flag tally (the legend says
+  what each flag means), one berth per worker flying its flag, second mates as
+  portholes and the queue as crates in the hold. A flag is hoisted once when a
+  worker starts needing you; nothing loops.
+- **Board or Ship** is remembered per browser (`localStorage`).
+- **Side panel**: the first mate's head line (click for its drawer: monitoring,
+  its own session and every past worker session), then **Chat** (newest at the
+  bottom, day separators, receipts under your messages: Sent, not seen yet /
+  Seen / Answered; action messages as cards with Sent, Seen, Done steps; an
+  unread badge; suggested messages; "Enable alerts" for browser notifications,
+  only requested from that button) and **Activity**
+  ([First mate activity](#first-mate-activity)). Drag the handle on its left
+  edge (or focus it and use the arrow keys, Shift for bigger steps, Home/End
+  for min/max, Enter or double-click to reset to 420 px); 320 px to 70% of the
+  window, remembered. Below 900 px the panel stacks under the view and a chat
+  button in the header jumps to it.
+- **Worker drawer**: click a card or berth; `#task=<id>` deep-links. The
+  status and last update, the title, id, project, pull request and tool, then
+  Ask for status, Merge PR, **Open in terminal** (the resume command) and
+  Clean up. A worker that needs you shows its question and answer box on top.
+  Tabs: **Terminal** (the latest update, the live terminal with Wrap, Follow,
+  Pause and Copy, and Message the worker), **Updates** (every status line,
+  one timestamp format), **Details** (brief, data files, facts in words,
+  messages about it) and **Model and effort**.
+- **Queue item drawer**: its question and answer box (queued questions), or
+  Start this, its details in words and its notes.
+- **Ship's Library** (book button): the first mate's permanent context files,
+  memory and skills, by title, rendered as safe markdown.
+- **Keyboard** (press `?` for the sheet, with the flag legend): `/` or Cmd/Ctrl+K
+  filters; `G` then `B`/`S`/`C`/`A`/`L` goes to the Board, Ship, Chat,
+  Activity or Library; `J`/`K` move between cards, `←`/`→` between columns,
+  `Enter` opens, `N` jumps to the next thing that needs you, `A`-`H` picks an
+  option on the selected card; in a worker `1`-`4` switch tabs, `W` wraps,
+  `F` follows, `O` opens the pull request, `M` messages the worker; `Esc`
+  closes or goes back. In the chat Enter sends, Shift+Enter adds a line,
+  Cmd+V pastes a screenshot.
 
-Follows the OS light/dark theme and respects reduced motion.
+Follows the OS light/dark theme and respects reduced motion (every
+animation and transition off).
 
 ## Layout
 
@@ -535,6 +584,6 @@ bin/orders.js      Orders, replies, thread and sessions CLI for the first mate
 bin/orders-check.sh  Watcher wake check (POSIX sh)
 bin/ship-deck.js   `ship-deck` / `npx` entry (same flags as server.js)
 bin/start.sh       Start the server in the background unless it already answers
-public/            index.html, style.css, app.js, markdown.js, labels.js, ansi.js (no build step)
+public/            index.html, style.css, app.js, board.js (flags + Board grouping), markdown.js, labels.js, ansi.js (no build step)
 test/              node:test suites and fabricated fixtures
 ```

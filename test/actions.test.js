@@ -279,6 +279,12 @@ test('library lists an allow-list of home files and memory *.md, MEMORY.md first
   assert.equal(by['home:AGENTS.md'].exists, false, 'missing files are listed as missing');
   assert.equal(by['home:data/projects.md'].exists, true);
   assert.ok(by['home:data/projects.md'].mtime > 0);
+  assert.equal(by['home:data/captain.md'].title, "Captain's preferences", 'home files have plain titles');
+  assert.equal(by['home:data/captain.md'].where, 'data/captain.md');
+  assert.equal(by['memory:MEMORY.md'].title, 'Memory index');
+  assert.equal(by['memory:alpha-rule.md'].title, 'Alpha rule');
+  assert.equal(by['memory:alpha-rule.md'].where, 'memory/alpha-rule.md');
+  for (const e of entries) assert.ok(!e.where.startsWith('/'), `${e.key}: where is never an absolute path`);
 
   assert.match(library.readLibraryEntry(home, mem, 'memory:MEMORY.md').text, /zeta-rule/);
   assert.equal(library.readLibraryEntry(home, mem, 'home:AGENTS.md').text, null);

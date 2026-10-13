@@ -17,9 +17,9 @@
   const ui = {
     home: $('home-path'), search: $('search'), sync: $('sync'), syncText: $('sync-text'),
     healthFm: $('health-fm'), healthMon: $('health-mon'), healthTime: $('health-time'),
-    firstRun: $('first-run'), firstRunChecked: $('first-run-checked'), captainName: $('captain-name'), awayName: $('away-name'),
+    firstRun: $('first-run'), firstRunChecked: $('first-run-checked'), captainName: $('captain-name'),
     reconnect: $('reconnect'), reconnectText: $('reconnect-text'), reconnectNow: $('reconnect-now'),
-    captain: $('captain'), firstmate: $('firstmate'), awaySign: $('away-sign'), lamp: $('lamp'), lampLabel: $('lamp-label'), wheel: $('wheel'),
+    captain: $('captain'), captainState: $('captain-state'), firstmate: $('firstmate'), fmShipNow: $('fm-ship-now'), lamp: $('lamp'), lampLabel: $('lamp-label'), legend: $('legend'),
     areas: $('areas'), cabins: $('cabins'), cabinRow: $('cabin-row'),
     hold: $('hold'), holdSub: $('hold-sub'), crates: $('crates'),
     tabs: { bridge: $('tab-bridge'), activity: $('tab-activity') },
@@ -30,8 +30,7 @@
     newJobBtn: $('new-job-btn'), jobSheet: $('job-sheet'), jobScrim: $('job-scrim'), jobClose: $('job-close'), jobCancel: $('job-cancel'),
     layout: document.querySelector('.layout'), panel: $('panel'), panelResize: $('panel-resize'),
     feed: $('feed'), activitySub: $('activity-sub'), activityDot: $('activity-dot'),
-    ticker: $('ticker'), tickerIcon: $('ticker-icon'), tickerText: $('ticker-text'), tickerAge: $('ticker-age'), fmPill: $('fm-pill'),
-    unread: $('unread-count'),
+    unread: $('unread-count'), workingNow: $('working-now'), workingNowText: $('working-now-text'), suggest: $('suggest'),
     thread: $('thread'), threadJump: $('thread-jump'), chatForm: $('chat-form'), chatText: $('chat-text'), chatSend: $('chat-send'),
     notifyBtn: $('notify-btn'), bridgeSub: $('bridge-sub'), chatHint: $('chat-hint'),
     attTray: $('att-tray'), attachBtn: $('attach-btn'), attachInput: $('attach-input'),
@@ -39,12 +38,12 @@
     jobForm: $('job-form'), jobProject: $('job-project'), jobText: $('job-text'),
     jobHarness: $('job-harness'), jobModel: $('job-model'), jobEffort: $('job-effort'),
     drawer: $('drawer'), scrim: $('scrim'), drawerKicker: $('drawer-kicker'), drawerTitle: $('drawer-title'),
-    drawerBody: $('drawer-body'), drawerClose: $('drawer-close'),
+    drawerBody: $('drawer-body'), drawerClose: $('drawer-close'), drawerSub: $('drawer-sub'),
     libraryBtn: $('library-btn'), library: $('library'), libraryScrim: $('library-scrim'), libraryClose: $('library-close'),
     libraryFilter: $('library-filter'), libraryList: $('library-list'), libraryDoc: $('library-doc'),
     confirm: $('confirm'), confirmScrim: $('confirm-scrim'), confirmTitle: $('confirm-title'), confirmBody: $('confirm-body'),
     confirmWarn: $('confirm-warn'), confirmYes: $('confirm-yes'), confirmNo: $('confirm-no'),
-    toasts: $('toasts'),
+    toasts: $('toasts'), helpBtn: $('help-btn'), shortcuts: $('shortcuts'), shortcutsScrim: $('shortcuts-scrim'), shortcutsClose: $('shortcuts-close'), shortcutsBody: $('shortcuts-body'),
   };
 
   let snap = null;
@@ -90,11 +89,7 @@
     }
     return el;
   }
-  function hash(s) {
-    let x = 2166136261;
-    for (let i = 0; i < s.length; i++) x = Math.imul(x ^ s.charCodeAt(i), 16777619);
-    return x >>> 0;
-  }
+
   function ago(ms) {
     if (!ms) return '—';
     const s = Math.max(0, (Date.now() - ms) / 1000);
@@ -128,7 +123,6 @@
     const day = d.toLocaleDateString([], { day: 'numeric', month: 'short', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' });
     return `${day} ${hm}`;
   }
-  function stateVar(state) { return `var(--s-${state || 'unknown'})`; }
   // Inline SVG from the sprite in index.html: line icons (#i-*) and status flags (#flag-*).
   const SVG_NS = 'http://www.w3.org/2000/svg';
   function icon(id, cls) {
@@ -144,8 +138,6 @@
   // A status pill: flag + word on the tone's tinted wash. st: { tone, flag, label }.
   function pillEl(st, cls) { return h('span', { class: `pill tone-${st.tone}${cls ? ' ' + cls : ''}` }, flagEl(st.flag), st.label); }
   function taskStatus(t) { return B.statusOf(t); }
-  // bucket (a state or "stale") -> the pill shown for it.
-  function bucketStatus(s) { return s === 'stale' ? { tone: 'quiet', flag: 'q0', label: 'Quiet' } : { ...B.statusOf({ state: s }), label: B.TONES[B.toneOf(s)].word }; }
   function prNumber(url) { const m = /\/pull\/(\d+)/.exec(url || ''); return m ? '#' + m[1] : 'PR'; }
   // Skips a DOM rebuild when its inputs are unchanged, so focus and hover survive polling.
   const sigs = new Map();
@@ -155,32 +147,10 @@
     sigs.set(name, sig);
     return false;
   }
-  // Stale crew are bucketed as "stale" for counts, tallies and the state filter.
-  function bucket(t) { return t.stale ? 'stale' : t.state; }
   function staleText(t) { return `${L.quietText(t.lastActivity)} (marked quiet after ${snap.staleDays} d without activity)`; }
   // Worker title (from its queue entry or brief), falling back to the raw id.
   function titleOf(id) { const t = snap && snap.tasks.find((x) => x.id === id); return t ? t.title || t.id : id; }
   function lastNote(t) { const l = t.lastStatus[t.lastStatus.length - 1]; return l ? l.note : ''; }
-
-  const SAILOR = `
-    <g class="body">
-      <rect class="legs" x="13" y="37" width="14" height="10" rx="2"/>
-      <path class="torso" d="M12 21h16a3 3 0 0 1 3 3v15H9V24a3 3 0 0 1 3-3z"/>
-      <path class="stripes" clip-path="url(#torso-clip)" d="M8 26.5h24M8 31h24M8 35.5h24"/>
-      <g class="arm arm-l"><rect class="torso" x="7" y="22" width="5" height="10" rx="2.5"/><circle class="skin" cx="9.5" cy="33" r="2.3"/></g>
-      <g class="arm arm-r"><rect class="torso" x="28" y="22" width="5" height="10" rx="2.5"/><circle class="skin" cx="30.5" cy="33" r="2.3"/><path class="tool" d="M30.5 33.5L35 42"/></g>
-      <circle class="skin" cx="20" cy="14.5" r="6.5"/>
-      <circle class="eye" cx="17.7" cy="15" r="0.95"/><circle class="eye" cx="22.3" cy="15" r="0.95"/>
-      <path class="cap" d="M12.6 11.2C13 6.5 16.2 4.6 20 4.6s7 1.9 7.4 6.6z"/>
-      <rect class="cap-band" x="12.4" y="10.2" width="15.2" height="2.2" rx="1.1"/>
-    </g>`;
-  const FLAG = '<path class="pole" d="M3 1v39"/><path class="cloth" d="M3.8 2.5h15.5l-4.5 6 4.5 6H3.8z"/>';
-  const BELL = '<path fill="currentColor" d="M8 1.5a1 1 0 0 1 1 1v.6a4.5 4.5 0 0 1 3.5 4.4v3l1.3 1.8a.6.6 0 0 1-.5 1H2.7a.6.6 0 0 1-.5-1L3.5 10.5v-3A4.5 4.5 0 0 1 7 3.1v-.6a1 1 0 0 1 1-1zM6.3 13.6h3.4a1.7 1.7 0 0 1-3.4 0z"/>';
-  const CHEST = '<rect class="box" x="1" y="6" width="20" height="11" rx="1.5"/><path class="box" d="M1 7.5C1 3 4 2 11 2s10 1 10 5.5z"/><path class="tick" d="M7.5 11.5l2.6 2.6 4.6-5"/>';
-  const XMARK = '<path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>';
-  const svg = (cls, vb, inner) => `<svg class="${cls}" viewBox="${vb}" aria-hidden="true">${inner}</svg>`;
-
-  document.querySelectorAll('.officer .sailor').forEach((s) => { s.innerHTML = SAILOR; });
 
   // ---------- filtering ----------
   function matchesTask(t) {
@@ -194,50 +164,39 @@
     return query.split(/\s+/).every((q) => hay.includes(q));
   }
 
-  // ---------- stations ----------
+  // ---------- ship view: the deck as a nautical chart ----------
+  // Each worker is a berth flying its status flag; the flag is hoisted once when it first
+  // goes up for "needs you" or "blocked". Nothing loops.
   function makeStation(t) {
-    const el = h('button', { class: 'station', type: 'button', 'data-id': t.id });
-    el.style.setProperty('--d', `-${(hash(t.id) % 1100) / 1000}s`);
-    el.innerHTML =
-      '<div class="post">' +
-        svg('st-flag', '0 0 22 40', FLAG) +
-        `<svg class="sailor" viewBox="0 0 40 48" aria-hidden="true">${SAILOR}</svg>` +
-        svg('chest', '0 0 22 18', CHEST) +
-        svg('bell', '0 0 16 16', BELL) +
-        svg('xmark', '0 0 16 16', XMARK) +
-        '<span class="zz">z</span><span class="zz">z</span>' +
-        '<span class="alive"></span>' +
-      '</div>' +
-      '<span class="stale-tag">quiet</span>' +
-      '<div class="label"><span class="id"></span><span class="rid"></span><span class="sub"><span class="pill"></span><span class="age"></span></span></div>';
+    const el = h('button', { class: 'berth', type: 'button', 'data-id': t.id },
+      h('span', { class: 'mast' }, h('span', { class: 'pole' }), flagEl('x')),
+      icon('i-crew', 'crew'),
+      h('span', { class: 't' }), h('code', { class: 'rid' }), h('span', { class: 'pill sm' }));
     el.addEventListener('click', () => openDrawer({ type: 'task', id: t.id }));
     return el;
   }
   function updateStation(el, t) {
-    const prev = el.dataset.state;
-    for (const c of [...el.classList]) if (c.startsWith('st-') || c.startsWith('k-')) el.classList.remove(c);
-    el.classList.add('st-' + t.state, 'k-' + t.kind);
+    const st = taskStatus(t);
+    const prev = el.dataset.tone;
+    el.className = `berth tone-${st.tone}`;
+    el.classList.toggle('needs', st.tone === 'needs' || st.tone === 'blocked');
     el.classList.toggle('is-alive', t.alive === true);
-    el.classList.toggle('is-stale', !!t.stale);
     el.classList.toggle('selected', !!selected && selected.type === 'task' && selected.id === t.id);
-    el.dataset.state = t.state;
-    if (prev && prev !== t.state) {
-      el.classList.remove('changed');
-      void el.offsetWidth;
-      el.classList.add('changed');
-      setTimeout(() => el.classList.remove('changed'), 1700);
+    el.dataset.tone = st.tone;
+    if (prev && prev !== st.tone && (st.tone === 'needs' || st.tone === 'blocked')) {
+      el.classList.add('hoist');
+      setTimeout(() => el.classList.remove('hoist'), 2600);
     }
-    el.querySelector('.id').textContent = t.title || t.id;
+    el.querySelector('.mast use').setAttribute('href', '#flag-' + st.flag);
+    el.querySelector('.t').textContent = t.title || t.id;
     el.querySelector('.rid').textContent = t.title && t.title !== t.id ? t.id : '';
-    el.querySelector('.pill').replaceWith(pillEl(taskStatus(t), 'sm'));
-    el.querySelector('.age').textContent = ago(t.lastActivity);
-    el.querySelector('.stale-tag').textContent = t.stale ? `quiet ${L.quietDays(t.lastActivity) || ''}d` : 'quiet';
+    el.querySelector('.pill').replaceWith(pillEl(st, 'sm'));
     const alive = t.alive === true ? 'terminal open' : t.alive === false ? 'terminal closed' : '';
-    el.title = `${t.title || t.id}\n${t.id} · ${t.project}${alive ? ' · ' + alive : ''}\n\n${L.summary(t)}`;
-    el.setAttribute('aria-label', `${t.title || t.id}, ${t.project}, ${L.summary(t)}`);
+    el.title = `${t.title || t.id}\n${t.project}${alive ? ', ' + alive : ''}\n\n${L.summary(t)}`;
+    el.setAttribute('aria-label', `${t.title || t.id}, ${t.project}: ${st.label}. ${L.summary(t)}`);
   }
 
-  // Stale crew sit after the active crew and before the done crew.
+  // Quiet workers sit after the active ones and before the finished ones.
   function rank(t) { return t.stale ? STATE_ORDER.indexOf('done') - 0.5 : STATE_ORDER.indexOf(t.state); }
   function sortTasks(a, b) {
     const d = rank(a) - rank(b);
@@ -245,14 +204,25 @@
   }
 
   function makeArea(key) {
-    const plaque = h('h2', { class: 'plaque' });
-    const tally = h('div', { class: 'area-tally' });
-    const grid = h('div', { class: 'stations' });
-    const root = h('section', { class: 'area', 'data-area': key }, h('div', { class: 'area-head' }, plaque, tally), grid);
+    const plaque = h('div', { class: 'zone-title' });
+    const tally = h('div', { class: 'tally' });
+    const grid = h('div', { class: 'berths' });
+    const root = h('section', { class: 'zone', 'data-area': key }, h('div', { class: 'zone-head' }, plaque, tally), grid);
     return { root, plaque, tally, grid };
   }
 
+  // Moves el to position i only when it is out of place: moving a node blurs it.
+  function placeAt(parent, el, i) {
+    if (parent.children[i] !== el) parent.insertBefore(el, parent.children[i] || null);
+  }
+  function renderLegend() {
+    if (ui.legend.childElementCount) return;
+    ui.legend.replaceChildren(h('span', { class: 'legend-title', text: 'Flags' }),
+      ...B.TONE_ORDER.map((tone) => h('span', { title: B.TONES[tone].meaning }, flagEl(B.TONES[tone].flag), B.TONES[tone].word)));
+  }
+
   function renderDeck() {
+    renderLegend();
     const crew = snap.tasks.filter((t) => t.kind !== 'secondmate');
     const byArea = new Map();
     for (const t of crew) {
@@ -272,14 +242,13 @@
       if (!area) { area = makeArea(key); areaEls.set(key, area); }
       const tasks = byArea.get(key).sort(sortTasks);
       const reg = regMode.get(key);
-      area.plaque.replaceChildren(...[tasks[0].project, reg && reg.mode ? h('span', { class: 'plaque-sub', text: reg.mode }) : null].filter(Boolean));
-      if (reg && reg.description) area.plaque.title = reg.description;
-      const tallies = {};
-      for (const t of tasks) tallies[bucket(t)] = (tallies[bucket(t)] || 0) + 1;
-      area.tally.replaceChildren(...[...STATE_ORDER, 'stale'].filter((s) => tallies[s]).map((s) =>
-        h('span', { class: 'tally', title: `${bucketStatus(s).label}: ${tallies[s]}` }, flagEl(bucketStatus(s).flag), tallies[s])));
+      area.plaque.replaceChildren(h('h2', { text: tasks[0].project }), reg && reg.description ? h('span', { class: 'muted', text: reg.description }) : null);
+      const tallies = new Map();
+      for (const t of tasks) { const tone = taskStatus(t).tone; tallies.set(tone, (tallies.get(tone) || 0) + 1); }
+      area.tally.replaceChildren(...B.TONE_ORDER.filter((tone) => tallies.get(tone)).map((tone) =>
+        h('span', { title: `${B.TONES[tone].word}: ${tallies.get(tone)}` }, flagEl(B.TONES[tone].flag), h('span', { class: 'sr-only', text: B.TONES[tone].word + ' ' }), tallies.get(tone))));
       let visible = 0;
-      tasks.forEach((t) => {
+      tasks.forEach((t, i) => {
         seen.add(t.id);
         let el = stations.get(t.id);
         const isNew = !el;
@@ -290,10 +259,10 @@
         const show = matchesTask(t);
         el.classList.toggle('hidden-by-filter', !show);
         if (show) visible++;
-        area.grid.append(el); // append re-orders in place
+        placeAt(area.grid, el, i);
       });
       area.root.classList.toggle('hidden-by-filter', visible === 0);
-      ui.areas.append(area.root);
+      placeAt(ui.areas, area.root, areaKeys.indexOf(key));
     }
     for (const [key, area] of areaEls) {
       if (!byArea.has(key)) { area.root.remove(); areaEls.delete(key); }
@@ -305,7 +274,7 @@
       setTimeout(() => el.remove(), 650);
     }
     if (!crew.length && !ui.areas.querySelector('.empty-deck')) {
-      ui.areas.append(h('p', { class: 'empty-deck', text: 'No workers right now. Ask the first mate for a task in the Bridge chat.' }));
+      ui.areas.append(h('div', { class: 'empty-card empty-deck' }, h('h3', { text: 'No workers on deck' }), h('p', { text: 'Ask the first mate for work in the chat, or start a New job from the Board.' })));
     } else if (crew.length) {
       ui.areas.querySelectorAll('.empty-deck').forEach((e) => e.remove());
     }
@@ -319,14 +288,14 @@
         const dy = r0.top - r1.top;
         if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
           el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }],
-            { duration: 550, easing: 'cubic-bezier(.2,.8,.2,1)' });
+            { duration: 450, easing: 'cubic-bezier(.2,.7,.2,1)' });
         }
       }
     }
     document.body.classList.toggle('has-tmux', !!snap.tmux.available);
   }
 
-  // ---------- cabins ----------
+  // ---------- cabins: second mates as portholes ----------
   function renderCabins() {
     const metas = snap.tasks.filter((t) => t.kind === 'secondmate');
     const reg = snap.secondmates.registry || [];
@@ -334,64 +303,55 @@
     const vacant = reg.filter((r) => !ids.has(r.id));
     ui.cabins.hidden = !metas.length && !vacant.length;
     if (ui.cabins.hidden) return;
-    if (unchanged('cabins', metas.map((t) => [t.id, t.state, t.stale, ago(t.lastActivity), matchesTask(t)]), vacant)) return;
-    const cabin = (id, sub, cls, onclick) => h('button', { class: 'cabin ' + cls, type: 'button', onclick },
-      h('span', { class: 'porthole' }),
-      h('div', null, h('div', { class: 'cab-id', text: id }), h('div', { class: 'cab-sub', text: sub })));
+    if (unchanged('cabins', metas.map((t) => [t.id, t.title, taskStatus(t), matchesTask(t)]), vacant)) return;
     const kids = [];
     for (const t of metas.sort(sortTasks)) {
-      const c = cabin(t.title || t.id, `${L.summary(t)} · ${ago(t.lastActivity)}`,
-        `k-secondmate st-${t.state}${t.stale ? ' is-stale' : ''}`, () => openDrawer({ type: 'task', id: t.id }));
-      c.style.setProperty('--c', stateVar(bucket(t)));
+      const st = taskStatus(t);
+      const c = h('button', { class: `porthole tone-${st.tone}`, type: 'button', title: L.summary(t), onclick: () => openDrawer({ type: 'task', id: t.id }) },
+        h('span', { class: 'ring' }, icon('i-helm')), h('span', { class: 'strong', text: t.title || t.id }), pillEl(st, 'sm'));
       c.classList.toggle('hidden-by-filter', !matchesTask(t));
-      c.querySelector('.porthole').innerHTML = `<svg class="sailor" viewBox="0 0 40 48" aria-hidden="true">${SAILOR}</svg>`;
       kids.push(c);
     }
     for (const r of vacant) {
-      kids.push(cabin(r.id, r.scope || r.description || 'off watch', 'k-secondmate vacant', () => openDrawer({ type: 'secondmate', id: r.id })));
+      kids.push(h('button', { class: 'porthole vacant', type: 'button', title: r.description || r.scope || '', onclick: () => openDrawer({ type: 'secondmate', id: r.id }) },
+        h('span', { class: 'ring' }), h('span', { text: `${r.id}, not running` })));
     }
     ui.cabinRow.replaceChildren(...kids);
   }
 
-  // ---------- hold ----------
+  // ---------- hold: the queue ----------
   function renderHold() {
     const queued = snap.backlog.queued || [];
-    const shown = queued.filter(matchesCrate);
-    const calls = queued.filter((q) => q.captainCall).length;
-    ui.holdSub.textContent = `${queued.length} waiting${calls ? ` · ${calls} need${calls === 1 ? 's' : ''} you` : ''}`;
+    const shown = queued.filter((q) => !q.checked && matchesCrate(q));
+    const calls = queued.filter((q) => q.captainCall && !q.checked).length;
+    ui.holdSub.textContent = `${shown.length} waiting${calls ? `, ${calls} need${calls === 1 ? 's' : ''} you` : ''}`;
     ui.hold.classList.toggle('hidden-by-filter', !!query && !shown.length);
     if (unchanged('hold', queued, shown.length, snap.backlog.present)) return;
-    const kids = shown.slice(0, MAX_CRATES).map((q, i) => {
-      const key = q.id || `item-${i}`;
+    const kids = shown.slice(0, MAX_CRATES).map((q) => {
+      const index = queued.indexOf(q);
       return h('button', {
-        class: 'crate' + (q.captainCall ? ' captain-call' : ''), type: 'button',
-        title: `${q.title}${q.id ? '\n' + q.id : ''}`,
-        onclick: () => openDrawer({ type: 'backlog', id: key, section: 'queued', index: queued.indexOf(q) }),
-      }, h('span', { text: q.title || q.id }));
+        class: 'crate' + (q.captainCall ? ' call' : ''), type: 'button', title: q.captainCall ? 'Needs your answer' : 'Up next',
+        onclick: () => openDrawer({ type: 'backlog', id: itemKey(q), section: 'queued', index }),
+      }, q.captainCall ? flagEl('k') : null, h('span', { text: q.title || q.id }));
     });
-    if (shown.length > MAX_CRATES) kids.push(h('div', { class: 'crate more', text: `+${shown.length - MAX_CRATES} more` }));
-    if (!queued.length) kids.push(h('p', { class: 'hold-empty', text: snap.backlog.present ? 'The queue is empty.' : 'No queue yet.' }));
+    if (shown.length > MAX_CRATES) kids.push(h('span', { class: 'crate more', text: `${shown.length - MAX_CRATES} more` }));
+    if (!shown.length) kids.push(h('p', { class: 'hint', text: snap.backlog.present ? 'The queue is empty.' : 'No queue yet.' }));
     ui.crates.replaceChildren(...kids);
   }
 
-  // ---------- bridge ----------
+  // ---------- bridge: captain, first mate, monitoring ----------
   function renderBridge() {
-    ui.captain.classList.toggle('away', snap.afk);
-    ui.awaySign.hidden = !snap.afk;
     const name = (snap.captain && snap.captain.name) || 'Captain';
+    ui.captain.classList.toggle('away', snap.afk);
     ui.captainName.textContent = name;
-    ui.awayName.textContent = name;
-    ui.captain.title = snap.captain && snap.captain.name ? `Captain ${name}` : 'Captain';
+    ui.captainState.textContent = snap.afk ? 'Ashore' : 'On the bridge';
     const w = snap.watcher;
-    ui.lamp.className = 'lamp ' + (w.lastBeat ? (w.healthy ? 'on' : 'amber') : '');
-    ui.lampLabel.textContent = w.lastBeat ? (w.healthy ? 'Monitoring ' : 'Monitoring late ') + ago(w.lastBeat) : 'Not monitoring';
-    ui.lamp.parentElement.title = w.lastBeat ? `Last monitoring check ${agoLong(w.lastBeat)}` : 'Monitoring has not checked in';
-    ui.wheel.style.animationPlayState = w.healthy ? 'running' : 'paused';
+    ui.lamp.className = 'lamp ' + (w.lastBeat ? (w.healthy ? 'on' : 'late') : 'off');
+    ui.lampLabel.textContent = w.lastBeat ? `${w.healthy ? 'Checked' : 'Late, checked'} ${agoLong(w.lastBeat)}` : 'Not running';
   }
 
   // ---------- orders: posting, confirm dialog, lifecycle ----------
   const IRREVERSIBLE = new Set(['merge', 'cleanup', 'cleanup-done']);
-  const ORDER_TONE = { pending: 'needs', acknowledged: 'working', done: 'done', declined: 'failed' };
 
   async function post(url, body) {
     try {
@@ -472,13 +432,16 @@
 
   function timeOf(ts) { const t = ts ? Date.parse(ts) : NaN; return Number.isFinite(t) ? t : null; }
   function clock(ms) { return ms ? new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''; }
-  function chip(status) { return h('span', { class: `pill sm tone-${ORDER_TONE[status] || 'waiting'}`, text: L.messageStatus(status) }); }
+  function titleOfItem(id) {
+    for (const k of ['captain', 'inFlight', 'queued', 'done', 'other']) { const b = ((snap && snap.backlog[k]) || []).find((x) => x.id === id); if (b && b.title) return b.title; }
+    return id;
+  }
   function payloadText(o) {
-    if (o.kind === 'cleanup-done' && o.targets) return `${o.targets.length} worker${o.targets.length === 1 ? '' : 's'}: ${o.targets.join(', ')}`;
-    if (o.kind === 'new-task') return `${o.taskKind || 'task'} in ${o.project}${o.harness ? ` · ${o.harness}${o.model ? ' ' + o.model : ''}${o.effort ? ' · effort ' + o.effort : ''}` : ''}`;
-    if (o.kind === 'config') return `${o.field} → ${o.value} · ${o.applied ? 'applied live' : 'on relaunch'}`;
-    if (o.item) return o.item + (o.option ? ` · option ${o.option}` : '');
-    if (o.option) return `option ${o.option}`;
+    if (o.kind === 'cleanup-done' && o.targets) return `${o.targets.length} worker${o.targets.length === 1 ? '' : 's'}: ${o.targets.map(titleOf).join(', ')}`;
+    if (o.kind === 'new-task') return `${sentence(o.taskKind || 'ship')} job in ${o.project}${o.harness ? `, ${B.toolText({ harness: o.harness, model: o.model, effort: o.effort })}` : ''}`;
+    if (o.kind === 'config') return `${sentence(o.field)} to ${o.value}, ${o.applied ? 'applied live' : 'on relaunch'}`;
+    if (o.item) return titleOfItem(o.item) + (o.option ? `, option ${o.option}` : '');
+    if (o.option) return `Option ${o.option}`;
     return '';
   }
   // Sent -> Seen -> Done (or Declined): one row of receipts, each step with its time, then the note.
@@ -489,7 +452,7 @@
     const step = (label, on, ts, cls) => h('li', { class: 'lc-step' + (on ? ' on' : '') + (cls ? ' ' + cls : ''), title: ts ? new Date(timeOf(ts)).toLocaleString() : null },
       label, ts ? ' ' + clock(timeOf(ts)) : '');
     const last = (o.history || []).filter((a) => a.note).pop();
-    return h('div', { class: 'receipt' },
+    return h('div', { class: 'steps' },
       h('ol', { class: 'lifecycle', 'aria-label': `Message ${L.messageStatus(o.status)}` },
         step('Sent', true, o.ts),
         step('Seen', !!seen, seen && seen.ts),
@@ -497,21 +460,15 @@
       last ? h('p', { class: 'lc-note', text: `“${last.note}”` }) : null);
   }
 
+  // A message in a drawer list: what was asked, when, and its receipts.
   function orderRow(o) {
-    const when = timeOf(o.ts);
     const extra = payloadText(o);
-    const inner = [
-      icon('i-chat', 'ico muted'),
-      h('span', { class: 'r-id' }, h('span', { class: 'o-kind', text: L.kindLabel(o.kind) }), o.target ? ' · ' + titleOf(o.target) : ''),
-      h('span', { class: 'r-age' }, chip(o.status), ' ', ago(when)),
-      h('span', { class: 'r-note', text: o.text + (extra ? ` (${extra})` : '') }),
-      h('span', { class: 'r-life' }, lifecycle(o)),
-    ];
-    const title = `${o.target ? o.target + '\n' : ''}${L.messageStatus(o.status)}${o.ackTs ? ' · ' + o.ackTs : ''}\nsent ${o.ts}`;
-    const attrs = { class: 'row' + (o.pending ? ' pending' : ''), title };
-    return h('li', null, o.target && snap.tasks.some((t) => t.id === o.target)
-      ? h('button', { ...attrs, type: 'button', onclick: () => openDrawer({ type: 'task', id: o.target }) }, ...inner)
-      : h('div', attrs, ...inner));
+    const note = [o.text, extra].filter(Boolean).join(' · ');
+    return h('li', { class: 'order-row' },
+      h('div', { class: 'o-line' }, o.kind === 'decision' || o.kind === 'backlog-answer' ? flagEl('k') : icon(KIND_ICON[o.kind] || 'i-chat', 'ico muted'),
+        h('span', { class: 'o-kind', text: L.kindLabel(o.kind) }), h('span', { class: 'r-age', text: whenText(timeOf(o.ts)) })),
+      note ? h('p', { class: 'o-note', text: note }) : null,
+      lifecycle(o));
   }
 
   // ---------- the Board (default view) ----------
@@ -833,133 +790,157 @@
       ta.remove();
     }
     if (btn) {
-      const prev = btn.textContent;
-      btn.textContent = ok ? 'Copied' : 'Copy failed';
-      setTimeout(() => { btn.textContent = prev; }, 1300);
+      const label = btn.querySelector('.lbl') || btn;
+      const prev = label.textContent;
+      label.textContent = ok ? 'Copied' : 'Copy failed';
+      setTimeout(() => { label.textContent = prev; }, 1300);
     }
   }
 
-  // "Resume in terminal" block for a session view from the server.
+  // "Open in terminal": the folder (home shortened to ~) and the resume command; Copy copies
+  // the full command with the real path.
   function resumeBlock(sess) {
     const wrap = h('div', { class: 'resume' });
     if (!sess || !sess.resume) {
-      wrap.append(h('p', { class: 'empty', text: (sess && sess.note) || 'No session recorded.' }));
+      wrap.append(h('p', { class: 'empty', text: sess && sess.note ? sentence(sess.note) : 'No session recorded.' }));
       return wrap;
     }
-    const btn = h('button', { class: 'btn', type: 'button', text: 'Copy', title: 'Copy the resume command' });
+    const btn = h('button', { class: 'btn sm', type: 'button', title: 'Copy the full command (cd into the folder, then resume)' }, icon('i-copy'), h('span', { class: 'lbl', text: 'Copy' }));
     btn.addEventListener('click', () => copyText(sess.resume, btn));
-    wrap.append(h('div', { class: 'resume-row' }, h('code', { class: 'resume-cmd', text: sess.resume, tabindex: '0' }), btn),
-      h('p', { class: 'hint resume-meta', text: `${sess.harness || 'claude'} session${sess.firstSeen ? ' · found ' + agoLong(sess.firstSeen) : ''}${sess.lastSeen ? ' · seen ' + agoLong(sess.lastSeen) : ''}` }));
+    wrap.append(h('div', { class: 'resume-row' }, h('code', { class: 'resume-cmd', text: `claude --resume ${sess.sessionId}` }), btn),
+      h('p', { class: 'hint resume-meta', text: [`In ${sess.cwdLabel || 'its workspace'}`, sess.lastSeen ? `seen ${agoLong(sess.lastSeen)}` : null].filter(Boolean).join(', ') }));
     return wrap;
   }
+  const sentence = (s) => { s = String(s || ''); return s ? s[0].toUpperCase() + s.slice(1) : s; };
 
-  // The task drawer keeps its interactive parts (pane peek, message box, order
-  // buttons, file viewer) across polls; only the facts are rebuilt each tick.
-  let td = null; // { id, root, info, decision, resume, orders, peek, file, ... }
+  // firstmate kind and mode in words.
+  const KIND_WORDS = { ship: 'Ship: makes the change and opens a pull request', scout: 'Scout: diagnoses and writes a report', secondmate: 'Second mate: runs its own lane' };
+  const MODE_WORDS = { 'no-mistakes': 'Full review pipeline before push', 'direct-PR': 'Opens a pull request directly', 'local-only': 'Local only, no pull request' };
+
+  // The worker drawer keeps its interactive parts (terminal, message box, tabs, file viewer)
+  // across polls; the header and each tab's facts are rebuilt only when they change.
+  let td = null;
+  const DRAWER_TABS = [['terminal', 'Terminal'], ['updates', 'Updates'], ['details', 'Details'], ['settings', 'Model and effort']];
 
   function renderTaskDrawer() {
     const t = snap.tasks.find((x) => x.id === selected.id);
     if (!t) {
       stopPeek();
       td = null;
-      ui.drawerKicker.replaceChildren('Cleaned up');
-      ui.drawerTitle.textContent = selected.id;
+      ui.drawerKicker.replaceChildren(h('span', { class: 'pill plain', text: 'Cleaned up' }));
+      ui.drawerTitle.textContent = titleOf(selected.id);
+      ui.drawerSub.replaceChildren();
       ui.drawerBody.replaceChildren(h('p', { text: 'This worker has been cleaned up. Its session stays listed under the first mate’s past sessions.' }));
       return;
     }
-    ui.drawerKicker.replaceChildren(pillEl(taskStatus(t)), h('span', { text: t.lastActivity ? `Last update ${agoLong(t.lastActivity)}` : 'No update yet' }));
-    ui.drawerTitle.textContent = t.title || t.id;
     if (!td || td.id !== t.id || !td.root.isConnected) buildTaskDrawer(t);
     td.task = t;
-    if (!unchanged('drawer-info', t, snap.tmux.available)) td.info.replaceChildren(...taskInfo(t));
-    if (!unchanged('drawer-decision', t.id, t.state, lastNote(t), t.options)) renderDecision(t);
-    if (!unchanged('drawer-resume', t.id, t.session)) td.resume.replaceChildren(h('h3', { text: 'Open in terminal' }), h('p', { class: 'hint', text: 'Copy this into a terminal to pick up the worker’s Claude Code session.' }), resumeBlock(t.session));
+    ui.drawerKicker.replaceChildren(pillEl(taskStatus(t)), h('span', { text: t.lastActivity ? `Last update ${agoLong(t.lastActivity)}` : 'No update yet' }));
+    ui.drawerTitle.textContent = t.title || t.id;
+    if (!unchanged('drawer-head', t.id, t.title, t.project, t.pr, B.toolText(t), t.window, t.alive)) renderTaskHead(t);
+    if (!unchanged('drawer-resume', t.id, t.session)) td.termOpen.replaceChildren(h('p', { class: 'hint', text: 'Copy into a terminal to pick up this worker’s Claude Code session.' }), resumeBlock(t.session));
+    if (!unchanged('drawer-decision', t.id, t.state, t.stale, lastNote(t), t.options)) renderDecision(t);
+    if (!unchanged('drawer-updates', t.id, t.lastStatus)) renderUpdates(t);
+    if (!unchanged('drawer-details', t, snap.tmux.available)) td.details.replaceChildren(...taskDetails(t));
     if (!unchanged('drawer-config', t.id, t.config, t.window, snap.configOptions)) renderConfig(t);
     renderTaskOrders(t);
-    td.peekWrap.hidden = !t.window;
-    td.msgWrap.hidden = !t.window;
-    td.mergeBtn.hidden = !t.pr;
+    td.tabBtns.terminal.hidden = !t.window;
+    if (!t.window && td.tab === 'terminal') showDrawerTab('updates');
   }
 
-  function taskInfo(t) {
+  function renderTaskHead(t) {
+    const d = td;
+    d.meta.replaceChildren(...[
+      t.title && t.title !== t.id ? h('code', { text: t.id }) : null,
+      h('span', { text: t.project }),
+      t.pr ? h('a', { class: 'chip', href: t.pr, target: '_blank', rel: 'noopener noreferrer', title: 'Open the pull request (O)' }, icon('i-pr'), prNumber(t.pr), icon('i-ext')) : null,
+      h('span', { class: 'chip', text: B.toolText(t) }),
+      t.window && t.alive === false ? h('span', { class: 'chip', text: 'Terminal closed' }) : null,
+    ].filter(Boolean));
+    d.mergeBtn.hidden = !t.pr;
+    d.prLink = t.pr || null;
+  }
+
+  // Latest update first, every one with its flag and one timestamp format.
+  function renderUpdates(t) {
+    const recent = t.lastStatus.slice().reverse();
+    td.tabBtns.updates.querySelector('.count').textContent = recent.length;
+    td.updates.replaceChildren(recent.length
+      ? h('ol', { class: 'timeline' }, ...recent.map((e) => {
+        const ms = e.ts ? localTime(e.ts) : e.approxTs;
+        const st = B.statusOf({ state: e.state });
+        const note = h('div', { class: 't-note', text: sentence(e.note), title: 'Click to expand' });
+        note.addEventListener('click', () => note.classList.toggle('expanded'));
+        return h('li', null, flagEl(st.flag, 'lg'), h('div', null, note, h('div', { class: 't-when', text: `${st.label}, ${ms ? whenText(ms) : 'time not recorded'}` })));
+      }))
+      : h('p', { class: 'empty', text: 'No update yet. The worker writes one when it starts, gets stuck or finishes.' }));
+    // The Terminal tab's one-line "latest" strip; hidden while the decision box shows the same note.
+    const last = recent[0];
+    td.latest.hidden = !last || !td.decision.hidden;
+    if (last) {
+      const st = B.statusOf({ state: last.state });
+      const ms = last.ts ? localTime(last.ts) : last.approxTs;
+      td.latest.replaceChildren(flagEl(st.flag, 'lg'), h('span', { class: 'latest-note', text: sentence(last.note) }), h('span', { class: 'when', text: ms ? whenText(ms) : '' }));
+    }
+  }
+
+  function taskDetails(t) {
     const kids = [];
     if (t.brief) kids.push(h('p', { class: 'brief', text: t.brief }));
     const links = h('div', { class: 'links' });
-    if (t.pr) links.append(h('a', { class: 'chip', href: t.pr, target: '_blank', rel: 'noopener noreferrer' }, icon('i-pr'), `Pull request ${prNumber(t.pr)}`, icon('i-ext')));
-    for (const name of t.files || []) {
-      links.append(h('button', { class: 'chip', type: 'button', title: `${name} (read-only)`, onclick: () => openDataFile(t.id, name) }, icon('i-file'), name));
-    }
-    if (t.worktree) {
-      const b = h('button', { class: 'chip', type: 'button', text: 'Copy folder path' });
-      b.addEventListener('click', () => copyText(t.worktree, b));
-      links.append(b);
-    }
+    for (const name of t.files || []) links.append(h('button', { class: 'chip', type: 'button', title: `${name} (read-only)`, onclick: () => openDataFile(t.id, name) }, icon('i-file'), name));
     if (links.childNodes.length) kids.push(links);
     const dl = h('dl', { class: 'facts' });
-    fact(dl, 'Now', L.summary(t));
-    fact(dl, 'Task id', t.id, true);
     fact(dl, 'Project', t.project);
-    fact(dl, 'Kind', t.kind);
-    fact(dl, 'Mode', t.mode);
-    fact(dl, 'Tool', [t.harness, t.model && `model ${t.model}`, t.effort && `effort ${t.effort}`].filter(Boolean).join(' · '));
-    fact(dl, 'Terminal', t.window ? `${t.window}${t.alive === true ? '  (open)' : t.alive === false ? '  (closed)' : ''}` : null, true);
-    fact(dl, 'Workspace', t.worktree, true);
-    fact(dl, 'PR head', t.prHead ? t.prHead.slice(0, 12) : null, true);
-    fact(dl, 'Last activity', t.lastActivity ? `${agoLong(t.lastActivity)} · ${whenText(t.lastActivity)}` : null);
+    fact(dl, 'Kind', KIND_WORDS[t.kind] || sentence(t.kind));
+    fact(dl, 'Checks', t.mode ? MODE_WORDS[t.mode] || t.mode : null);
+    fact(dl, 'Tool', B.toolText(t));
+    fact(dl, 'Terminal', t.window ? (t.alive === true ? 'Open' : t.alive === false ? 'Closed' : snap.tmux.available ? 'Not found' : 'Not checked (no tmux)') : 'None');
+    if (t.worktree) {
+      const b = h('button', { class: 'btn sm', type: 'button', title: 'Copy the workspace folder path' }, icon('i-copy'), h('span', { class: 'lbl', text: 'Copy folder path' }));
+      b.addEventListener('click', () => copyText(t.worktree, b));
+      fact(dl, 'Workspace', b);
+    }
+    fact(dl, 'Pull request head', t.prHead ? t.prHead.slice(0, 12) : null, true);
+    fact(dl, 'Last activity', t.lastActivity ? `${whenText(t.lastActivity)} (${agoLong(t.lastActivity)})` : null);
     if (t.stale) fact(dl, 'Quiet', staleText(t));
-    fact(dl, 'Turn ended', t.turnEnded ? `${agoLong(t.turnEnded)} · ${whenText(t.turnEnded)}` : 'not yet');
-    kids.push(dl);
-    const entry = (e) => {
-      const ms = e.ts ? localTime(e.ts) : e.approxTs;
-      const note = h('div', { class: 't-note', text: e.note, title: 'Click to expand' });
-      note.addEventListener('click', () => note.classList.toggle('expanded'));
-      const st = B.statusOf({ state: e.state });
-      return h('li', null, flagEl(st.flag, 'lg'),
-        h('div', null, note, h('div', { class: 't-when', text: `${st.label} · ${ms ? whenText(ms) : 'time not recorded'}` })));
-    };
-    // Latest update: the worker's full last line, verbatim; the earlier ones below it.
-    const recent = t.lastStatus.slice().reverse();
-    kids.push(h('h3', { text: 'Latest update' }));
-    if (!recent.length) kids.push(h('p', { class: 'empty', text: 'No update yet.' }));
-    else kids.push(h('ol', { class: 'timeline' }, entry(recent[0])));
-    if (recent.length > 1) kids.push(h('h3', { text: 'Earlier updates' }), h('ol', { class: 'timeline' }, ...recent.slice(1).map(entry)));
+    fact(dl, 'Turn ended', t.turnEnded ? whenText(t.turnEnded) : 'Not yet');
+    kids.push(dl, h('h3', { text: 'Messages about this worker' }), td.ordersList);
     return kids;
   }
 
-  // Lettered option buttons plus a free-text answer; one shared builder for crew
-  // decisions and Captain's Call backlog items.
+  // Lettered option buttons plus a free-text answer; one shared builder for worker
+  // decisions and the queue's questions.
   function answerPanel({ options, draftKey, placeholder, send }) {
     const text = persist(h('textarea', { rows: '3', maxlength: '2000', placeholder, 'aria-label': placeholder }), draftKey);
-    const opts = (options || []).map((o) => h('button', {
-      class: 'option-btn' + (o.recommended ? ' rec' : ''), type: 'button', title: `Answer with option ${o.letter}`,
-      onclick: async () => { if (await send(o, text.value.trim())) clearDraft(text); },
-    }, h('span', { class: 'opt-letter', text: o.letter }), h('span', { class: 'opt-text', text: o.text }), o.recommended ? h('span', { class: 'opt-rec', text: 'recommended' }) : null));
+    const opts = (options || []).length ? optionButtons(options, async (o) => { if (await send(o, text.value.trim())) clearDraft(text); }) : null;
     const sendBtn = h('button', { class: 'btn primary', type: 'button', text: 'Send answer', onclick: async () => {
       if (!text.value.trim()) { text.focus(); return; }
       if (await send(null, text.value.trim())) clearDraft(text);
     } });
     text.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendBtn.click(); } });
     return h('div', { class: 'answer' },
-      opts.length ? h('div', { class: 'options', role: 'group', 'aria-label': 'Options' }, ...opts) : null,
-      opts.length ? h('p', { class: 'hint', text: 'Click an option to answer with it; anything in the box below is sent along with it.' }) : null,
+      opts,
+      opts ? h('p', { class: 'hint', text: 'Pick an option to answer with it; anything in the box below goes along with it.' }) : null,
       text, h('div', { class: 'btn-row end' }, sendBtn));
   }
 
   function renderDecision(t) {
-    if (!ATTENTION.has(t.state) || t.state === 'failed') { td.decision.hidden = true; td.decision.replaceChildren(); return; }
-    td.decision.hidden = false;
+    const show = (t.state === 'needs-decision' || t.state === 'blocked') && !t.stale;
+    td.decision.hidden = !show;
+    if (!show) { td.decision.replaceChildren(); td.latest.hidden = !t.lastStatus.length; return; }
+    const st = taskStatus(t);
+    td.decision.className = `decision-sec tone-${st.tone}`;
     td.decision.replaceChildren(
-      h('h3', { text: t.state === 'blocked' ? 'Blocked: help it along' : 'Needs your call' }),
-      h('div', { class: 'decision-note', text: lastNote(t) || '(no note)' }),
+      h('h3', null, flagEl(st.flag), t.state === 'blocked' ? 'Blocked: help it along' : 'Needs your call'),
+      h('div', { class: 'decision-note', text: B.cardSummary(t, 2000) || 'No note.' }),
       answerPanel({
         options: t.options,
         draftKey: 'decision.' + t.id,
-        placeholder: t.options.length ? 'Optional note or your own answer…' : 'Your answer…',
-        send: (opt, extra) => queueOrder({ kind: 'decision', target: t.id, option: opt ? opt.letter : null, text: answerText(opt, extra) }, {
-          title: opt ? `Answer “${t.title || t.id}” with option ${opt.letter}?` : `Send this answer to “${t.title || t.id}”?`,
-          body: answerText(opt, extra),
-        }),
+        placeholder: t.options.length ? 'Optional note, or your own answer…' : 'Your answer…',
+        send: (opt, extra) => answerTask(t, opt, extra),
       }));
+    td.latest.hidden = true;
   }
 
   // Current harness/model/effort with allow-listed pickers; claude workers apply live.
@@ -967,48 +948,95 @@
     const c = t.config || { harness: t.harness || 'claude', model: t.model, effort: t.effort, pending: {} };
     const spec = (snap.configOptions || {})[c.harness] || {};
     const live = !!spec.live && !!t.window;
-    const show = (field) => [c[field] || 'default', c.pending[field] ? ` → ${c.pending[field]} on relaunch` : ''].join('');
+    const show = (field) => [c[field] || 'default', c.pending[field] ? `, ${c.pending[field]} on relaunch` : ''].join('');
     const rows = [];
-    for (const field of ['effort', 'model']) {
+    for (const field of ['model', 'effort']) {
       const list = spec[field];
+      const label = field === 'model' ? 'Model' : 'Effort';
       if (!list) {
-        rows.push(h('div', { class: 'cfg-row' }, h('span', { class: 'cfg-label', text: field }), h('span', { class: 'cfg-val mono', text: show(field) }), h('span', { class: 'hint cfg-fixed', text: 'show current only' })));
+        rows.push(h('div', { class: 'cfg-row' }, h('span', { class: 'cfg-label', text: label }), h('span', { class: 'cfg-val mono', text: show(field) }), h('span', { class: 'hint cfg-fixed', text: 'Shown only; this tool has no choices here' })));
         continue;
       }
       const choice = L.configChoices(list, c[field], c.pending[field]);
-      const sel = h('select', { 'aria-label': `${field} for ${t.id}` }, ...choice.options.map(([v, label]) => h('option', { value: v, text: label })));
+      const sel = h('select', { 'aria-label': `${label} for ${t.title || t.id}` }, ...choice.options.map(([v, text]) => h('option', { value: v, text })));
       sel.value = choice.selected;
       const btn = h('button', { class: 'btn', type: 'button', disabled: true, text: live ? 'Apply live' : 'Send change', onclick: () => sel.value && applyConfig(t, field, sel.value, live) });
       sel.addEventListener('change', () => { btn.disabled = !sel.value; });
-      rows.push(h('div', { class: 'cfg-row' }, h('span', { class: 'cfg-label', text: field }), h('span', { class: 'cfg-val mono', text: show(field) }), h('span', { class: 'cfg-ctl' }, sel, btn)));
+      rows.push(h('div', { class: 'cfg-row' }, h('span', { class: 'cfg-label', text: label }), h('span', { class: 'cfg-val mono', text: show(field) }), h('span', { class: 'cfg-ctl' }, sel, btn)));
     }
-    td.config.replaceChildren(h('h3', { text: 'Settings' }),
-      h('p', { class: 'hint', text: `Tool: ${c.harness}. ` + (live
-        ? 'Changes are typed into its terminal as /effort or /model; Claude Code applies them from its next turn.'
+    td.config.replaceChildren(
+      h('p', { class: 'hint', text: `Tool: ${B.toolText({ harness: c.harness })}. ` + (live
+        ? 'Changes are typed into its terminal as /model or /effort; Claude Code applies them from its next turn.'
         : spec.live ? 'No terminal is open for it, so the first mate applies changes when it next restarts the worker.'
-          : `${c.harness} workers cannot change live; the first mate applies changes when it next restarts the worker.`) }),
+          : 'This tool cannot change live; the first mate applies changes when it next restarts the worker.') }),
       ...rows);
   }
   async function applyConfig(t, field, value, live) {
     const ok = await confirmDialog({
-      title: `Set ${field} of “${t.title || t.id}” to ${value}?`,
+      title: `Set the ${field} of “${t.title || t.id}” to ${value}?`,
       body: live
         ? `Types “/${field} ${value}” into its terminal now. It applies from the worker's next turn, and the first mate is told about the change.`
-        : `Tells the first mate, who applies it when it next restarts this worker.`,
+        : 'Tells the first mate, who applies it when it next restarts this worker.',
       yes: live ? 'Apply now' : 'Send change',
     });
     if (!ok) return;
     const r = await post('/api/config', { id: t.id, field, value });
-    if (r.ok) { toast(r.applied ? `Sent ${r.command} to ${t.title || t.id}` : `Sent: ${field} → ${value} on restart`, 'ok'); poll(); }
+    if (r.ok) { toast(r.applied ? `Sent ${r.command} to ${t.title || t.id}` : `Sent: ${field} ${value} on restart`, 'ok'); poll(); }
     else toast(`Settings change failed: ${r.error}`, 'err');
+  }
+
+  function showDrawerTab(name) {
+    if (!td) return;
+    if (name === 'terminal' && td.tabBtns.terminal.hidden) name = 'updates';
+    td.tab = name;
+    store.set('drawerTab', name);
+    for (const [k] of DRAWER_TABS) {
+      const on = k === name;
+      td.tabBtns[k].setAttribute('aria-selected', String(on));
+      td.tabBtns[k].tabIndex = on ? 0 : -1;
+      td.panels[k].hidden = !on;
+    }
+    if (name === 'terminal') refreshPeek();
   }
 
   function buildTaskDrawer(t) {
     stopPeek();
     const id = t.id;
     const d = { id };
+    const name = () => (td && td.task && td.task.title) || id;
 
-    // File viewer: replaces the drawer content while open.
+    // Header: meta chips, the asks, the "Open in terminal" panel and the tabs.
+    d.meta = h('div', { class: 'd-meta' });
+    d.mergeBtn = h('button', { class: 'btn sm', type: 'button', text: 'Merge PR…', onclick: () => queueOrder({ kind: 'merge', target: id }, { title: `Ask the first mate to merge the pull request of “${name()}”?`, body: (td && td.task && td.task.pr) || null }) });
+    d.termOpen = h('div', { class: 'term-open', hidden: true });
+    d.termBtn = h('button', { class: 'btn sm', type: 'button', 'aria-expanded': 'false', title: 'Show the command that resumes this worker’s session in your terminal', onclick: () => {
+      d.termOpen.hidden = !d.termOpen.hidden;
+      d.termBtn.setAttribute('aria-expanded', String(!d.termOpen.hidden));
+      if (!d.termOpen.hidden) { const b = d.termOpen.querySelector('.btn'); if (b) b.focus(); }
+    } }, icon('i-term'), 'Open in terminal');
+    const actions = h('div', { class: 'd-actions' },
+      h('button', { class: 'btn sm', type: 'button', text: 'Ask for status', title: 'Asks the first mate for a status update', onclick: () => queueOrder({ kind: 'status', target: id }) }),
+      d.mergeBtn, d.termBtn,
+      h('button', { class: 'btn sm danger', type: 'button', text: 'Clean up…', onclick: () => queueOrder({ kind: 'cleanup', target: id }, { title: `Ask the first mate to clean up “${name()}”?`, body: 'Closes its terminal and workspace once its work is safe.' }) }));
+    d.tabBtns = {};
+    d.panels = {};
+    const tabs = h('div', { class: 'tabs d-tabs', role: 'tablist', 'aria-label': 'Worker' });
+    DRAWER_TABS.forEach(([k, label], i) => {
+      const b = h('button', { class: 'tab', role: 'tab', type: 'button', id: `dtab-${k}`, 'aria-controls': `dpanel-${k}`, title: `${label} (${i + 1})`, onclick: () => showDrawerTab(k) },
+        label, k === 'updates' ? h('span', { class: 'count', text: '0' }) : null);
+      b.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+        const shown = DRAWER_TABS.map(([x]) => x).filter((x) => !d.tabBtns[x].hidden);
+        const next = shown[(shown.indexOf(k) + (e.key === 'ArrowRight' ? 1 : shown.length - 1)) % shown.length];
+        showDrawerTab(next);
+        d.tabBtns[next].focus();
+      });
+      d.tabBtns[k] = b;
+      tabs.append(b);
+    });
+    ui.drawerSub.replaceChildren(d.meta, actions, d.termOpen, tabs);
+
+    // File viewer: replaces the drawer body while open.
     d.fileTitle = h('span', { class: 'mono' });
     d.fileMeta = h('span', { class: 'file-meta' });
     d.fileText = h('pre', { class: 'file-text', tabindex: '0' });
@@ -1018,79 +1046,72 @@
         d.fileTitle, d.fileMeta),
       d.fileText);
 
-    d.info = h('div', { class: 'task-info' });
-    d.decision = h('section', { class: 'drawer-sec decision-sec', hidden: true });
-    d.resume = h('section', { class: 'drawer-sec' });
-    d.config = h('section', { class: 'drawer-sec config-sec' });
+    d.decision = h('section', { class: 'decision-sec', hidden: true });
+    d.latest = h('div', { class: 'latest', hidden: true });
 
-    // Messages to the first mate about this worker.
-    const name = () => (td && td.task && td.task.title) || id;
-    d.mergeBtn = h('button', { class: 'btn', type: 'button', text: 'Merge its pull request', onclick: () => queueOrder({ kind: 'merge', target: id }, { title: `Ask the first mate to merge the pull request of “${name()}”?`, body: (td && td.task && td.task.pr) || null }) });
-    d.ordersList = h('ul', { class: 'list orders compact' });
-    const ordersSec = h('section', { class: 'drawer-sec' },
-      h('h3', { text: 'Ask the first mate' }),
-      h('p', { class: 'hint', text: 'Sent to the first mate to act on; Ship Deck does not do these itself.' }),
-      h('div', { class: 'btn-row' },
-        h('button', { class: 'btn', type: 'button', text: 'Ask for status', onclick: () => queueOrder({ kind: 'status', target: id }) }),
-        h('button', { class: 'btn', type: 'button', onclick: () => { d.resume.scrollIntoView({ block: 'start', behavior: 'smooth' }); const b = d.resume.querySelector('.resume-row .btn'); if (b) b.focus({ preventScroll: true }); } }, icon('i-term'), 'Open in terminal'),
-        d.mergeBtn,
-        h('button', { class: 'btn', type: 'button', text: 'Clean up this worker', onclick: () => queueOrder({ kind: 'cleanup', target: id }, { title: `Ask the first mate to clean up “${name()}”?`, body: 'Closes its terminal and workspace once its work is safe.' }) })),
-      d.ordersList);
+    // Terminal: the live peek, then a one-line message straight to the worker (fm-send).
+    d.peekText = h('pre', { class: 'peek', tabindex: '0', 'aria-label': `Terminal of ${name()}` });
+    d.peekState = h('span', { class: 'peek-state' });
+    d.peekDot = h('span', { class: 'live off' });
+    d.pauseBtn = h('button', { class: 'tbtn', type: 'button', 'aria-pressed': 'false', title: 'Pause refreshing', onclick: () => {
+      d.paused = !d.paused;
+      d.pauseBtn.setAttribute('aria-pressed', String(d.paused));
+      if (!d.paused) refreshPeek();
+      setPeekState();
+    } }, icon('i-pause'), h('span', { class: 'lbl', text: 'Pause' }));
+    const toggle = (key, label, ico, title, apply) => {
+      const btn = h('button', { class: 'tbtn', type: 'button', title, onclick: () => { d[key] = !d[key]; store.set('peek.' + key, d[key] ? '1' : '0'); apply(); } }, icon(ico), h('span', { class: 'lbl', text: label }));
+      d[key] = store.get('peek.' + key) !== '0';
+      return btn;
+    };
+    d.applyWrap = () => { d.peekText.classList.toggle('wrap', d.wrap); d.wrapBtn.setAttribute('aria-pressed', String(d.wrap)); if (d.follow) d.peekText.scrollTop = d.peekText.scrollHeight; };
+    d.applyFollow = () => { d.followBtn.setAttribute('aria-pressed', String(d.follow)); if (d.follow) d.peekText.scrollTop = d.peekText.scrollHeight; };
+    d.wrapBtn = toggle('wrap', 'Wrap', 'i-wrap', 'Wrap long lines (W)', d.applyWrap);
+    d.followBtn = toggle('follow', 'Follow', 'i-follow', 'Stick to the newest line (F)', d.applyFollow);
+    const copyBtn = h('button', { class: 'tbtn', type: 'button', title: 'Copy the visible output', 'aria-label': 'Copy the visible output', onclick: () => copyText(d.peekText.textContent, null).then(() => toast('Terminal output copied', 'ok')) }, icon('i-copy'));
+    d.peekText.addEventListener('scroll', () => {
+      const pre = d.peekText;
+      if (d.follow && pre.scrollHeight - pre.scrollTop - pre.clientHeight > 24) { d.follow = false; d.applyFollow(); }
+    });
+    d.applyWrap(); d.applyFollow();
+    const term = h('div', { class: 'term' },
+      h('div', { class: 'term-bar' }, h('span', { class: 'peek-live' }, d.peekDot, d.peekState), d.wrapBtn, d.followBtn, d.pauseBtn, copyBtn),
+      d.peekText,
+      h('div', { class: 'term-foot' }, h('span', { text: 'Last lines of its terminal, colours kept' }), h('span', { class: 'spacer' }), h('span', { text: 'Read-only. To type into it, use Message the worker.' })));
 
-    // Message the worker directly (fm-send), with a confirmation step.
-    const msg = persist(h('input', { type: 'text', maxlength: '2000', placeholder: 'Message to this worker (one line)…', 'aria-label': `Message to ${id}`, autocomplete: 'off' }), 'msg.' + id);
-    const sendBtn = h('button', { class: 'btn primary', type: 'submit', text: 'Send' });
-    const form = h('form', { class: 'msg-form' }, msg, sendBtn);
+    d.msg = persist(h('input', { class: 'input', type: 'text', maxlength: '2000', placeholder: 'One line, sent straight to this worker', 'aria-label': `Message to ${name()}`, autocomplete: 'off' }), 'msg.' + id);
+    const sendBtn = h('button', { class: 'btn', type: 'submit', text: 'Send…' });
+    const form = h('form', { class: 'msg-form' }, d.msg, sendBtn);
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const text = msg.value.replace(/\s+/g, ' ').trim();
-      if (!text) { msg.focus(); return; }
+      const text = d.msg.value.replace(/\s+/g, ' ').trim();
+      if (!text) { d.msg.focus(); return; }
       if (!await confirmDialog({ title: `Send to “${name()}” now?`, body: text, yes: 'Send now' })) return;
       sendBtn.disabled = true;
       const r = await post('/api/send', { id, message: text });
       sendBtn.disabled = false;
-      if (r.ok) { clearDraft(msg); toast(`Sent to ${name()}`, 'ok'); setTimeout(refreshPeek, 600); }
+      if (r.ok) { clearDraft(d.msg); toast(`Sent to ${name()}`, 'ok'); setTimeout(refreshPeek, 600); }
       else toast(`Send to ${name()} failed: ${r.error || 'unknown error'}`, 'err');
     });
-    d.msgWrap = h('section', { class: 'drawer-sec' },
-      h('h3', { text: 'Message the worker' }),
-      h('p', { class: 'hint', text: 'Types one line straight into its terminal. Use sparingly: it bypasses the first mate.' }),
-      form);
+    d.panels.terminal = h('section', { class: 'd-panel', id: 'dpanel-terminal', role: 'tabpanel', 'aria-labelledby': 'dtab-terminal' },
+      d.latest, term,
+      h('div', { class: 'msg-wrap' }, h('h3', { class: 'h-sec', text: 'Message the worker' }), form,
+        h('p', { class: 'hint', text: 'Goes straight into its terminal and skips the first mate. Use it for quick nudges.' })));
+    d.updates = h('div');
+    d.panels.updates = h('section', { class: 'd-panel', id: 'dpanel-updates', role: 'tabpanel', 'aria-labelledby': 'dtab-updates' }, d.updates);
+    d.details = h('div', { class: 'task-info' });
+    d.ordersList = h('ul', { class: 'list orders' });
+    d.panels.details = h('section', { class: 'd-panel', id: 'dpanel-details', role: 'tabpanel', 'aria-labelledby': 'dtab-details' }, d.details);
+    d.config = h('div', { class: 'config-sec' });
+    d.panels.settings = h('section', { class: 'd-panel', id: 'dpanel-settings', role: 'tabpanel', 'aria-labelledby': 'dtab-settings' }, d.config);
 
-    // Live terminal peek.
-    d.peekText = h('pre', { class: 'peek', tabindex: '0', 'aria-label': `Terminal of ${id}` });
-    d.peekState = h('span', { class: 'peek-state' });
-    d.pauseBtn = h('button', { class: 'btn', type: 'button', 'aria-pressed': 'false', text: 'Pause refresh', onclick: () => {
-      d.paused = !d.paused;
-      d.pauseBtn.textContent = d.paused ? 'Resume refresh' : 'Pause refresh';
-      d.pauseBtn.setAttribute('aria-pressed', d.paused ? 'true' : 'false');
-      if (!d.paused) refreshPeek();
-      setPeekState();
-    } });
-    // Wrap long lines / Follow the newest output; scrolling up stops following.
-    const toggle = (key, label, apply) => {
-      const btn = h('button', { class: 'btn', type: 'button', text: label, onclick: () => { d[key] = !d[key]; store.set('peek.' + key, d[key] ? '1' : '0'); apply(); } });
-      d[key] = store.get('peek.' + key) !== '0';
-      return btn;
-    };
-    const applyWrap = () => { d.peekText.classList.toggle('wrap', d.wrap); d.wrapBtn.setAttribute('aria-pressed', String(d.wrap)); if (d.follow) d.peekText.scrollTop = d.peekText.scrollHeight; };
-    const applyFollow = () => { d.followBtn.setAttribute('aria-pressed', String(d.follow)); if (d.follow) d.peekText.scrollTop = d.peekText.scrollHeight; };
-    d.wrapBtn = toggle('wrap', 'Wrap', applyWrap);
-    d.followBtn = toggle('follow', 'Follow', applyFollow);
-    d.peekText.addEventListener('scroll', () => {
-      const pre = d.peekText;
-      if (d.follow && pre.scrollHeight - pre.scrollTop - pre.clientHeight > 24) { d.follow = false; applyFollow(); }
-    });
-    applyWrap(); applyFollow();
-    d.peekWrap = h('section', { class: 'drawer-sec' },
-      h('div', { class: 'sec-head' }, h('h3', { text: 'Terminal' }), d.peekState, h('div', { class: 'btn-row' }, d.wrapBtn, d.followBtn, d.pauseBtn)),
-      d.peekText);
-
-    d.root = h('div', { class: 'task-drawer' }, d.file, d.decision, d.info, d.resume, d.config, ordersSec, d.peekWrap, d.msgWrap);
+    d.root = h('div', { class: 'task-drawer' }, d.file, d.decision, ...DRAWER_TABS.map(([k]) => d.panels[k]));
     ui.drawerBody.replaceChildren(d.root);
     ui.drawerBody.scrollTop = 0;
-    for (const k of ['drawer-info', 'drawer-orders', 'drawer-decision', 'drawer-resume', 'drawer-config']) sigs.delete(k);
+    for (const k of ['drawer-head', 'drawer-details', 'drawer-orders', 'drawer-decision', 'drawer-updates', 'drawer-resume', 'drawer-config']) sigs.delete(k);
     td = d;
+    d.tabBtns.terminal.hidden = !t.window;
+    showDrawerTab(store.get('drawerTab', 'terminal'));
     if (t.window) startPeek();
   }
 
@@ -1104,13 +1125,14 @@
   const PEEK_MS = 2000;
   let peekTimer = null;
   let peekBusy = false;
-  function setPeekState(text) {
+  function setPeekState(text, on) {
     if (!td) return;
-    if (text !== undefined) td.peekNote = text;
-    td.peekState.textContent = td.paused ? 'paused' : (td.peekNote || '');
+    if (text !== undefined) { td.peekNote = text; td.peekOn = !!on; }
+    td.peekState.textContent = td.paused ? 'Paused' : (td.peekNote || 'Connecting…');
+    td.peekDot.classList.toggle('off', td.paused || !td.peekOn);
   }
   async function refreshPeek() {
-    if (!td || peekBusy || td.paused || document.hidden || !td.file.hidden) return;
+    if (!td || peekBusy || td.paused || document.hidden || !td.file.hidden || td.tab !== 'terminal' || td.tabBtns.terminal.hidden) return;
     const d = td;
     peekBusy = true;
     try {
@@ -1121,15 +1143,15 @@
       if (res.ok) {
         if (d.peekRaw !== body.text || pre.classList.contains('peek-err')) { d.peekRaw = body.text; renderPeek(pre, body.text); }
         pre.classList.remove('peek-err');
-        setPeekState(`live · ${new Date().toLocaleTimeString()}`);
+        setPeekState(`Live, refreshed ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`, true);
       } else {
         pre.textContent = body.error || `HTTP ${res.status}`;
         pre.classList.add('peek-err');
-        setPeekState('unavailable');
+        setPeekState('Unavailable', false);
       }
       if (d.follow) pre.scrollTop = pre.scrollHeight;
     } catch {
-      setPeekState('offline');
+      setPeekState('Offline', false);
     } finally {
       peekBusy = false;
     }
@@ -1157,8 +1179,8 @@
   async function openDataFile(id, name) {
     if (!td || td.id !== id) return;
     const d = td;
-    d.fileTitle.textContent = `data/${id}/${name}`;
-    d.fileMeta.textContent = 'loading…';
+    d.fileTitle.textContent = name;
+    d.fileMeta.textContent = 'Loading…';
     d.fileText.textContent = '';
     d.file.hidden = false;
     d.root.classList.add('viewing-file');
@@ -1168,7 +1190,7 @@
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'HTTP ' + res.status);
       d.fileText.textContent = body.text;
-      d.fileMeta.textContent = `${(body.size / 1024).toFixed(1)} KB${body.truncated ? ' · truncated' : ''} · read-only`;
+      d.fileMeta.textContent = `${(body.size / 1024).toFixed(1)} KB${body.truncated ? ', truncated' : ''}, read-only`;
     } catch (e) {
       d.fileMeta.textContent = '';
       d.fileText.textContent = `Could not open: ${e.message}`;
@@ -1183,37 +1205,40 @@
     return true;
   }
 
-  // ---------- backlog, secondmate and first mate drawers ----------
+  // ---------- queue item, second mate and first mate drawers ----------
   function backlogItem() {
     const list = snap.backlog[selected.section] || [];
     const byIndex = list[selected.index];
     if (byIndex && itemKey(byIndex) === selected.id) return byIndex;
     return list.find((b) => itemKey(b) === selected.id);
   }
+  // Queue tags in words; kind and hold-kind are parser bookkeeping and stay hidden.
+  const TAG_WORDS = { repo: 'Project', since: 'Waiting since', after: 'Starts after', hold: 'On hold', reported: 'Reported', done: 'Done', added: 'Added', landed: 'Landed', due: 'Due', until: 'Until' };
+  const HIDDEN_TAGS = new Set(['kind', 'hold-kind']);
+  const DATE_TAG = new Set(['since', 'reported', 'done', 'added', 'landed', 'due', 'until']);
 
   function renderBacklogDrawer() {
     const b = backlogItem();
-    const sectionName = { captain: 'Needs you', inFlight: 'In progress', queued: 'Waiting', done: 'Done', other: 'Other' }[selected.section] || 'Other';
-    ui.drawerKicker.replaceChildren(`Queue · ${sectionName}${b && b.captainCall && selected.section !== 'captain' ? ' · Needs you' : ''}`, b && b.id ? h('span', { class: 'mono', text: ' · ' + b.id }) : '');
+    const call = b && b.id ? (snap.backlog.calls || []).find((c) => c.id === b.id) : null;
+    const st = call ? B.callStatus() : { captain: B.callStatus(), inFlight: { tone: 'working', flag: 'p', label: 'In progress' }, queued: { tone: 'waiting', flag: 'x', label: 'Up next in the queue' }, done: { tone: 'done', flag: 'c', label: 'Done' } }[selected.section] || { tone: 'waiting', flag: 'x', label: 'In the queue' };
+    ui.drawerKicker.replaceChildren(pillEl(st), h('span', { text: 'From the queue' }));
     ui.drawerTitle.textContent = (b && b.title) || selected.id;
-    if (!b) { ui.drawerBody.replaceChildren(h('p', { text: 'This item is no longer in the queue.' })); return; }
-    if (unchanged('drawer-backlog', selected.id, selected.section, b, (snap.orders && snap.orders.list || []).filter((o) => o.item === b.id))) return;
+    if (!b) { ui.drawerSub.replaceChildren(); ui.drawerBody.replaceChildren(h('p', { text: 'This item is no longer in the queue.' })); return; }
+    if (unchanged('drawer-backlog', selected.id, selected.section, b, call && call.options, (snap.orders && snap.orders.list || []).filter((o) => o.item === b.id))) return;
+    ui.drawerSub.replaceChildren(h('div', { class: 'd-meta' }, ...[b.id ? h('code', { text: b.id }) : null, b.tags.repo ? h('span', { text: b.tags.repo }) : null].filter(Boolean)));
     const kids = [];
-    const call = (snap.backlog.calls || []).find((c) => c.id && c.id === b.id);
-    if (b.id && call) {
-      kids.push(h('section', { class: 'drawer-sec decision-sec' },
-        h('h3', { text: 'Needs you: your answer' }),
-        b.tags.hold ? h('div', { class: 'decision-note', text: b.tags.hold }) : null,
+    if (call) {
+      kids.push(h('section', { class: 'decision-sec tone-needs' },
+        h('h3', null, flagEl('k'), 'Needs your answer'),
+        b.tags.hold ? h('div', { class: 'decision-note', text: sentence(b.tags.hold) }) : null,
         answerPanel({
           options: call.options,
           draftKey: 'call.' + b.id,
-          placeholder: call.options.length ? 'Optional note or your own answer…' : 'Your answer…',
-          send: (opt, extra) => queueOrder({ kind: 'backlog-answer', item: b.id, option: opt ? opt.letter : null, text: answerText(opt, extra) }, {
-            title: opt ? `Answer “${b.title || b.id}” with option ${opt.letter}?` : `Send this answer on “${b.title || b.id}”?`, body: answerText(opt, extra),
-          }),
+          placeholder: call.options.length ? 'Optional note, or your own answer…' : 'Your answer…',
+          send: (opt, extra) => answerCall(b, opt, extra),
         })));
     } else if (b.id && selected.section === 'queued' && !b.checked) {
-      const note = persist(h('textarea', { rows: '2', maxlength: '2000', placeholder: 'Optional instructions for this task…', 'aria-label': 'Instructions' }), 'start.' + b.id);
+      const note = persist(h('textarea', { rows: '2', maxlength: '2000', placeholder: 'Optional instructions for this job…', 'aria-label': 'Instructions' }), 'start.' + b.id);
       kids.push(h('section', { class: 'drawer-sec' },
         h('h3', { text: 'Start this' }),
         h('p', { class: 'hint', text: 'Asks the first mate to start a worker on this queue item.' }),
@@ -1221,30 +1246,33 @@
           if (await startBacklog(b, note.value.trim() ? `Start ${b.id}: ${b.title}\n\n${note.value.trim()}` : null)) clearDraft(note);
         } })))));
     } else if (!b.id) {
-      kids.push(h('p', { class: 'hint', text: 'This item has no id, so it cannot be started from here. Mention it in the Bridge chat instead.' }));
+      kids.push(h('p', { class: 'hint', text: 'This item has no id, so it cannot be started from here. Mention it in the chat instead.' }));
     }
     const dl = h('dl', { class: 'facts' });
-    if (b.captainCall) fact(dl, 'Needs', 'your decision');
-    for (const [k, v] of Object.entries(b.tags || {})) if (!(call && k === 'hold')) fact(dl, k, v.length > 600 ? v.slice(0, 600) + '…' : v);
-    kids.push(h('h3', { text: 'Details' }), dl);
+    for (const [k, v] of Object.entries(b.tags || {})) {
+      if (HIDDEN_TAGS.has(k) || (call && k === 'hold') || k === 'repo') continue;
+      const value = k === 'after' ? titleOf(v) : DATE_TAG.has(k) ? shortDate(v) : v;
+      fact(dl, TAG_WORDS[k] || sentence(k.replace(/-/g, ' ')), value.length > 600 ? value.slice(0, 600) + '…' : value);
+    }
+    if (dl.childNodes.length) kids.push(h('h3', { text: 'Details' }), dl);
     if (b.notes.length) kids.push(h('h3', { text: 'Notes' }), h('pre', { class: 'notes-block', text: b.notes.join('\n') }));
     const mine = ((snap.orders && snap.orders.list) || []).filter((o) => o.item === b.id);
-    if (mine.length) kids.push(h('h3', { text: 'Messages about this item' }), h('ul', { class: 'list orders compact' }, ...mine.slice(0, 6).map(orderRow)));
+    if (mine.length) kids.push(h('h3', { text: 'Messages about this item' }), h('ul', { class: 'list orders' }, ...mine.slice(0, 6).map(orderRow)));
     ui.drawerBody.replaceChildren(...kids);
     if (selected.focus) { selected.focus = false; const ta = ui.drawerBody.querySelector('textarea'); if (ta) ta.focus(); }
   }
 
   function renderSecondmateDrawer() {
     const r = (snap.secondmates.registry || []).find((x) => x.id === selected.id);
-    ui.drawerKicker.replaceChildren('Secondmate');
+    ui.drawerKicker.replaceChildren(h('span', { class: 'pill plain', text: 'Second mate, not running' }));
     ui.drawerTitle.textContent = selected.id;
+    ui.drawerSub.replaceChildren();
     if (!r) { ui.drawerBody.replaceChildren(h('p', { text: 'No longer registered.' })); return; }
     const dl = h('dl', { class: 'facts' });
-    fact(dl, 'About', r.description);
-    fact(dl, 'Home', r.home, true);
-    fact(dl, 'Scope', r.scope);
+    fact(dl, 'About', sentence(r.description));
+    fact(dl, 'Scope', sentence(r.scope));
     fact(dl, 'Projects', r.projects);
-    ui.drawerBody.replaceChildren(dl, h('p', { class: 'empty', text: 'Not running right now.' }));
+    ui.drawerBody.replaceChildren(dl, h('p', { class: 'hint', text: 'The first mate starts it when its lane has work.' }));
   }
 
   // The first mate: monitoring, its own session, and every past worker session (Sessions
@@ -1255,10 +1283,12 @@
     ui.drawerTitle.textContent = 'First mate';
     const sess = snap.firstmate && snap.firstmate.session;
     if (unchanged('drawer-fm', sess, snap.watcher.healthy, !!snap.watcher.lastBeat, snap.orders && snap.orders.pending, snap.homeLabel) && fmSess && fmSess.list.isConnected) return;
+    ui.drawerSub.replaceChildren();
     const dl = h('dl', { class: 'facts' });
     fact(dl, 'Fleet home', snap.homeLabel || snap.home, true);
     fact(dl, 'Monitoring', snap.watcher.lastBeat ? `${snap.watcher.healthy ? 'On' : 'Late'}, last check ${agoLong(snap.watcher.lastBeat)}` : 'Has not checked in');
-    fact(dl, 'Not picked up yet', `${(snap.orders && snap.orders.pending) || 0} message${(snap.orders && snap.orders.pending) === 1 ? '' : 's'}`);
+    const pending = (snap.orders && snap.orders.pending) || 0;
+    fact(dl, 'Not picked up yet', `${pending} message${pending === 1 ? '' : 's'}`);
     const filter = h('input', { class: 'input pane-filter', type: 'search', placeholder: 'Filter sessions…', 'aria-label': 'Filter sessions', autocomplete: 'off', spellcheck: 'false' });
     if (fmSess) filter.value = fmSess.filter.value;
     fmSess = { filter, list: h('ul', { class: 'list sessions' }) };
@@ -1274,9 +1304,8 @@
     loadSessions(false);
   }
 
-
   function openDrawer(sel) {
-    if (!selected || selected.type !== sel.type || selected.id !== sel.id) { stopPeek(); td = null; }
+    if (!selected || selected.type !== sel.type || selected.id !== sel.id) { stopPeek(); td = null; ui.drawerSub.replaceChildren(); }
     sigs.delete('drawer-backlog');
     sigs.delete('drawer-fm');
     const wantFocus = !!sel.focus;
@@ -1304,7 +1333,6 @@
   ui.scrim.addEventListener('click', closeDrawer);
   const openFirstMate = () => { if (snap) openDrawer({ type: 'firstmate', id: 'first-mate' }); };
   ui.firstmate.addEventListener('click', openFirstMate);
-  ui.firstmate.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFirstMate(); } });
 
   // ---------- panel tabs ----------
   let activeTab = 'bridge';
@@ -1429,7 +1457,7 @@
     actLoading = false;
     renderActivity();
   }
-  function clock(ms) { return ms ? new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''; }
+  function clockSec(ms) { return ms ? new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''; }
   function dur(ms) {
     if (ms === null || ms === undefined) return '';
     if (ms < 1000) return ms + 'ms';
@@ -1453,18 +1481,15 @@
     return h('li', { class: `ev ev-${e.kind}` + (e.status ? ' st-' + e.status : '') },
       icon(actIcon(e), 'ev-icon'),
       h('div', { class: 'ev-main' }, main),
-      h('span', { class: 'ev-side' }, evStatus(e), h('time', { class: 'ev-time', text: clock(e.ts) })));
+      h('span', { class: 'ev-side' }, evStatus(e), h('time', { class: 'ev-time', text: clockSec(e.ts) })));
   }
   function renderActivity() {
     const has = act.loaded && !!act.sessionId;
     const label = !has ? 'no session' : act.working ? 'working…' : 'idle';
-    ui.fmPill.hidden = !has;
-    ui.fmPill.textContent = label;
-    ui.fmPill.className = 'fm-pill ' + (act.working ? 'on' : 'off');
     ui.activityDot.hidden = !act.working;
     renderHealth();
     ui.activitySub.textContent = has
-      ? `Live from the first mate's transcript (read-only) · last line ${act.lastAt ? agoLong(act.lastAt) : 'unknown'}`
+      ? `Live from the first mate's Claude Code transcript (read-only). Last line ${act.lastAt ? agoLong(act.lastAt) : 'unknown'}.`
       : act.loaded ? 'No first mate Claude Code transcript found yet.' : 'Loading…';
     const list = [...act.events.values()].sort((a, b) => b.seq - a.seq);
     const latest = list.find((e) => e.kind === 'tool' || e.kind === 'text');
@@ -1473,17 +1498,12 @@
     ui.fmNowText.textContent = !has ? (act.loaded ? 'No session found' : 'Loading…')
       : act.working ? `Working: ${latest && latest.kind === 'tool' ? latest.label.charAt(0).toLowerCase() + latest.label.slice(1) : 'thinking'}`
         : `Idle, last active ${act.lastAt ? agoLong(act.lastAt) : 'a while ago'}`;
-    ui.ticker.hidden = !latest;
-    if (latest) {
-      ui.tickerIcon.replaceChildren(icon(actIcon(latest)));
-      ui.tickerText.textContent = latest.kind === 'text' ? `“${latest.label}”` : latest.label;
-      ui.tickerAge.textContent = latest.status === 'running' ? 'running…' : latest.status === 'failed' ? 'failed · ' + ago(latest.ts) : ago(latest.ts);
-      ui.ticker.classList.toggle('on', act.working);
-    }
+    ui.workingNow.hidden = !(has && act.working);
+    if (has && act.working) ui.workingNowText.textContent = `First mate is ${latest && latest.kind === 'tool' ? latest.label.charAt(0).toLowerCase() + latest.label.slice(1) : 'thinking'}`;
+    ui.fmShipNow.textContent = ui.fmNowText.textContent;
     if (activeTab !== 'activity' || unchanged('feed', act.epoch, act.rev, list.length)) return;
     ui.feed.replaceChildren(...(list.length ? list.map(evRow) : [emptyRow(has ? 'No tool calls in the transcript yet.' : 'Nothing to show until the first mate has a Claude Code session in its home.')]));
   }
-  ui.ticker.addEventListener('click', () => showTab('activity'));
 
   // ---------- bridge chat ----------
   let threadSig = null;
@@ -1525,6 +1545,24 @@
   }
   function excerpt(s, n = 90) { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 
+  // Kind -> icon on an action card in the chat.
+  const KIND_ICON = { merge: 'i-pr', cleanup: 'i-check', 'cleanup-done': 'i-check', status: 'i-eye', 'new-task': 'i-plus', 'backlog-start': 'i-chev', config: 'i-bolt' };
+  // One receipt line under the captain's chat bubble: Answered / Seen / Sent, not seen yet.
+  function receipt(x) {
+    const at = (st) => (x.history || []).find((a) => a.status === st);
+    const t = (a) => (a && a.ts ? ' ' + clock(timeOf(a.ts)) : '');
+    if (x.status === 'done') return h('span', { class: 'receipt done' }, icon('i-check'), `Answered${t(at('done'))}`);
+    if (x.status === 'declined') return h('span', { class: 'receipt no' }, icon('i-x'), `Declined${t(at('declined'))}`);
+    if (x.status === 'acknowledged') return h('span', { class: 'receipt' }, icon('i-eye'), `Seen${t(at('acknowledged'))}`);
+    return h('span', { class: 'receipt wait' }, icon('i-dash'), `Sent ${clock(timeOf(x.ts))}, not seen yet`);
+  }
+  // The worker an order names, as a chip with its flag.
+  function refChip(id) {
+    const t = snap && snap.tasks.find((w) => w.id === id);
+    const st = t ? taskStatus(t) : null;
+    return h('button', { class: 'ref', type: 'button', title: t ? `${st.label}: open details` : id, onclick: () => (t ? openDrawer({ type: 'task', id }) : null), disabled: !t },
+      st ? flagEl(st.flag) : null, titleOf(id));
+  }
   function threadItem(x, prev, byId) {
     const when = timeOf(x.ts);
     const stampEl = h('time', { datetime: x.ts || '', title: x.ts ? new Date(when).toLocaleString() : '', text: clock(when) });
@@ -1533,32 +1571,30 @@
       body.innerHTML = MD.render(x.text, { breaks: true }); // escaped by the renderer
       const ref = x.inReplyTo && byId.get(x.inReplyTo);
       const quote = ref && !(prev && prev.id === ref.id)
-        ? h('button', { class: 'quote', type: 'button', title: 'Show the message this answers', onclick: () => flashMessage(ref.id) }, 'Re: ', excerpt(ref.text, 70))
+        ? h('button', { class: 'quote', type: 'button', title: 'Show the message this answers', onclick: () => flashMessage(ref.id) }, 'Re: ', excerpt(ref.text || L.kindLabel(ref.kind), 70))
         : null;
       const unread = !seenId || x.id > seenId;
       return h('li', { class: 'msg mate' + (unread && seenId !== null ? ' unread' : ''), 'data-id': x.id },
         h('span', { class: 'fm-avatar small', 'aria-hidden': 'true' }, icon('i-helm')),
         h('div', { class: 'msg-col' }, h('div', { class: 'msg-meta' }, h('strong', { text: 'First mate' }), stampEl), quote, x.text ? body : null, attachmentsBlock(x.attachments)));
     }
-    const isChat = x.kind === 'chat';
-    const head = isChat ? null : h('div', { class: 'order-head' }, h('span', { class: 'o-kind', text: L.kindLabel(x.kind) }), x.target ? h('span', { text: titleOf(x.target), title: x.target }) : null,
-      payloadText(x) ? h('span', { class: 'o-extra', text: payloadText(x) }) : null);
-    return h('li', { class: 'msg captain' + (isChat ? '' : ' action'), 'data-id': x.id },
-      h('div', { class: 'msg-col' },
-        h('div', { class: 'msg-meta' }, stampEl, chip(x.status)),
-        h('div', { class: 'bubble' + (x.text || head ? '' : ' bare') }, head, x.text ? h('div', { class: 'bubble-text', text: x.text }) : null, attachmentsBlock(x.attachments)),
-        x.history && x.history.length ? lifecycle(x) : null));
+    if (x.kind === 'chat') {
+      return h('li', { class: 'msg captain', 'data-id': x.id },
+        h('div', { class: 'msg-col' },
+          h('div', { class: 'bubble' + (x.text ? '' : ' bare'), title: x.ts ? `Sent ${new Date(when).toLocaleString()}` : null }, x.text ? h('div', { class: 'bubble-text', text: x.text }) : null, attachmentsBlock(x.attachments)),
+          receipt(x)));
+    }
+    // Any other order is an action card: what was asked, about whom, and how far it got.
+    const extra = payloadText(x);
+    return h('li', { class: 'msg captain action', 'data-id': x.id },
+      h('div', { class: 'action-card' },
+        h('div', { class: 'ac-head' }, x.kind === 'decision' || x.kind === 'backlog-answer' ? flagEl('k') : icon(KIND_ICON[x.kind] || 'i-chat'),
+          h('span', { text: L.kindLabel(x.kind) }), x.target ? refChip(x.target) : null),
+        extra ? h('div', { class: 'ac-extra', text: extra }) : null,
+        x.text ? h('div', { class: 'ac-text', text: x.text }) : null,
+        attachmentsBlock(x.attachments),
+        lifecycle(x)));
   }
-
-  function flashMessage(id) {
-    const el = ui.thread.querySelector(`[data-id="${CSS.escape(id)}"]`);
-    if (!el) return;
-    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    el.classList.remove('flash');
-    void el.offsetWidth;
-    el.classList.add('flash');
-  }
-
   function renderThread() {
     const wasBottom = !threadRendered || nearBottom();
     const byId = new Map(thread.map((x) => [x.id, x]));
@@ -1802,8 +1838,9 @@
   }
   function updateSendState() {
     const busy = attBusy();
+    ui.suggest.hidden = !!ui.chatText.value.trim() || outgoing.length > 0; // suggestions only for an empty composer
     ui.chatSend.disabled = busy;
-    ui.chatHint.textContent = busy ? 'Waiting for attachments…' : 'Enter to send · Shift+Enter for a new line';
+    ui.chatHint.textContent = busy ? 'Waiting for attachments…' : 'Enter to send, Shift+Enter for a new line';
   }
 
   // Attachments in the thread, served by GET /api/attachments/<id>. Elements are
@@ -1815,7 +1852,7 @@
       const stills = a.frames ? `${a.frameCount} stills for the first mate` : 'no stills';
       return h('figure', { class: 'att-video' },
         h('video', { src, controls: true, preload: 'metadata', playsinline: true, onloadedmetadata: mediaLoaded }),
-        h('figcaption', { title: a.path || '' }, a.name, ' · ', stills));
+        h('figcaption', null, a.name, ', ', stills));
     }
     return h('button', { class: 'att-img', type: 'button', title: `${a.name} (click to enlarge)`, onclick: () => openLightbox(src, a.name) },
       h('img', { src, alt: a.name, loading: 'lazy', onload: mediaLoaded }));
@@ -1864,7 +1901,17 @@
     addFiles([...e.dataTransfer.files]);
   });
 
+  // Suggestions fill the box (never send on their own).
+  ui.suggest.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-text]');
+    if (!b) return;
+    ui.chatText.value = b.dataset.text;
+    ui.chatText.dispatchEvent(new Event('input'));
+    ui.chatText.focus();
+  });
   persist(ui.chatText, 'chat');
+  ui.chatText.addEventListener('input', updateSendState);
+  updateSendState();
   ui.chatForm.addEventListener('submit', (e) => { e.preventDefault(); sendChat(); });
   ui.chatText.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !e.altKey) { e.preventDefault(); sendChat(); }
@@ -1958,7 +2005,7 @@
   }
 
   // ---------- health strip ----------
-  // Deck running · First mate listening (transcript activity < 2 min) · Monitoring · Last update.
+  // First mate listening (transcript activity < 2 min), Monitoring, Updated; "Deck offline" only when it is.
   function setHealth(el, cls, text, title) {
     el.classList.remove('ok', 'warn', 'err');
     if (cls) el.classList.add(cls);
@@ -1974,20 +2021,22 @@
       fmAt ? `Last first mate activity ${agoLong(fmAt)}` : 'No first mate activity seen yet');
     const w = snap.watcher;
     setHealth(ui.healthMon, w.lastBeat ? (w.healthy ? 'ok' : 'warn') : 'err',
-      w.lastBeat ? (w.healthy ? 'Monitoring' : 'Monitoring late') : 'Not monitoring',
+      w.lastBeat ? (w.healthy ? 'Monitoring on' : 'Monitoring late') : 'Not monitoring',
       w.lastBeat ? `Last monitoring check ${agoLong(w.lastBeat)}` : 'Monitoring has not checked in');
-    ui.healthTime.textContent = lastOkAt ? `Updated ${new Date(lastOkAt).toLocaleTimeString()}` : '';
+    ui.healthTime.textContent = lastOkAt ? `Updated ${new Date(lastOkAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : '';
   }
 
   // First run: the server found no firstmate home, so explain how to point it at one.
   function renderFirstRun() {
     document.body.classList.add('first-run-mode');
     ui.firstRun.hidden = false;
-    ui.home.textContent = 'No firstmate home yet';
-    ui.firstRunChecked.replaceChildren(...['--home flag', 'FM_HOME', ...(snap.checked || [])].map((p) => h('li', { text: p })));
+    ui.home.textContent = 'No firstmate folder yet';
+    ui.firstRunChecked.replaceChildren(...['The --home flag', 'The FM_HOME variable', ...(snap.checked || [])].map((p, i) =>
+      h('li', null, h('span', { class: 'ic todo' }, icon('i-dash')), h('div', null, i < 2 ? h('b', { text: p }) : h('code', { text: p }), h('span', { text: i < 2 ? 'Not set' : 'Not a firstmate folder' })))));
     ui.healthFm.hidden = true;
     ui.healthMon.hidden = true;
   }
+  $('fr-copy').addEventListener('click', (e) => copyText($('fr-cmd').textContent, e.currentTarget));
 
   // ---------- wiring ----------
   function renderAll() {
@@ -2010,7 +2059,7 @@
     ui.sync.classList.toggle('ok', ok);
     ui.sync.classList.toggle('err', !ok);
     ui.syncText.textContent = text;
-    if (ok) { ui.sync.classList.remove('tick'); void ui.sync.offsetWidth; ui.sync.classList.add('tick'); }
+    ui.sync.hidden = ok; // the strip only mentions the deck itself when it is offline
   }
 
   // Polls every POLL_MS; after a failure it backs off up to 15 s and shows the banner.
@@ -2060,21 +2109,152 @@
   if (firstHash) firstHash = decodeURIComponent(firstHash);
 
   ui.search.addEventListener('input', () => { query = ui.search.value.trim().toLowerCase(); renderAll(); });
+  // ---------- keyboard: shortcuts and the "?" sheet ----------
+  // The sheet is built from this list, so it always matches what the keys do.
+  const SHORTCUTS = [
+    ['Get around', [
+      [['/'], 'Filter the board'], [['⌘', 'K'], 'Filter (also Ctrl+K)'],
+      [['G', 'then', 'B'], 'Board view'], [['G', 'then', 'S'], 'Ship view'],
+      [['G', 'then', 'C'], 'Chat with the first mate'], [['G', 'then', 'A'], 'First mate activity'],
+      [['G', 'then', 'L'], "Ship's Library"], [['Esc'], 'Close or go back'],
+    ]],
+    ['On the board', [
+      [['J', 'K'], 'Next or previous card'], [['←', '→'], 'Previous or next column'],
+      [['Enter'], 'Open the selected card'], [['N'], 'Next thing that needs you'],
+      [['A', '…', 'H'], 'Pick an option on the selected card'],
+    ]],
+    ['In a worker', [
+      [['1', '2', '3', '4'], 'Switch tab (terminal to settings)'],
+      [['W'], 'Wrap long lines'], [['F'], 'Follow new output'],
+      [['O'], 'Open the pull request'], [['M'], 'Message the worker'],
+    ]],
+    ['Chat', [
+      [['Enter'], 'Send'], [['Shift', 'Enter'], 'New line'], [['⌘', 'V'], 'Paste a screenshot'],
+    ]],
+  ];
+  function renderShortcuts() {
+    const keys = (list) => h('span', { class: 'keys' }, ...list.map((k) => (k === 'then' || k === '…' ? h('span', { text: k }) : h('span', { class: 'kbd', text: k }))));
+    const group = ([title, rows]) => h('div', { class: 'sc-group' }, h('h3', { text: title }), ...rows.map(([k, what]) => h('div', { class: 'sc' }, h('span', { text: what }), keys(k))));
+    const flags = h('div', { class: 'sc-group' }, h('h3', { text: 'What the flags mean' }), h('div', { class: 'sc-flags' },
+      ...B.TONE_ORDER.map((tone) => h('div', null, flagEl(B.TONES[tone].flag, 'lg'), h('b', { text: B.TONES[tone].word }), h('i', { text: B.TONES[tone].meaning })))));
+    ui.shortcutsBody.replaceChildren(h('div', null, group(SHORTCUTS[0]), group(SHORTCUTS[1])), h('div', null, group(SHORTCUTS[2]), group(SHORTCUTS[3]), flags));
+  }
+  let shortcutsBack = null;
+  function openShortcuts() {
+    if (!ui.shortcutsBody.childElementCount) renderShortcuts();
+    shortcutsBack = document.activeElement;
+    ui.shortcuts.hidden = false;
+    ui.shortcutsScrim.hidden = false;
+    ui.shortcuts.focus();
+  }
+  function closeShortcuts() {
+    ui.shortcuts.hidden = true;
+    ui.shortcutsScrim.hidden = true;
+    if (shortcutsBack && shortcutsBack.isConnected) shortcutsBack.focus({ preventScroll: true });
+  }
+  ui.helpBtn.addEventListener('click', openShortcuts);
+  ui.shortcutsClose.addEventListener('click', closeShortcuts);
+  ui.shortcutsScrim.addEventListener('click', closeShortcuts);
+
+  // Cards (board) or berths (ship) in reading order, column by column.
+  function navItems() {
+    if (view === 'ship') return [...ui.areas.querySelectorAll('.berth:not(.hidden-by-filter)')];
+    return [...ui.cols.querySelectorAll('.card-link')];
+  }
+  function currentItem(items) {
+    const a = document.activeElement;
+    return items.findIndex((el) => el === a || (a && el.closest('.bcard, .row-card') && el.closest('.bcard, .row-card').contains(a)));
+  }
+  function focusItem(el) {
+    if (!el) return;
+    el.focus();
+    el.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  }
+  function moveColumn(dir) {
+    const cols = [...ui.cols.querySelectorAll('.col')];
+    const here = document.activeElement && document.activeElement.closest('.col');
+    let i = cols.indexOf(here);
+    for (let n = 0; n < cols.length; n++) {
+      i = i < 0 ? 0 : (i + dir + cols.length) % cols.length;
+      const first = cols[i].querySelector('.card-link');
+      if (first) return focusItem(first);
+    }
+  }
+  const modalOpen = () => !ui.lightbox.hidden || !!confirmResolve || !ui.library.hidden || !ui.jobSheet.hidden || !ui.shortcuts.hidden;
   const editable = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+  let gPending = 0;
   document.addEventListener('keydown', (e) => {
-    if (e.key === '/' && !editable(document.activeElement) && !e.metaKey && !e.ctrlKey && !e.altKey) {
-      e.preventDefault();
-      if (!ui.library.hidden) { ui.libraryFilter.focus(); ui.libraryFilter.select(); } else { ui.search.focus(); ui.search.select(); }
-    } else if (e.key === 'Escape') {
+    const typing = editable(document.activeElement);
+    if (e.key === 'Escape') {
       if (!ui.lightbox.hidden) closeLightbox();
       else if (confirmResolve) confirmResolve(false);
+      else if (!ui.shortcuts.hidden) closeShortcuts();
+      else if (!ui.jobSheet.hidden) closeJobSheet();
       else if (!ui.library.hidden) closeLibrary();
-      else if (selected && closeDataFile()) { /* back to the crew details */ }
+      else if (selected && closeDataFile()) { /* back to the worker */ }
       else if (selected) closeDrawer();
       else if (document.activeElement === ui.search && ui.search.value) { ui.search.value = ''; query = ''; renderAll(); }
-    } else if (e.key === 'Enter' && confirmResolve && !editable(document.activeElement) && document.activeElement !== ui.confirmNo) {
+      else if (typing) document.activeElement.blur();
+      return;
+    }
+    if (e.key === 'Enter' && confirmResolve && !typing && document.activeElement !== ui.confirmNo) {
       e.preventDefault();
       confirmResolve(true);
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'k' && !modalOpen()) {
+      e.preventDefault();
+      ui.search.focus();
+      ui.search.select();
+      return;
+    }
+    if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === '?') { e.preventDefault(); if (ui.shortcuts.hidden) { if (!modalOpen()) openShortcuts(); } else closeShortcuts(); return; }
+    if (modalOpen()) return;
+    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (k === '/') {
+      e.preventDefault();
+      ui.search.focus();
+      ui.search.select();
+      return;
+    }
+    if (gPending && Date.now() - gPending < 1500) {
+      gPending = 0;
+      const go = { b: () => setView('board'), s: () => setView('ship'), c: () => { showTab('bridge'); ui.chatText.focus(); }, a: () => showTab('activity'), l: () => openLibrary() }[k];
+      if (go) { e.preventDefault(); if (selected && k !== 'c' && k !== 'a') closeDrawer(); go(); }
+      return;
+    }
+    if (k === 'g') { gPending = Date.now(); return; }
+    // In an open worker drawer.
+    if (selected && selected.type === 'task' && td) {
+      const tab = { 1: 'terminal', 2: 'updates', 3: 'details', 4: 'settings' }[k];
+      if (tab) { e.preventDefault(); showDrawerTab(tab); td.tabBtns[td.tab].focus(); return; }
+      if (k === 'w' || k === 'f') { e.preventDefault(); showDrawerTab('terminal'); (k === 'w' ? td.wrapBtn : td.followBtn).click(); return; }
+      if (k === 'o' && td.prLink) { e.preventDefault(); window.open(td.prLink, '_blank', 'noopener,noreferrer'); return; }
+      if (k === 'm' && !td.tabBtns.terminal.hidden) { e.preventDefault(); showDrawerTab('terminal'); td.msg.focus(); return; }
+      return;
+    }
+    if (selected) return;
+    // On the board or the ship.
+    const items = navItems();
+    if (k === 'j' || k === 'k') {
+      e.preventDefault();
+      const i = currentItem(items);
+      focusItem(items[i < 0 ? 0 : Math.min(items.length - 1, Math.max(0, i + (k === 'j' ? 1 : -1)))]);
+    } else if ((k === 'ArrowRight' || k === 'ArrowLeft') && view === 'board' && (currentItem(items) >= 0 || document.activeElement === document.body)) {
+      e.preventDefault();
+      moveColumn(k === 'ArrowRight' ? 1 : -1);
+    } else if (k === 'n') {
+      e.preventDefault();
+      if (view !== 'board') setView('board');
+      const needs = [...ui.cols.querySelectorAll('.col[data-col="needs"] .card-link')];
+      if (!needs.length) { toast('Nothing needs you right now', 'ok'); return; }
+      const i = needs.indexOf(document.activeElement);
+      focusItem(needs[(i + 1) % needs.length]);
+    } else if (/^[a-h]$/.test(k) && view === 'board') {
+      const card = document.activeElement && document.activeElement.closest('.bcard');
+      const opt = card && card.querySelector(`.opt[data-letter="${k.toUpperCase()}"]`);
+      if (opt) { e.preventDefault(); opt.click(); }
     }
   });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { poll(); refreshPeek(); markSeen(); } });
@@ -2085,7 +2265,7 @@
 
   function renderLibraryList() {
     const q = ui.libraryFilter.value.trim().toLowerCase();
-    const shown = libEntries.filter((e) => !q || [e.group, e.label, e.description].join(' ').toLowerCase().includes(q));
+    const shown = libEntries.filter((e) => !q || [e.group, e.title, e.label, e.description].join(' ').toLowerCase().includes(q));
     const groups = [];
     for (const e of shown) {
       let g = groups.find((x) => x.name === e.group);
@@ -2093,13 +2273,13 @@
       g.items.push(e);
     }
     ui.libraryList.replaceChildren(...(groups.length ? groups.map((g) => h('div', { class: 'lib-group' },
-      h('h3', null, g.name, h('span', { class: 'lib-count', text: g.items.length })),
+      h('h3', null, g.name, h('span', { class: 'count', text: g.items.length })),
       h('ul', { class: 'lib-items' }, ...g.items.map((e) => h('li', null, h('button', {
         class: 'lib-item' + (e.exists ? '' : ' missing') + (e.key === libKey ? ' active' : '') + (e.description !== undefined ? ' skill' : ''), type: 'button',
-        'aria-current': e.key === libKey ? 'true' : null, title: e.description || e.path,
+        'aria-current': e.key === libKey ? 'true' : null, title: e.where || e.label,
         onclick: () => openLibraryEntry(e.key),
-      }, h('span', { class: 'lib-line' }, h('span', { class: 'lib-name', text: e.label }), h('span', { class: 'lib-age', text: e.exists ? ago(e.mtime) : 'missing' })),
-      e.description ? h('span', { class: 'lib-desc', text: e.description }) : null)))))) : [h('p', { class: 'empty', text: 'No files match.' })]));
+      }, h('span', { class: 'lib-line' }, h('span', { class: 'lib-name', text: e.title || e.label }), h('span', { class: 'lib-age', text: e.exists ? agoLong(e.mtime) : 'Not created yet' })),
+      e.description ? h('span', { class: 'lib-desc', text: e.description }) : h('span', { class: 'lib-desc mono', text: e.where || e.label }))))))) : [h('p', { class: 'empty', text: 'Nothing matches.' })]));
   }
   async function openLibraryEntry(key) {
     libKey = key;
@@ -2114,13 +2294,12 @@
       const isSkill = e.description !== undefined;
       const head = h('header', { class: 'doc-head' },
         h('p', { class: 'doc-kicker', text: e.group }),
-        h('h2', { class: 'mono', text: e.label }),
+        h('h2', { text: e.title || e.label }),
         isSkill && e.description ? h('p', { class: 'doc-desc', text: e.description }) : null,
-        h('p', { class: 'doc-meta', text: e.exists
-          ? `${e.path} · modified ${agoLong(e.mtime)} (${whenText(e.mtime)}) · ${(e.size / 1024).toFixed(1)} KB${body.truncated ? ' · truncated' : ''}`
-          : e.path }));
+        h('p', { class: 'doc-meta' }, h('code', { text: e.where || e.label }), e.exists
+          ? `, changed ${whenText(e.mtime)}, ${(e.size / 1024).toFixed(1)} KB${body.truncated ? ', truncated' : ''}` : ''));
       if (body.text === null) {
-        ui.libraryDoc.replaceChildren(head, h('div', { class: 'doc-missing' }, h('strong', { text: 'Missing' }), h('span', { text: 'This file does not exist (yet). Nothing to show.' })));
+        ui.libraryDoc.replaceChildren(head, h('div', { class: 'doc-missing' }, h('strong', { text: 'Not created yet' }), h('span', { text: 'The first mate has not written this file. It shows up here once it does.' })));
       } else {
         const md = h('div', { class: 'md' });
         md.innerHTML = MD.render(body.text, { frontmatter: isSkill ? 'hide' : 'show' }); // escaped by the renderer
