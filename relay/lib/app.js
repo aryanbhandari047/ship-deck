@@ -5,13 +5,16 @@
 //   user:<email> account   sess:<hash> session   cap:<sub> captain record (devices + grants)
 //   snap:<sub> latest snapshot (1 h TTL)   vix:<email> captains sharing with an email
 //   aud:<sub> / aud:auth append-only audit (90 days)   aseen:... 15-minute audit de-dupe
+//   setup:used the one-time owner setup link was spent
+const crypto = require('node:crypto');
 const { createAuth, AuthError } = require('../auth');
+const { MAX_FAILURES, LOCK_SEC } = require('../auth/password');
 const { randomId, sha256 } = require('../auth/tokens');
 const { sessionKey } = require('../auth/sessions');
 const { sanitizeSnapshot, viewFor, MAX_BYTES } = require('./snapshot');
 const { validateGrant, findGrant, checkAccess, GrantError } = require('./access');
 const { StoreError } = require('./store');
-const { HttpError, sendJson, readJson, clientIp, sameOrigin, bearer } = require('./http');
+const { HttpError, BASE_HEADERS, sendJson, readJson, clientIp, sameOrigin, bearer } = require('./http');
 
 const SNAP_TTL = 3600;
 const AUDIT_DAYS = 90;
@@ -87,6 +90,44 @@ function createRelay({ config, store, now = Date.now, log = (m) => console.error
     });
   }
 
+  // True when any account exists. SCAN, not KEYS: user:* keys have no index of their own.
+  async function hasAccounts() {
+    let cursor = '0';
+    do {
+      const [next, keys] = await store.cmd(['SCAN', cursor, 'MATCH', 'user:*', 'COUNT', 1000]);
+      if (keys && keys.length) return true;
+      cursor = String(next);
+    } while (cursor !== '0');
+    return false;
+  }
+  // Hashing first gives equal-length buffers, so the compare leaks neither content nor length.
+  const codeMatches = (got, want) => crypto.timingSafeEqual(Buffer.from(sha256(String(got))), Buffer.from(sha256(want)));
+
+  // GET /api/auth/setup?code=: the first captain's one-time link. Every refusal is the same 404;
+  // wrong codes count toward the per-IP login lockout. Never logs the code or the invite token.
+  async function ownerSetup(req, res, url) {
+    req.resume();
+    const notFound = () => sendJson(res, 404, { error: 'not found' });
+    if (config.setupCode.length < 32 || !config.ownerEmail || !auth.emailAllowed(config.ownerEmail) || !auth.provider.createInvite) return notFound();
+    const ip = clientIp(req, config.trustProxy);
+    const ki = 'fail:ip:' + ip;
+    const [used, fails] = await store.cmd(['MGET', 'setup:used', ki]);
+    if (used || (await hasAccounts())) return notFound();
+    const audit = (result, reason) => store.pipeline(auditCmds('auth', { who: 'owner setup link', what: 'Owner setup link opened', result, reason, ip }));
+    if (Number(fails) >= MAX_FAILURES) { await audit('refused', 'locked for 15 minutes'); return notFound(); }
+    if (!codeMatches(url.searchParams.get('code') || '', config.setupCode)) {
+      const [n] = await store.pipeline([['INCR', ki], ['EXPIRE', ki, LOCK_SEC]]);
+      await audit('refused', Number(n) >= MAX_FAILURES ? 'wrong code, locked for 15 minutes' : 'wrong code');
+      return notFound();
+    }
+    // NX makes the link single-use even when two clicks race.
+    if ((await store.cmd(['SET', 'setup:used', String(now()), 'NX'])) !== 'OK') return notFound();
+    const inv = await auth.provider.createInvite({ email: config.ownerEmail, by: 'setup' });
+    await audit('ok', 'invite created for ' + inv.email);
+    res.writeHead(302, { ...BASE_HEADERS, Location: inv.link, 'Content-Length': 0 });
+    res.end();
+  }
+
   function sessionCookieHeaders(id) { return { 'Set-Cookie': auth.sessions.cookie(id) }; }
   function guardCookiePost(req) {
     if (!sameOrigin(req, config.baseUrl)) throw new HttpError(403, 'cross-site request refused');
@@ -104,6 +145,7 @@ function createRelay({ config, store, now = Date.now, log = (m) => console.error
         sendJson(res, 200, { ok: true, viewer: { email: who.email, name: who.name } }, sessionCookieHeaders(id));
       },
     }],
+    ['/api/auth/setup', { GET: ownerSetup }],
     ['/api/auth/logout', {
       POST: async (req, res) => {
         guardCookiePost(req);

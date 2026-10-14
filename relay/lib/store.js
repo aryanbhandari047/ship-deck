@@ -97,6 +97,11 @@ function createMemoryStore({ now = Date.now } = {}) {
         if (li >= 0) rows = rows.slice(Number(a[li + 1]), Number(a[li + 1]) + Number(a[li + 2]));
         return rows;
       }
+      case 'SCAN': { // one pass: MATCH with a trailing * only, COUNT ignored
+        const mi = a.findIndex((x) => x.toUpperCase() === 'MATCH');
+        const pre = mi >= 0 ? a[mi + 1].replace(/\*$/, '') : '';
+        return ['0', [...data.keys()].filter((x) => x.startsWith(pre) && live(x))];
+      }
       default: throw new StoreError('unsupported command ' + name);
     }
   }

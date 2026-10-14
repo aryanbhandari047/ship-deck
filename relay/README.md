@@ -80,9 +80,14 @@ number of viewers watching at once; nothing bills either way.
    integration to the project sets `KV_REST_API_URL`/`KV_REST_API_TOKEN`, which work as is.
 4. **Deploy**, then open `https://<project>.vercel.app/`: you should see "Sign in to see
    shared decks". Set `PUBLIC_BASE_URL` to exactly that origin and redeploy if it changed.
-5. **First account.** On your own computer, from this folder:
-   `UPSTASH_REDIS_REST_URL=… UPSTASH_REDIS_REST_TOKEN=… PUBLIC_BASE_URL=https://<project>.vercel.app node scripts/bootstrap-owner.js you@keychain.com`.
-   Open the printed link (24 h, single use) and set a password of at least 12 characters.
+5. **First account.** Set `OWNER_EMAIL` and `SETUP_CODE` (random 48 characters, e.g.
+   `openssl rand -base64 36`), redeploy, open
+   `https://<project>.vercel.app/api/auth/setup?code=<SETUP_CODE>` and set a password of at
+   least 12 characters. Then remove `SETUP_CODE` and redeploy. The link works once (a second
+   click is a 404, even before the password is set) and only while the relay has no
+   accounts. Fallback, from this folder on your own computer:
+   `UPSTASH_REDIS_REST_URL=… UPSTASH_REDIS_REST_TOKEN=… PUBLIC_BASE_URL=https://<project>.vercel.app node scripts/bootstrap-owner.js you@keychain.com`,
+   then open the printed link (24 h, single use).
 6. **Share.** Start Ship Deck with `--share --share-relay https://<project>.vercel.app`,
    open Settings > Sharing (the share button in the top bar), sign in, add teammates, and send
    each new person the invite link it shows (Slack or email; the relay sends no email).
@@ -95,6 +100,7 @@ number of viewers watching at once; nothing bills either way.
 | `ALLOWED_HD` | `keychain.com`. The only email domain that can hold an account, exact match. |
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | From Upstash. `KV_REST_API_URL`/`KV_REST_API_TOKEN` (Marketplace names) also work. |
 | `OWNER_EMAIL` | Optional. This account also sees every sign-in attempt (failures, lockouts) in its audit log. |
+| `SETUP_CODE` | Only for the first account (step 5): 32+ random characters (48 suggested). Remove it once you have signed in. |
 | `AUTH_PROVIDER` | Optional, `password` (the only one today). |
 
 The relay refuses to serve (503 "relay not configured", reason in the function log) when it
@@ -129,6 +135,11 @@ fails when they drift.
   single use, and a newer invite for the same email replaces the older. The token is in the
   fragment, so it never reaches logs. Opening it sets the password and signs in. Re-inviting
   an existing account is the password reset and ends its other sessions.
+- **Owner setup link.** `GET /api/auth/setup?code=<SETUP_CODE>` answers only while
+  `SETUP_CODE` (32+ characters) and `OWNER_EMAIL` are set and no account exists. The code is
+  compared in constant time; a match creates the usual invite for `OWNER_EMAIL`, redirects
+  (302) to it and records `setup:used`, so the link works once. Every refusal is the same
+  404; wrong codes are audited to `OWNER_EMAIL`'s log and count toward the per-IP lockout.
 - **Passwords:** at least 12 characters, scrypt (N=16384, r=8, p=1) with a random salt per
   user, constant-time compare, never logged, stored or returned.
 - **Lockout:** 5 failures for an email or from an IP lock both for 15 minutes; failures and
@@ -146,6 +157,7 @@ fails when they drift.
 | Route | Who | |
 |---|---|---|
 | `POST /api/auth/login`, `/api/auth/logout`, `/api/auth/accept` | browser | sign in, sign out, set a password from an invite |
+| `GET /api/auth/setup?code=` | browser | one-time owner setup link: 302 to an invite for `OWNER_EMAIL` |
 | `POST /v1/device/login`, `DELETE /v1/device` | deck | get or revoke this deck's token |
 | `POST /v1/snapshot` | deck token | store the latest snapshot (re-sanitised against the allow-list, 64 KB) |
 | `GET /v1/grants`, `PUT /v1/grants/<email>`, `DELETE /v1/grants/<email or sub>` | deck token | the captain's grants (`?brief=1`: no account or last-viewed lookups) |

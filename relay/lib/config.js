@@ -8,6 +8,8 @@ function loadConfig(env = process.env) {
     domain: String(env.ALLOWED_HD || 'keychain.com').trim().toLowerCase(),
     sessionSecret: env.SESSION_SECRET || '',
     ownerEmail: String(env.OWNER_EMAIL || '').trim().toLowerCase() || null,
+    // One-time owner setup link (GET /api/auth/setup), unset once the owner has an account.
+    setupCode: String(env.SETUP_CODE || ''),
     authProvider: env.AUTH_PROVIDER || 'password',
     upstash: {
       url: env.UPSTASH_REDIS_REST_URL || env.KV_REST_API_URL || '',

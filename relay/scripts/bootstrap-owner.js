@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// One-time bootstrap: prints an invite link for the first captain, straight into the production
+// Fallback for the owner setup link (README step 5): prints an invite link for the first captain, straight into the production
 // store. Run on your own machine with the Upstash REST env vars and PUBLIC_BASE_URL set:
 //   UPSTASH_REDIS_REST_URL=... UPSTASH_REDIS_REST_TOKEN=... PUBLIC_BASE_URL=https://<relay> \
 //     node scripts/bootstrap-owner.js you@keychain.com
