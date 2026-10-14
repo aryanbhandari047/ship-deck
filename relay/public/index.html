@@ -11,7 +11,7 @@
 </head>
 <body class="viewer-page">
   <!-- Same symbols as the deck's public/index.html (test/share.test.js keeps shared ids identical). -->
-  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <svg class="sprite" width="0" height="0" aria-hidden="true" focusable="false">
     <defs>
       <symbol id="flag-k" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="15" height="20" style="fill:var(--signal-yellow)"/><rect x="15" width="15" height="20" style="fill:var(--signal-blue)"/></g></symbol>
       <symbol id="flag-v" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="30" height="20" style="fill:var(--flag-white)"/><path d="M0 0L30 20M30 0L0 20" style="stroke:var(--signal-red)" stroke-width="5"/></g><rect x=".5" y=".5" width="29" height="19" rx="1.5" fill="none" style="stroke:var(--flag-edge)"/></symbol>
@@ -73,6 +73,7 @@
       <svg class="ico" aria-hidden="true"><use href="#i-eye"/></svg>
       <span>You are viewing <b id="vb-name"></b> deck</span>
       <span class="ro"><svg aria-hidden="true"><use href="#i-lock"/></svg>Read-only</span>
+      <span class="muted v-health" id="vb-health"></span>
       <span class="age" id="vb-age"></span>
     </div>
     <main class="v-main">

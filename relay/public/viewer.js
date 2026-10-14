@@ -127,7 +127,7 @@
     if (board.offline) note.textContent = `${possessive(first(board.captain.name))} deck is offline: no update in the last hour. You will see it again when their Ship Deck is running.`;
     renderBoard();
     renderAside();
-    if (++polls % 10 === 0) refreshDecks();
+    if (++polls % 60 === 0) refreshDecks(); // the deck list changes rarely: every 30 minutes
     schedule(POLL_MS);
   }
   async function refreshDecks() {
@@ -162,7 +162,7 @@
     const el = $('vb-age');
     if (!board) { el.textContent = ''; return; }
     el.textContent = paused ? 'Paused while you are away; click to refresh'
-      : board.offline ? 'Offline' : `Snapshot from ${ago(board.at)} ago`;
+      : board.offline ? 'Offline' : `Last update ${ago(board.at)} ago; sent when something changes`;
   }
   setInterval(renderAge, 5000);
 
@@ -201,6 +201,8 @@
     const name = board.captain.name;
     $('vb-name').textContent = possessive(name);
     $('board-title').textContent = `${possessive(first(name))} work`;
+    const f = board.fleet || {};
+    $('vb-health').textContent = [f.firstMate ? `First mate ${f.firstMate.state === 'working' ? 'working' : 'idle'}` : null, f.monitoring === 'ok' ? 'Monitoring on' : 'Monitoring late'].filter(Boolean).join(' · ');
     renderAge();
     const workers = board.workers || [];
     const names = [...new Set(workers.map((w) => w.project).filter(Boolean))].sort();

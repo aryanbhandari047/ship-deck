@@ -88,6 +88,7 @@ ship-deck --orders-dir DIR            # where messages are kept, default ~/.ship
 ship-deck --memory-dir DIR            # first mate memory for the Ship's Library, default derived from the home
 ship-deck --claude-dir DIR            # Claude Code data dir, default ~/.claude (transcripts, skills)
 ship-deck --no-wake                   # don't append wake lines to <home>/state/ship-deck-inbox.status
+ship-deck --share --share-relay https://<relay>   # opt in to read-only sharing (or SHIP_DECK_SHARE=1, SHIP_DECK_RELAY)
 sh bin/start.sh [flags...]            # start in the background unless it already runs; prints the URL
 ```
 
@@ -423,6 +424,51 @@ event>** or **Idle, last active …** (working = a tool call without its result,
 under 10 min old, or a transcript line in the last 20 s), and the chat shows
 "First mate is …" under the newest message while it works.
 
+## Sharing with teammates (read-only, opt-in)
+
+Off unless Ship Deck starts with `--share --share-relay https://<relay>`. Then the share
+button in the top bar opens **Settings > Sharing** (`/share.html`):
+
+1. Sign in with your Keychain relay account (invite-only, `@keychain.com`). The password goes
+   straight to the relay; Ship Deck keeps only a revocable device token in
+   `~/.ship-deck/share.json` (0600).
+2. Add a teammate by their `@keychain.com` email, pick what they can see and which projects,
+   for 1, 7 or 30 days. New people get a one-time invite link (24 h) that you send them
+   yourself; the same button on an existing account is the password reset.
+3. They open the relay's page and see your Board read-only. "Who viewed what" lists every view
+   and refusal (kept 90 days by the relay). Revoke takes effect on their next request.
+
+![Settings > Sharing: people with access, what they can see, and the audit log](docs/share-settings.png)
+![A teammate's read-only view of the sample fleet on the relay](docs/share-viewer.png)
+
+What leaves the computer is an allow-list built in `lib/share.js` (field by field, see
+`WORKER_KEYS`), scrubbed by `lib/redact.js`: tokens (GitHub, Slack, AWS, OpenAI/Anthropic,
+Stripe, Google, JWTs, PEM blocks, `Authorization`/`Bearer`, `password=`/`token=`/`secret=`
+values, any 32+ character high-entropy run), the home path shown as `~`, other absolute
+paths as "path hidden", URL queries and fragments dropped and links kept only for
+github.com and linear.app. Caps: 200 characters per summary, 40 terminal lines (ANSI
+stripped), 64 KB per snapshot. Workers are keyed by an HMAC of their id.
+
+| Shared | Default | |
+|---|---|---|
+| Board (titles, status, projects, ages, PR links) | on | |
+| Updates (last 5 status lines) | on | |
+| Model and effort | on | |
+| Skills (names and descriptions) | off | |
+| Terminal (40 redacted lines, every 30 s) | off | |
+| Captain notes and memory | off | |
+| First mate chat and activity (labels only) | off | |
+| Attachments, paths, worktrees, windows, session ids, orders | never | not in the allow-list |
+| Sending anything | never | the relay has no viewer write route |
+
+Nothing is pushed until someone has an active grant. The share agent pushes only when the
+redacted snapshot changes, at most every 30 s, plus a keep-alive every 10 minutes; on quota,
+rate-limit or network errors it backs off (30 s doubling to 15 min) and Settings shows
+"Sharing paused". Nothing listens for the relay: everything it returns is shown as data,
+and `lib/share.js` cannot reach orders or fm-send (a test checks its imports). The relay
+itself (Vercel + Upstash free tiers, deploy steps, cost estimate) is in
+[`relay/README.md`](relay/README.md).
+
 ## Security
 
 - Binds `127.0.0.1` only; every request must carry `Host: 127.0.0.1:<port>` or
@@ -439,6 +485,9 @@ under 10 min old, or a transcript line in the last 20 s), and the chat shows
 - File views only serve regular files directly under `data/<id>/` (symlinks out
   are refused). The Ship's Library serves only a server-side allow-list (see
   below), addressed by key, never by path.
+- Sharing (`--share`, off by default) only makes outbound HTTPS requests to the configured
+  relay (http only for localhost). `POST /api/share/*` has the same `X-Ship-Deck`, Origin and
+  Sec-Fetch-Site checks. The sign-in password is passed to the relay once and never stored.
 - Order payloads are validated against the live home: crew ids need a meta,
   `cleanup-done` targets must be done, projects come from `data/projects.md`,
   backlog items must exist, config values come from the allow-list.
@@ -446,8 +495,17 @@ under 10 min old, or a transcript line in the last 20 s), and the chat shows
 ## Tests
 
 ```sh
-npm test            # same as: node --test test/*.test.js
+npm test            # same as: node --test test/*.test.js relay/test/*.test.js
 ```
+
+`test/share.test.js` covers the share projection (no home, worktree, window, session, files,
+orders, thread or attachments whatever the toggles), redaction of known secret shapes, the
+caps, HMAC refs, grant unions, the agent's push pacing and back-off, and that the relay's
+allow-list and UI copies match the deck. `test/share-e2e.test.js` runs a real deck with
+`--share` against the relay dev server: sign-in, grant, push, a granted viewer, a refused one
+and the audit. `relay/test/` covers auth (domain, invites, scrypt, lockout, sessions, no
+password leaks) and the relay routes (grant checks, append-only audit, no viewer write route,
+Redis commands per request).
 
 `test/actions.test.js` covers the orders queue, CLI and wake check (temp
 `HOME`), window lookup, peek/send with an injected executor (fm-send is never

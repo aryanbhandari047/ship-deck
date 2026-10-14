@@ -89,7 +89,7 @@
     const d = new Date(ms);
     return d.toDateString() === new Date().toDateString() ? fmtTime(ms) : `${fmtDate(ms)} ${fmtTime(ms)}`;
   }
-  const initials = (s) => String(s || '?').split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
+  const initials = (s) => String(s || '?').split('@')[0].split(/[\s._-]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
 
   // ---------- state + top ----------
   function renderState() {
@@ -134,7 +134,7 @@
       body.append(h('tr', null,
         h('td', null, h('div', { class: 'who' }, h('span', { class: 'av', 'aria-hidden': 'true', text: initials(g.viewerName || g.viewerEmail) }),
           h('div', null, h('b', { text: g.viewerName || g.viewerEmail.split('@')[0] }), h('span', { text: g.viewerEmail }),
-            g.hasAccount === false ? h('span', { class: 'tag', text: 'No account yet: send an invite link' }) : null))),
+            g.hasAccount === false ? h('span', { class: 'tag', text: 'No account yet' }) : null))),
         h('td', null, h('div', { class: 'scopes' }, g.scopes.map((k) => h('span', { class: 'pill plain', text: NAME[k] || k })))),
         h('td', { class: 'muted', text: g.projects.includes('*') ? 'All projects' : g.projects.join(', ') }),
         h('td', { class: expired ? 'denied' : null, text: ends(g.expiresAt) }),
@@ -242,6 +242,7 @@
       grants = (await post('/api/share/revoke', { viewer: email })).grants;
       renderPeople();
       toast(`Revoked. ${email} can no longer see your deck.`);
+      refresh();
       loadLog();
     } catch (e) { toast(e.message, true); }
   }
@@ -280,6 +281,7 @@
       renderPeople();
       const g = grants.find((x) => x.viewerEmail === email.toLowerCase());
       toast(wasEditing ? `Updated access for ${email}.` : `${email} can now view your deck.`);
+      refresh();
       if (g && g.hasAccount === false) invite(g.viewerEmail);
       loadLog();
     } catch (err) { toast(err.message, true); }

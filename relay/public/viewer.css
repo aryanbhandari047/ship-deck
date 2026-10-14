@@ -1,5 +1,7 @@
 /* Viewer additions on top of the deck's style.css (Chart room tokens; synced copy). Tokens only. */
 .viewer-page { min-height: 100vh; }
+/* The symbol sprite takes no space (a class, so it does not depend on inline styles). */
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
 .viewer-page .topbar .spacer { flex: 1; }
 .v-center { min-height: calc(100vh - 56px); display: grid; place-items: center; padding: var(--s8) var(--s4); }
 .v-card { width: min(440px, 100%); }
@@ -14,6 +16,7 @@
 .viewbar .ro { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: var(--r-pill); background: var(--surface); color: var(--ink-2); font-weight: 600; }
 .viewbar .ro svg { width: 13px; height: 13px; }
 .viewbar .age { margin-left: auto; color: var(--ink-2); }
+.viewbar .v-health { color: var(--ink-2); }
 .v-main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: calc(100vh - 96px); }
 .v-hidden { font-size: var(--t-sm); }
 .v-aside { display: grid; align-content: start; gap: var(--s5); padding: var(--s5); background: var(--surface); border-left: 1px solid var(--line); min-width: 0; }

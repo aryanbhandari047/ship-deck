@@ -85,7 +85,7 @@ test('end to end on the relay: push, granted viewer reads, ungranted refused, re
 
   // Expiry: re-grant for one day, move the clock.
   await r.deckCall(ada.token, 'PUT', '/v1/grants/grace%40keychain.com', { scopes: ['board'], projects: ['*'], expiresAt: r.clock.t + DAY });
-  r.clock.t += 6 * 60e3; // past the audit de-dupe window
+  r.clock.t += 16 * 60e3; // past the audit de-dupe window
   assert.equal((await g.call('GET', `/v1/decks/${ada.sub}/board`)).status, 200);
   r.clock.t += DAY;
   res = await g.call('GET', `/v1/decks/${ada.sub}/board`);
@@ -103,7 +103,7 @@ test('end to end on the relay: push, granted viewer reads, ungranted refused, re
   assert.ok(rows.every((x, i) => i === 0 || rows[i - 1].ts >= x.ts), 'newest first');
 });
 
-test('audit is append-only: earlier rows never change, repeat views collapse for 5 minutes, rows age out after 90 days', async (t) => {
+test('audit is append-only: earlier rows never change, repeat views collapse for 15 minutes, rows age out after 90 days', async (t) => {
   const r = await startRelay(t);
   const ada = await r.captain();
   const g = await r.person('grace@keychain.com');
@@ -115,7 +115,7 @@ test('audit is append-only: earlier rows never change, repeat views collapse for
   const after = raw();
   assert.deepEqual(after.slice(0, before.length), before, 'existing rows untouched');
   assert.equal(after.length, before.length + 1, 'five quick views, one row');
-  r.clock.t += 5 * 60e3 + 1;
+  r.clock.t += 15 * 60e3 + 1;
   await g.call('GET', `/v1/decks/${ada.sub}/board`);
   assert.equal(raw().length, before.length + 2);
   // The routes can only add rows: nothing edits or deletes a row except the 90-day age-out.
@@ -148,6 +148,7 @@ test('viewers have no write route; deck routes refuse cookies; nothing else is r
   const gt = (await r.deckCall(null, 'POST', '/v1/device/login', { email: g.email, password: g.password })).data.token;
   await r.deckCall(gt, 'DELETE', '/v1/grants/grace%40keychain.com');
   assert.equal((await g.call('GET', `/v1/decks/${ada.sub}/board`)).status, 200, "Ada's grant is untouched");
+  assert.equal((await r.deckCall(ada.token, 'DELETE', '/v1/grants/%E0%A4%A')).status, 400, 'malformed escape');
   for (const p of ['/v1/orders', '/v1/send', '/api/send', '/v1/decks/x/board/send', '/v1/attachments/1']) assert.equal((await g.call('POST', p, {})).status, 404, p);
 });
 

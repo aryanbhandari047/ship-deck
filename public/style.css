@@ -800,7 +800,7 @@ button.officer:hover b { color: var(--primary); }
 .s-title-text { flex: 1; min-width: 0; }
 .s-title h1 { margin: 0 0 6px; font: 700 var(--t-2xl)/1.1 var(--font-instr); }
 .s-title p { margin: 0; color: var(--ink-2); max-width: 64ch; }
-.panel-box { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-card); overflow-x: auto; min-width: 0; }
+.panel-box { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-card); overflow-x: auto; min-width: 0; }
 .pb-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
 .pb-head h2 { margin: 0; font: 700 var(--t-lg)/1.2 var(--font-instr); flex: 1; }
 .pb-foot { padding: 12px 18px; }
@@ -809,8 +809,9 @@ button.officer:hover b { color: var(--primary); }
 .toggle[aria-checked="true"] { background: var(--done-edge); }
 .toggle[aria-checked="true"]::after { transform: translateX(16px); }
 .who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.who { min-width: 200px; }
 .who b { display: block; }
-.who span { display: block; font-size: var(--t-xs); color: var(--ink-3); overflow-wrap: anywhere; }
+.who > div > span { display: block; font-size: var(--t-xs); color: var(--ink-3); }
 .who .tag { color: var(--needs-fg); font-weight: 600; }
 .av { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--primary-soft); color: var(--ink); font: 700 var(--t-sm)/1 var(--font-instr); flex: none; }
 table.tbl { width: 100%; border-collapse: collapse; }
@@ -845,6 +846,7 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .callout.warn { background: var(--needs-bg); color: var(--needs-fg); }
 .callout code { overflow-wrap: anywhere; }
 .denied { color: var(--blocked-fg); font-weight: 600; }
+.tbl td.denied { white-space: nowrap; }
 .twocol { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .twocol > div:first-child { border-right: 1px solid var(--line); }
 .preview-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }

@@ -4,7 +4,7 @@
 // reaches a deck. Storage keys (all in one Redis):
 //   user:<email> account   sess:<hash> session   cap:<sub> captain record (devices + grants)
 //   snap:<sub> latest snapshot (1 h TTL)   vix:<email> captains sharing with an email
-//   aud:<sub> / aud:auth append-only audit (90 days)   aseen:... 5-minute audit de-dupe
+//   aud:<sub> / aud:auth append-only audit (90 days)   aseen:... 15-minute audit de-dupe
 const { createAuth, AuthError } = require('../auth');
 const { randomId, sha256 } = require('../auth/tokens');
 const { sessionKey } = require('../auth/sessions');
@@ -16,7 +16,7 @@ const { HttpError, sendJson, readJson, clientIp, sameOrigin, bearer } = require(
 const SNAP_TTL = 3600;
 const AUDIT_DAYS = 90;
 const AUDIT_TTL = AUDIT_DAYS * 86400;
-const SEEN_TTL = 300;
+const SEEN_TTL = 900; // repeat views of the same thing collapse into one audit row per 15 minutes
 const MAX_DEVICES = 10;
 const SCOPE_LABEL = { board: 'Board', updates: 'Updates', model: 'Model and effort', skills: 'Skills', terminal: 'Terminal', notes: 'Notes and memory', chat: 'Chat and activity' };
 const parse = (raw) => { try { return raw ? JSON.parse(raw) : null; } catch { return null; } };
@@ -290,6 +290,7 @@ function createRelay({ config, store, now = Date.now, log = (m) => console.error
       req.resume();
       sendJson(res, 404, { error: 'not found' });
     } catch (e) {
+      if (e instanceof URIError) return sendJson(res, 400, { error: 'bad path' });
       if (e instanceof AuthError) return sendJson(res, e.status, { error: e.message }, e.retryAfter ? { 'Retry-After': String(e.retryAfter) } : {});
       if (e instanceof HttpError || e instanceof GrantError) return sendJson(res, e.status, { error: e.message }, e.headers || {});
       if (e instanceof StoreError && e.quota) {

@@ -380,3 +380,11 @@ test('share flags: off by default; --share needs an https relay', () => {
   assert.throws(() => share.checkRelayUrl('http://relay.example'), /https/);
   assert.equal(share.checkRelayUrl('http://localhost:3000'), 'http://localhost:3000');
 });
+
+test('push hash ignores the build time and the first mate busy flag, not real changes', () => {
+  const a = { v: 1, at: 1, workers: [{ ref: 'r', title: 'x' }], fleet: { counts: {}, firstMate: { state: 'idle', since: 1 }, monitoring: 'ok' } };
+  const same = { ...a, at: 2, fleet: { ...a.fleet, firstMate: { state: 'working', since: 5 } } };
+  assert.equal(share.snapshotHash(a), share.snapshotHash(same));
+  assert.notEqual(share.snapshotHash(a), share.snapshotHash({ ...a, fleet: { ...a.fleet, monitoring: 'late' } }));
+  assert.notEqual(share.snapshotHash(a), share.snapshotHash({ ...a, workers: [{ ref: 'r', title: 'y' }] }));
+});
