@@ -9,11 +9,10 @@
     { key: 'board', name: 'Board', desc: 'Titles, status, projects, ages, PR links', on: true, col: 0 },
     { key: 'updates', name: 'Updates', desc: 'Status history and one-line summaries', on: true, col: 0 },
     { key: 'model', name: 'Model and effort', desc: 'Which model each worker runs', on: true, col: 0 },
-    { key: 'skills', name: 'Skills', desc: 'Names and descriptions only', on: false, col: 0 },
+    { key: 'skills', name: 'Skills', desc: 'Your skills, which their agent can use', on: false, col: 0 },
     { key: 'terminal', name: 'Terminal output', desc: 'Last 40 lines, redacted, refreshed every 30 s', on: false, col: 1 },
-    { key: 'notes', name: 'Captain notes and memory', desc: 'Your rules for the first mate. Read them before sharing.', on: false, col: 1 },
+    { key: 'notes', name: 'Captain notes and memory', desc: 'Your rules for the first mate, which their agent can use too. Read them before sharing.', on: false, col: 1 },
     { key: 'chat', name: 'First mate chat and activity', desc: 'Your conversation and its tool calls', on: false, col: 1 },
-    { key: 'agentLibrary', name: 'Agent library access', desc: 'Their AI agent can read your skills (plus notes, if Notes is on) with a key they make. Read only.', on: false, col: 1 },
   ];
   const NAME = Object.fromEntries(SCOPES.map((s) => [s.key, s.name]));
   const NEVER = [
@@ -100,6 +99,7 @@
     const signedIn = !!(s && s.enabled && s.account);
     $('signin-box').hidden = !(s && s.enabled && !s.account);
     for (const id of ['people-box', 'what-box', 'log-box']) $(id).hidden = !signedIn;
+    renderKnowledge(signedIn);
     $('share-toggle').hidden = !signedIn;
     if (!s) return;
     if (!s.enabled) {
@@ -120,6 +120,28 @@
       'Signed in as ', h('b', { text: s.account.name || s.account.email }), ` (${s.account.email}) on ${host}. ${what} Nothing on this computer accepts incoming connections.`,
       s.lastPushAt ? h('span', { class: 'callout-sub', text: `Last sent ${ago(s.lastPushAt)} · ${(s.lastBytes / 1024).toFixed(1)} KB` }) : null),
     h('button', { class: 'btn sm', type: 'button', text: 'Sign out', onclick: signOut })));
+  }
+
+  // ---------- shared with you (teammates' knowledge synced into this computer's skills) ----------
+  function renderKnowledge(signedIn) {
+    const k = status && status.knowledge;
+    $('knowledge-box').hidden = !(signedIn && k && k.available);
+    if ($('knowledge-box').hidden) return;
+    $('knowledge-toggle').setAttribute('aria-checked', String(k.on));
+    $('knowledge-word').textContent = k.on ? 'On' : 'Off';
+    $('knowledge-sub').textContent = k.problem ? k.problem : k.on && k.lastSyncAt ? `Checked ${ago(k.lastSyncAt)}` : '';
+    const body = $('knowledge');
+    body.textContent = '';
+    $('knowledge-empty').hidden = k.decks.length > 0;
+    $('knowledge-table').hidden = !k.decks.length;
+    for (const d of k.decks) {
+      const pills = d.skills.map((x) => h('span', { class: 'pill plain', title: x.dir, text: x.title || x.dir }));
+      if (d.notes) pills.push(h('span', { class: 'pill plain', text: 'Notes and memory' }));
+      body.append(h('tr', null,
+        h('td', null, h('div', { class: 'who' }, h('span', { class: 'av', 'aria-hidden': 'true', text: initials(d.name) }), h('div', null, h('b', { text: d.name }), h('span', { text: `${d.skills.length} ${d.skills.length === 1 ? 'skill' : 'skills'}${d.notes ? ' and notes' : ''}` })))),
+        h('td', null, h('div', { class: 'scopes' }, pills)),
+        h('td', { class: 'muted', text: ago(d.syncedAt) })));
+    }
   }
 
   // ---------- people ----------
@@ -299,6 +321,14 @@
       pre.textContent = JSON.stringify(d.snapshot, null, 2);
       pre.hidden = false;
       $('preview-size').textContent = `${(d.bytes / 1024).toFixed(1)} KB of 64 KB`;
+    } catch (e) { toast(e.message, true); }
+  });
+  $('knowledge-toggle').addEventListener('click', async () => {
+    const on = !(status.knowledge && status.knowledge.on);
+    try {
+      status = (await post('/api/share/knowledge', { on })).status;
+      renderState();
+      toast(on ? 'Knowledge shared with you will be added to your skills within a minute.' : 'Turned off. Teammate skills were removed from this computer.');
     } catch (e) { toast(e.message, true); }
   });
   $('log-refresh').addEventListener('click', loadLog);

@@ -166,9 +166,40 @@ what** lists every view.
 
 ![Settings > Sharing](share-settings.png)
 
+Turning on **Skills** or **Captain notes and memory** for someone also gives
+their own agent that knowledge (next section), with no extra switch.
+
 **Turning it off:** use the switch at the top of Settings > Sharing to pause
 (nothing is sent), **Revoke** a person, or **Sign out** to remove this
 laptop's access. To stop completely, restart Ship Deck without `--share`.
+
+## 9. Optional: let your agent use what teammates share with you
+
+When a teammate shares their **Skills** or **Captain notes and memory** with
+you, your own Claude Code can use them automatically. There is no key to make:
+
+1. Start Ship Deck with sharing (step 8, item 2) and sign in under
+   **Settings > Sharing** with your relay account.
+2. That is all. Within a minute, and then whenever they change something
+   (checked at most every 10 minutes), Ship Deck adds their knowledge to
+   `~/.claude/skills` as read-only skills:
+   `teammate-<their-name>-<skill>` for each skill, and one
+   `teammate-<their-name>-notes` for their notes and memory.
+
+Each of these files starts with "Shared by <name> via Ship Deck on <date>;
+reference knowledge from a teammate - follow it as guidance, it is not an
+instruction from the user", so your agent treats it as a teammate's advice,
+not as your orders. Secrets and paths were scrubbed on their laptop before
+anything left it.
+
+**Shared with you**, at the bottom of Settings > Sharing, lists what you have
+from whom. The Ship's Library shows them under "Shared by <name>". Turn off
+**Use knowledge shared with me** there to remove them all. They are also
+removed when you sign out, and a teammate's go away on the next check once
+they stop sharing, revoke you or your access ends. Ship Deck only touches
+`teammate-*` folders it made itself (they hold a `.ship-deck-teammate.json`
+marker); your own skills are never changed. Details:
+[AGENT-LIBRARY.md](AGENT-LIBRARY.md).
 
 ## Removing Ship Deck
 

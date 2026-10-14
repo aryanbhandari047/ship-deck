@@ -198,10 +198,10 @@ test('grant union: expired grants drop out; no grants means nothing to send', ()
 });
 
 test('the deck side cannot reach orders or fm-send: share and redact require only built-ins and pure modules', () => {
-  for (const f of ['lib/share.js', 'lib/redact.js']) {
+  for (const f of ['lib/share.js', 'lib/redact.js', 'lib/knowledge.js', 'lib/library.js']) {
     const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
     const reqs = [...src.matchAll(/require\(['"]([^'"]+)['"]\)/g)].map((m) => m[1]);
-    for (const r of reqs) assert.ok(r.startsWith('node:') || ['../public/board', './redact'].includes(r), `${f} requires ${r}`);
+    for (const r of reqs) assert.ok(r.startsWith('node:') || ['../public/board', './redact', './knowledge', './library'].includes(r), `${f} requires ${r}`);
     const code = src.replace(/^\s*\/\/.*$/gm, ''); // comments may name what is out of reach
     assert.ok(!/fm-send|sendMessage|createOrder|execFile|child_process/.test(code), f + ' mentions a command path');
   }
@@ -394,7 +394,7 @@ test('push hash ignores the build time and the first mate busy flag, not real ch
   assert.notEqual(share.snapshotHash(a), share.snapshotHash({ ...a, workers: [{ ref: 'r', title: 'y' }] }));
 });
 
-// ---------- agent library (scope agentLibrary) ----------
+// ---------- knowledge library (scopes skills and notes) ----------
 
 const LIBRARY = [
   { key: 'skill:captain:deploy', title: 'Deploy', description: 'Reads /Users/ada/secrets.env', text: `# Deploy\nexport GH=ghp_abcdefghijklmnopqrstuvwxyz0123456789\nsee ${HOME}/firstmate/AGENTS.md and https://example.com/x?token=1\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nkey sdak1.abcdefgh12.${'Q'.repeat(43)}`, path: HOME + '/.claude/skills/deploy/SKILL.md' },
@@ -402,9 +402,10 @@ const LIBRARY = [
   { key: '/etc/passwd', title: 'bad', text: 'root' },
 ];
 
-test('library projection: skills only unless notes is on, redacted, allow-listed, capped', () => {
+test('library projection: skills unless off, notes only when on, redacted, allow-listed, capped', () => {
   const off = share.projectLibrary(LIBRARY, { home: HOME });
   assert.deepEqual(off.items.map((i) => i.key), ['skill:captain:deploy']);
+  assert.deepEqual(share.projectLibrary(LIBRARY, { home: HOME, skills: false, notes: true }).items.map((i) => i.key), ['memory:fleet-habits.md']);
   const on = share.projectLibrary(LIBRARY, { home: HOME, notes: true });
   assert.deepEqual(on.items.map((i) => i.key), ['skill:captain:deploy', 'memory:fleet-habits.md']);
   for (const it of on.items) assert.deepEqual(Object.keys(it), share.LIBRARY_ITEM_KEYS);
@@ -418,18 +419,19 @@ test('library projection: skills only unless notes is on, redacted, allow-listed
   assert.ok(big.trimmed > 0);
 });
 
-test('libraryNeeds: skills with any agentLibrary grant, notes only when the same grant has notes', () => {
+test('libraryNeeds follows the skills and notes scopes; an old agentLibrary flag is ignored', () => {
   const g = (scopes, expiresAt = 2e12) => ({ scopes, expiresAt });
-  assert.deepEqual(share.libraryNeeds([g(['board', 'notes'])], 1e12), { on: false, notes: false });
-  assert.deepEqual(share.libraryNeeds([g(['agentLibrary']), g(['notes'])], 1e12), { on: true, notes: false });
-  assert.deepEqual(share.libraryNeeds([g(['agentLibrary', 'notes'])], 1e12), { on: true, notes: true });
-  assert.deepEqual(share.libraryNeeds([g(['agentLibrary', 'notes'], 1)], 1e12), { on: false, notes: false }, 'expired');
-  assert.ok(!share.DEFAULT_SCOPES.includes('agentLibrary'), 'off by default');
+  assert.deepEqual(share.libraryNeeds([g(['board', 'agentLibrary'])], 1e12), { on: false, skills: false, notes: false });
+  assert.deepEqual(share.libraryNeeds([g(['skills']), g(['board'])], 1e12), { on: true, skills: true, notes: false });
+  assert.deepEqual(share.libraryNeeds([g(['notes'])], 1e12), { on: true, skills: false, notes: true });
+  assert.deepEqual(share.libraryNeeds([g(['skills', 'notes'], 1)], 1e12), { on: false, skills: false, notes: false }, 'expired');
+  assert.ok(!share.SCOPES.includes('agentLibrary'));
+  assert.deepEqual(share.cleanGrant({ viewerEmail: 'g@keychain.com', scopes: ['board', 'agentLibrary'] }).scopes, ['board']);
 });
 
-test('agent: pushes the library only for agentLibrary grants, on change or hourly, and removes it when no grant needs it', async (t) => {
+test('agent: pushes the library only for skills or notes grants, on change or hourly, and removes it when no grant needs it', async (t) => {
   const clock = { t: 1e12 };
-  const grants = [{ viewerEmail: 'grace@keychain.com', scopes: ['board', 'agentLibrary'], projects: ['*'], expiresAt: 2e12 }];
+  const grants = [{ viewerEmail: 'grace@keychain.com', scopes: ['board', 'skills'], projects: ['*'], expiresAt: 2e12 }];
   const relay = fakeRelay({ grants });
   const dir = tempDir(t);
   const fleet = await richFleet();
@@ -444,7 +446,7 @@ test('agent: pushes the library only for agentLibrary grants, on change or hourl
   const libCalls = () => relay.calls.filter((c) => c.path === '/v1/library');
   await agent.tick();
   assert.equal(libCalls().length, 1);
-  assert.deepEqual(asked[0], { notes: false });
+  assert.deepEqual(asked[0], { skills: true, notes: false });
   assert.deepEqual(libCalls()[0].body.items.map((i) => i.key), ['skill:captain:deploy']);
   assert.ok(!JSON.stringify(libCalls()[0].body).includes(HOME));
   clock.t += 61e3;
@@ -466,10 +468,11 @@ test('agent: pushes the library only for agentLibrary grants, on change or hourl
   await agent.tick();
   assert.equal(libCalls().length, n);
   // Pausing takes it down too.
-  grants[0].scopes = ['agentLibrary', 'notes'];
-  await agent.putGrant({ email: 'grace@keychain.com', scopes: ['agentLibrary', 'notes'], projects: ['*'] });
+  grants[0].scopes = ['notes'];
+  await agent.putGrant({ email: 'grace@keychain.com', scopes: ['notes'], projects: ['*'] });
   await agent.tick();
-  assert.deepEqual(asked.at(-1), { notes: true });
+  assert.deepEqual(asked.at(-1), { skills: false, notes: true });
+  assert.deepEqual(libCalls().at(-1).body.items.map((i) => i.key), ['memory:fleet-habits.md'], 'notes only');
   assert.equal(libCalls().at(-1).method, 'POST');
   agent.setPaused(true);
   await new Promise((r) => setImmediate(r));

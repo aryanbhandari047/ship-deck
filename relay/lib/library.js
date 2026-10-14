@@ -1,7 +1,8 @@
 'use strict';
-// Agent library access (grant scope agentLibrary): the pushed library projection and read-only
-// agent keys. Pure functions; lib/app.js stores and routes. The deck builds and redacts the
-// projection (lib/share.js projectLibrary); this file re-applies the same allow-list.
+// Shared knowledge: the library a captain pushes (granted skills and notes, full text) that a
+// teammate's own Ship Deck syncs into their agent's skills, plus the optional read-only agent keys
+// for agents without Ship Deck. Pure functions; lib/app.js stores and routes. The deck builds and
+// redacts the projection (lib/share.js projectLibrary); this file re-applies the same allow-list.
 //   lib:<captainSub>   Redis hash: field "index" (JSON list without text), field "i:<key>" per item
 //   agk:<sha256(key)>  one agent key record   agks:<captainSub>:<viewerSub>  that viewer's key ids
 const { randomId, sha256 } = require('../auth/tokens');
@@ -30,13 +31,23 @@ function sanitizeLibrary(body) {
     seen.add(x.key);
     items.push({ key: x.key, kind: kindOf(x.key), title: s(x.title, 120) || x.key, description: s(x.description, 300), text: s(x.text, MAX_TEXT) });
   }
-  const index = items.map(({ text, ...rest }) => ({ ...rest, size: Buffer.byteLength(text) }));
+  // h: a short content hash per item, so a teammate's deck can tell what changed from the index alone.
+  const index = items.map(({ text, ...rest }) => ({ ...rest, size: Buffer.byteLength(text), h: sha256(JSON.stringify([rest.title, rest.description, text])).slice(0, 16) }));
   return { index, items, trimmed: Number.isInteger(body.trimmed) && body.trimmed > 0 ? Math.min(body.trimmed, 1000) : 0 };
 }
 
-// What a grant lets an agent read: skills always, notes and memory only with the notes scope.
+// What a grant shares as knowledge: skills with the skills scope, notes and memory with notes.
+// (An old agentLibrary flag on a stored grant is ignored.)
+const skillsAllowed = (grant) => !!grant && grant.scopes.includes('skills');
 const notesAllowed = (grant) => !!grant && grant.scopes.includes('notes');
-const itemAllowed = (key, grant) => kindOf(key) === 'skill' || notesAllowed(grant);
+const knowledgeAllowed = (grant) => skillsAllowed(grant) || notesAllowed(grant);
+const itemAllowed = (key, grant) => (kindOf(key) === 'skill' ? skillsAllowed(grant) : notesAllowed(grant));
+
+// One hash over what this grant may read; it changes when an item, or the grant's reach, does.
+function knowledgeHash(index, grant) {
+  const items = (index || []).filter((i) => i && itemAllowed(i.key, grant)).map((i) => [i.key, i.h || i.size]);
+  return sha256(JSON.stringify([skillsAllowed(grant), notesAllowed(grant), items])).slice(0, 32);
+}
 
 // "sdak1.<captainSub>.<random>": the deck it reads is in the key, so a read is one round trip.
 function newKey(captainSub) {
@@ -67,5 +78,5 @@ const fieldOf = (key) => 'i:' + key;
 
 module.exports = {
   ITEM_KEYS, KEY_RE, MAX_ITEMS, MAX_TEXT, MAX_BYTES, LIB_TTL, MAX_KEYS, KEY_TTL, RATE_PER_HOUR, TOKEN_RE,
-  kindOf, sanitizeLibrary, notesAllowed, itemAllowed, newKey, parseKey, cleanLabel, keyExpiry, rateWindow, fieldOf,
+  kindOf, sanitizeLibrary, skillsAllowed, notesAllowed, knowledgeAllowed, itemAllowed, knowledgeHash, newKey, parseKey, cleanLabel, keyExpiry, rateWindow, fieldOf,
 };

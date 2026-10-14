@@ -1,6 +1,6 @@
 'use strict';
-// Agent library access: a teammate's agent reads the captain's pushed library with a read-only
-// key. Scope off -> 403; revoked, expired or orphaned keys -> 401; notes only with the notes
+// Agent keys (the optional path for agents without Ship Deck): a teammate's agent reads the
+// captain's pushed knowledge library with a read-only key. Skills and notes both off -> 403; revoked, expired or orphaned keys -> 401; notes only with the notes
 // scope; the relay re-applies the allow-list; one audit row per read; a per-key hourly limit;
 // keys stored only as hashes; and no route under /v1/agent accepts anything but GET.
 const test = require('node:test');
@@ -19,7 +19,7 @@ const LIB = {
   ],
 };
 
-async function setup(t, scopes = ['board', 'agentLibrary']) {
+async function setup(t, scopes = ['board', 'skills']) {
   const r = await startRelay(t);
   const ada = await r.captain('ada@keychain.com');
   const g = await r.person('grace@keychain.com');
@@ -87,29 +87,34 @@ test('notes and memory are hidden unless the same grant also has the notes scope
   const token = (await createKey()).data.token;
   assert.equal((await agent(`/v1/agent/library/${ada.sub}/memory:fleet-habits.md`, token)).status, 404);
   assert.equal((await agent(`/v1/agent/library/${ada.sub}/home:data/captain.md`, token)).status, 404);
-  await grant(['board', 'agentLibrary', 'notes']);
+  await grant(['board', 'skills', 'notes']);
   const d = (await agent('/v1/agent/library', token)).data.decks[0];
   assert.equal(d.notes, true);
   assert.deepEqual(d.items.map((i) => i.key).sort(), ['home:data/captain.md', 'memory:fleet-habits.md', 'skill:captain:deploy', 'skill:firstmate:review']);
   const md = await agent(`/v1/agent/library/${ada.sub}/home:data/captain.md`, token);
   assert.equal(md.status, 200);
   assert.equal(md.data, 'Be brief.');
-  // Notes alone (no agentLibrary) give the agent nothing.
+  // Notes alone: notes yes, skills no.
   await grant(['board', 'notes']);
-  assert.equal((await agent(`/v1/agent/library/${ada.sub}/home:data/captain.md`, token)).status, 403);
+  assert.equal((await agent(`/v1/agent/library/${ada.sub}/home:data/captain.md`, token)).status, 200);
+  assert.equal((await agent(`/v1/agent/library/${ada.sub}/skill:captain:deploy`, token)).status, 404);
+  assert.deepEqual((await agent('/v1/agent/library', token)).data.decks[0].items.map((i) => i.key).sort(), ['home:data/captain.md', 'memory:fleet-habits.md']);
+  // An old agentLibrary flag is dropped and grants nothing by itself.
+  assert.deepEqual((await grant(['board', 'agentLibrary'])).data.grants[0].scopes, ['board']);
+  assert.equal((await agent('/v1/agent/library', token)).status, 403);
 });
 
 test('scope off: 403 for the agent and no new keys; scope back on: the same key works again', async (t) => {
   const { grant, createKey, agent, g, keysPath } = await setup(t, ['board']);
   assert.equal((await createKey()).status, 403, 'no agentLibrary: no key');
   assert.equal((await g.call('GET', keysPath)).status, 403);
-  await grant(['board', 'agentLibrary']);
+  await grant(['board', 'skills']);
   const token = (await createKey()).data.token;
   await grant(['board']);
   const res = await agent('/v1/agent/library', token);
   assert.equal(res.status, 403);
-  assert.equal(res.data.error, 'agent library not shared');
-  await grant(['board', 'agentLibrary']);
+  assert.equal(res.data.error, 'skills and notes not shared');
+  await grant(['board', 'skills']);
   assert.equal((await agent('/v1/agent/library', token)).status, 200, 'an edit keeps the grant, so the key lives');
 });
 
@@ -131,7 +136,7 @@ test('revoked, expired or orphaned keys answer 401', async (t) => {
   assert.equal((await agent('/v1/agent/library', b.token)).status, 200);
   await r.deckCall(ada.token, 'DELETE', '/v1/grants/grace%40keychain.com');
   assert.equal((await agent('/v1/agent/library', b.token)).status, 401);
-  await grant(['board', 'agentLibrary']);
+  await grant(['board', 'skills']);
   assert.equal((await agent('/v1/agent/library', b.token)).status, 401, 'a new grant does not revive old keys');
   // Keys expire with the grant.
   const c = (await createKey('c')).data;
@@ -219,7 +224,7 @@ test('no write route under /v1/agent: every other method is 405 and nothing chan
 });
 
 test('the relay re-applies the library allow-list and the deck can replace or remove it', async (t) => {
-  const { r, ada, createKey, agent } = await setup(t, ['board', 'agentLibrary', 'notes']);
+  const { r, ada, createKey, agent } = await setup(t, ['board', 'skills', 'notes']);
   const token = (await createKey()).data.token;
   const s = L.sanitizeLibrary({ ...LIB, home: '/Users/ada', items: [...LIB.items, { key: 'skill:x', title: 't'.repeat(500), text: 'x'.repeat(L.MAX_TEXT + 10), cwd: '/tmp' }] });
   for (const it of s.items) assert.deepEqual(Object.keys(it).sort(), ['description', 'key', 'kind', 'text', 'title']);

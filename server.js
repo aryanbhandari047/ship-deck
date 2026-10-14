@@ -32,7 +32,7 @@ const MAX_BODY = 16 * 1024;
 const ORDERS_IN_SNAPSHOT = 60;
 const THREAD_LIMIT = 300;
 const POST_ROUTES = new Set(['/api/send', '/api/orders', '/api/config']);
-const SHARE_POST = new Set(['/api/share/signin', '/api/share/signout', '/api/share/grant', '/api/share/revoke', '/api/share/invite', '/api/share/pause']);
+const SHARE_POST = new Set(['/api/share/signin', '/api/share/signout', '/api/share/grant', '/api/share/revoke', '/api/share/invite', '/api/share/pause', '/api/share/knowledge']);
 // Library files a "notes and memory" grant may carry (plus memory/*).
 const SHARE_NOTES = ['home:data/captain.md', 'home:data/captain-shared.md', 'home:data/learnings.md'];
 const USAGE = 'usage: ship-deck [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--no-open] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR] [--captain-name NAME] [--no-wake] [--share --share-relay URL]';
@@ -262,7 +262,8 @@ function createServer(opts) {
   }
 
   // Sharing (--share): readers hand the agent data; it never gets orders, wake or fm-send.
-  const isSkill = (e) => e.exists && e.key.startsWith('skill:');
+  // Skills a teammate shared with this captain are never passed on to anyone else.
+  const isSkill = (e) => e.exists && e.key.startsWith('skill:') && !e.key.startsWith('skill:teammate:');
   const isNote = (e) => e.exists && (SHARE_NOTES.includes(e.key) || e.key.startsWith('memory:'));
   const readEntryText = (e) => { const r = library.readLibraryEntry(opts.home, memoryDir, e.key, libOpts); return (r && r.text) || ''; };
   const agent = opts.share ? share.createShareAgent({
@@ -273,6 +274,8 @@ function createServer(opts) {
     now: opts.shareNow,
     log: (m) => console.warn(m),
     readFleet: fleetSnapshot,
+    // Knowledge teammates share with this account lands here as teammate-* skills.
+    skillsDir: libOpts.captainSkills,
     readTerminal: async (id) => (await actions.peekPane(opts.home, id, exec)).text,
     readExtras: async (needs) => {
       const fm = feed.view(NaN);
@@ -286,9 +289,9 @@ function createServer(opts) {
       }
       return out;
     },
-    // The agent library (grant scope agentLibrary): skills with their text, notes only when asked.
-    readLibrary: async ({ notes }) => library.listLibrary(opts.home, memoryDir, libOpts)
-      .filter((e) => isSkill(e) || (notes && isNote(e)))
+    // The knowledge library (grant scopes skills and notes): full text, only what a grant needs.
+    readLibrary: async ({ skills, notes }) => library.listLibrary(opts.home, memoryDir, libOpts)
+      .filter((e) => (skills && isSkill(e)) || (notes && isNote(e)))
       .map((e) => ({ key: e.key, title: e.title, description: e.description || '', text: readEntryText(e) })),
   }) : null;
 
@@ -329,6 +332,7 @@ function createServer(opts) {
       if (url.pathname === '/api/share/revoke') return json(res, 200, { ok: true, grants: await agent.revoke(body.viewer) });
       if (url.pathname === '/api/share/invite') return json(res, 200, { ok: true, invite: await agent.invite(body.email) });
       if (url.pathname === '/api/share/pause') return json(res, 200, { ok: true, status: agent.setPaused(!!body.paused) });
+      if (url.pathname === '/api/share/knowledge') return json(res, 200, { ok: true, status: agent.setKnowledge(!!body.on) });
     } catch (e) { return shareError(res, e); }
   }
 

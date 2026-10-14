@@ -99,6 +99,7 @@ function createMemoryStore({ now = Date.now } = {}) {
       }
       case 'HSET': { const e = of(k, 'hash', () => new Map()); let n = 0; for (let i = 1; i + 1 < a.length; i += 2) { if (!e.v.has(a[i])) n++; e.v.set(a[i], a[i + 1]); } return n; }
       case 'HGET': { const e = of(k, 'hash'); return e && e.v.has(a[1]) ? e.v.get(a[1]) : null; }
+      case 'HGETALL': { const e = of(k, 'hash'); return e ? [...e.v].flat() : []; } // flat, like Upstash REST
       case 'HDEL': { const e = of(k, 'hash'); if (!e) return 0; let n = 0; for (const f of a.slice(1)) if (e.v.delete(f)) n++; if (!e.v.size) data.delete(k); return n; }
       case 'SCAN': { // one pass: MATCH with a trailing * only, COUNT ignored
         const mi = a.findIndex((x) => x.toUpperCase() === 'MATCH');

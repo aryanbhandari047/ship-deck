@@ -3,7 +3,7 @@
 // the two in step). Pushed snapshots are rebuilt field by field, so a deck bug or a forged push
 // can never store anything outside the list, and each viewer gets only their scopes and projects.
 
-const SCOPES = ['board', 'updates', 'model', 'skills', 'terminal', 'notes', 'chat', 'agentLibrary'];
+const SCOPES = ['board', 'updates', 'model', 'skills', 'terminal', 'notes', 'chat'];
 const WORKER_KEYS = ['ref', 'id', 'title', 'project', 'state', 'quietDays', 'summary', 'updatedAt', 'options', 'pr', 'model', 'effort'];
 const SNAPSHOT_KEYS = ['v', 'at', 'scopes', 'projects', 'hiddenProjects', 'fleet', 'workers', 'updates', 'terminal', 'skills', 'notes', 'chat', 'activity', 'trimmed'];
 const STATES = ['needs-decision', 'blocked', 'failed', 'working', 'resolved', 'paused', 'unknown', 'done'];

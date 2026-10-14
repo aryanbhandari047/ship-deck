@@ -112,6 +112,20 @@
           </table>
           <p class="empty-row" id="log-empty">No views yet.</p>
         </section>
+
+        <section class="panel-box" id="knowledge-box" aria-labelledby="knowledge-h" hidden>
+          <div class="pb-head"><h2 id="knowledge-h">Shared with you</h2><span class="hint" id="knowledge-sub"></span></div>
+          <div class="perm">
+            <b>Use knowledge shared with me</b>
+            <p>When a teammate shares their Skills or Captain notes and memory with you, Ship Deck adds them to your Claude Code as read-only skills named <code>teammate-&lt;name&gt;-…</code>, checked every 10 minutes. Your agent treats them as a teammate's guidance, not as your instructions. Turning this off removes them.</p>
+            <div class="ctl"><span id="knowledge-word">On</span><button class="toggle" id="knowledge-toggle" type="button" role="switch" aria-checked="true" aria-label="Use knowledge shared with me"></button></div>
+          </div>
+          <table class="tbl" id="knowledge-table">
+            <thead><tr><th>Teammate</th><th>Your agent can use</th><th>Last synced</th></tr></thead>
+            <tbody id="knowledge"></tbody>
+          </table>
+          <p class="empty-row" id="knowledge-empty">Nothing yet. Skills and notes a teammate shares with you show up here.</p>
+        </section>
       </div>
     </div>
   </main>

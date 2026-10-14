@@ -453,6 +453,15 @@ button in the top bar opens **Settings > Sharing** (`/share.html`):
    yourself; the same button on an existing account is the password reset.
 3. They open the relay's page and see your Board read-only. "Who viewed what" lists every view
    and refusal (kept 90 days by the relay). Revoke takes effect on their next request.
+4. If you share **Skills** or **Captain notes and memory**, a teammate whose own Ship Deck is
+   signed in to the relay gets them automatically: every 10 minutes their deck checks a hash
+   and writes changed knowledge into their `~/.claude/skills` as read-only
+   `teammate-<your-name>-<skill>` skills (notes and memory as one `teammate-<your-name>-notes`
+   skill), each starting with a "Shared by … via Ship Deck" header. "Use knowledge shared with
+   me" in their Settings > Sharing (on by default) turns it off; turning it off, signing out,
+   or your grant being narrowed, revoked or ending removes them. Only directories with Ship
+   Deck's marker file are ever written or removed (`lib/knowledge.js`,
+   [`docs/AGENT-LIBRARY.md`](docs/AGENT-LIBRARY.md)).
 
 ![Settings > Sharing: people with access, what they can see, and the audit log](docs/share-settings.png)
 ![A teammate's read-only view of the sample fleet on the relay](docs/share-viewer.png)
@@ -470,13 +479,12 @@ stripped), 64 KB per snapshot. Workers are keyed by an HMAC of their id.
 | Board (titles, status, projects, ages, PR links) | on | |
 | Updates (last 5 status lines) | on | |
 | Model and effort | on | |
-| Skills (names and descriptions) | off | |
+| Skills (full text, redacted: the teammate's own Ship Deck gives them to their agent) | off | see [`docs/AGENT-LIBRARY.md`](docs/AGENT-LIBRARY.md) |
 | Terminal (40 redacted lines, every 30 s) | off | |
-| Captain notes and memory | off | |
+| Captain notes and memory (also given to their agent as one reference skill) | off | |
 | First mate chat and activity (labels only) | off | |
-| Agent library access (their AI agent reads your skills, plus notes if Notes is on, with a read-only key) | off | see [`docs/AGENT-LIBRARY.md`](docs/AGENT-LIBRARY.md) |
 | Attachments, paths, worktrees, windows, session ids, orders | never | not in the allow-list |
-| Sending anything | never | viewers can only make and revoke their own agent keys; `/v1/agent` is GET only |
+| Sending anything | never | viewers can only make and revoke their own agent keys; `/v1/knowledge` and `/v1/agent` are GET only |
 
 Nothing is pushed until someone has an active grant. The share agent pushes only when the
 redacted snapshot changes, at most every 30 s, plus a keep-alive every 10 minutes; on quota,
@@ -520,10 +528,13 @@ orders, thread or attachments whatever the toggles), redaction of known secret s
 caps, HMAC refs, grant unions, the agent's push pacing and back-off, and that the relay's
 allow-list and UI copies match the deck. `test/share-e2e.test.js` runs a real deck with
 `--share` against the relay dev server: sign-in, grant, push, a granted viewer, a refused one
-and the audit. It also covers the agent library projection (skills only unless notes is on,
-redacted, capped) and its push and removal. `relay/test/` covers auth (domain, invites, scrypt, lockout, sessions, no
+and the audit. It also covers the knowledge library projection (skills and notes per scope,
+redacted, capped) and its push and removal. `test/knowledge.test.js` covers the other side:
+two real decks and the relay, granted skills and notes landing in the teammate's skills dir
+(header, redaction, namespaced and collision-safe names, read-only), and removal on toggle
+off, narrowed, revoked or expired grants and sign-out, touching only marked directories. `relay/test/` covers auth (domain, invites, scrypt, lockout, sessions, no
 password leaks) and the relay routes (grant checks, append-only audit, no viewer write route,
-Redis commands per request) and agent library keys (`relay/test/agent.test.js`: scope off,
+Redis commands per request), knowledge sync (`relay/test/knowledge.test.js`) and agent keys (`relay/test/agent.test.js`: scopes off,
 revoked or expired keys, notes gating, one audit row per read, the hourly limit, GET only).
 
 `test/actions.test.js` covers the orders queue, CLI and wake check (temp
@@ -591,7 +602,7 @@ All paths are relative to the fleet home. Missing files are fine.
 | `state/<id>.status` last line (needs-decision/blocked) | Lettered options `(A) ...`, `(B, recommended) ...`, `Options: A) ...`, `option A, ...` become decision buttons |
 | `~/.claude/projects/*/<uuid>.jsonl` (head only) | Session discovery for resume commands |
 | `~/.claude/projects/<encoded FM_HOME>/<uuid>.jsonl` (tail, newest session) | The first mate activity feed |
-| `~/.claude/skills/*/SKILL.md`, `<home>/.agents/skills/*/SKILL.md` | Skills in the Ship's Library (name and description from the frontmatter) |
+| `~/.claude/skills/*/SKILL.md`, `<home>/.agents/skills/*/SKILL.md` | Skills in the Ship's Library (name and description from the frontmatter); `teammate-*` skills synced from a teammate (with `--share`) are grouped as "Shared by <name>" and never shared on |
 | `tmux list-windows -a` | Optional: marks whether a crew member's window is open. Skipped if tmux is missing. |
 
 ## The views
@@ -659,6 +670,8 @@ lib/actions.js     Window lookup, pane peek, fm-send, data files (the only exec)
 lib/orders.js      Orders queue in ~/.ship-deck
 lib/attachments.js Bridge attachments: magic bytes, storage, stills, Range serving
 lib/library.js     Ship's Library allow-list (home files, memory, skills)
+lib/share.js       Sharing (--share): redacted snapshot and knowledge pushes, knowledge sync
+lib/knowledge.js   Teammates' shared knowledge as marked teammate-* skills (the only ~/.claude writer)
 lib/sessions.js    Claude session discovery and ~/.ship-deck/sessions.json
 lib/activity.js    First mate activity feed: read-only transcript tail
 lib/config.js      Per-harness model/effort allow-list and slash commands

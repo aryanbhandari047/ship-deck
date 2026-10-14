@@ -4,7 +4,7 @@ A small Vercel project that lets Keychain teammates watch each other's Ship Deck
 A captain's deck pushes a redacted snapshot out to the relay (`ship-deck --share`); teammates
 the captain named sign in here and see it. The captain's computer never accepts a connection,
 and nothing a viewer does can reach a deck: deck data routes are GET only, and the only viewer
-writes are their own read-only agent keys (see [Agent library access](#agent-library-access)).
+writes are their own read-only agent keys (see [Shared knowledge](#shared-knowledge)).
 
 ```
 Captain's laptop                       Relay (Vercel + Upstash Redis)            Teammate's browser
@@ -45,6 +45,8 @@ Redis commands per request (asserted in `relay/test/relay.test.js`):
 | Deck grant refresh (`GET /v1/grants?brief=1`, every 30 min) | 1 |
 | Viewer read (`GET /v1/decks/<sub>/<scope>`) | 1, plus 3 when it writes an audit row (first look at that item in 15 min) |
 | Viewer deck list (`GET /v1/decks`, on load and every 30 min) | 2 |
+| Knowledge check (`GET /v1/knowledge?since=`, a teammate's deck, at most every 10 min, skipped when a grant refresh already showed the same version) | 1 unchanged; 3 + one per sharing captain when the version moved |
+| Knowledge read (`GET /v1/knowledge/<captainSub>`, only for a captain whose hash changed) | 5 |
 | Agent read (`GET /v1/agent/library[/…]`) | 6: key + deck + item, rate counter, audit row; 7 when it also stamps last-used (at most every 10 min); 2 for an unknown key |
 | Deck library push (`POST /v1/library`, on change or hourly) | 4-5 |
 
@@ -59,7 +61,14 @@ pauses after 10 idle minutes) and opens 5 workers.
 | 50 viewers: 60 polls, 2 lists, 10 worker reads, 12 audit rows each | 3,600 requests | 5,500 | 3,600 |
 | **Total** | | **≈ 10,300 (≈ 310,000/month, 62% of 500K)** | **≈ 6,100 (≈ 183,000/month, 18% of 1M)** |
 
-Agent library: 10 agent keys reading 20 items a day each is 200 reads, about 1,300
+Shared knowledge: a teammate's deck asks only when its own grant refresh (which it makes every
+10 minutes anyway, and which now carries the knowledge version in the same MGET) shows a change,
+or while its sharing is paused (1 command per 10 minutes). A change costs one list and one
+read per changed captain: 10 knowledge changes a day reaching 5 teammates each is about 450
+commands a day (≈ 14,000/month, 3%). Library pushes bump the version only when the content
+changed, never on the hourly keep-alive.
+
+Agent keys (optional, for agents without Ship Deck): 10 agent keys reading 20 items a day each is 200 reads, about 1,300
 commands a day (≈ 40,000/month, 8%), plus at most 10 library pushes a day per deck (≈ 15,000/month).
 Library items are capped at 16,000 characters, so reads move little data. The 60 reads/hour
 limit per key is the ceiling: a key read flat out all day would cost about 9,000 commands, so
@@ -183,32 +192,42 @@ fails when they drift.
 | `GET /v1/decks` | viewer session | decks shared with me |
 | `GET /v1/decks/<captainSub>/<scope>[?ref=]` | viewer session | one scope: `board`, `updates`, `model`, `skills`, `terminal`, `notes`, `chat` |
 | `GET`, `POST /v1/decks/<captainSub>/agent-keys`, `DELETE …/agent-keys/<id>` | viewer session | the viewer's own agent keys for that deck (`POST` returns the key once) |
-| `POST /v1/library`, `DELETE /v1/library` | deck token | store or remove the agent library projection (re-sanitised, 256 KB) |
+| `POST /v1/library`, `DELETE /v1/library` | deck token | store or remove the knowledge library projection (re-sanitised, 256 KB) |
+| `GET /v1/knowledge[?since=<version>]`, `GET /v1/knowledge/<captainSub>` | deck token | a teammate's own deck: what every captain shares with this account (hashes), and one captain's granted skills and notes with their text |
 | `GET /v1/agent/library`, `GET /v1/agent/library/<captainSub>/<key>` | agent key | the library list (JSON) and one item (markdown) |
 
-Nothing else is routed. Viewer deck routes and `/v1/agent` answer 405 to every other method. A grant is authored
+Nothing else is routed. Viewer deck routes, `/v1/knowledge` and `/v1/agent` answer 405 to every other method. A grant is authored
 only through the owning captain's deck token and is checked on every viewer request: grant
 present (revoke deletes it), not expired (30 days at most), scope granted, and the worker's
 project granted. The first person to use a grant binds it to their account, so a recycled
 email does not inherit it. Every view and refusal is audited; repeats of the same view collapse
 into one row per 15 minutes to stay inside the free tier.
 
-## Agent library access
+## Shared knowledge
 
-Grant scope `agentLibrary` (off by default) lets the teammate's AI agent read the captain's
-library; usage, curl and a skill stub are in [`../docs/AGENT-LIBRARY.md`](../docs/AGENT-LIBRARY.md).
+Grant scopes `skills` and `notes` also share their full text as knowledge the teammate's own
+agent uses; the flow for both sides is in [`../docs/AGENT-LIBRARY.md`](../docs/AGENT-LIBRARY.md).
+An old `agentLibrary` flag on a stored grant is ignored and left out of every answer.
 
-- The deck pushes a separate, redacted projection (skills; notes and memory only when one
-  grant has both `agentLibrary` and `notes`) to `lib:<sub>`, a hash with an `index` field and
-  one `i:<key>` field per item, kept 2 hours past the last push. The relay re-applies the
-  allow-list (`lib/library.js`) and serves notes only to grants that also have `notes`.
-- Keys are `sdak1.<captainSub>.<random>`, made by a signed-in viewer whose grant has the scope,
-  at most 3 per viewer per deck, returned once. The relay stores `agk:<sha256(key)>` (label,
-  created, last used, the grant's id) and `agks:<captainSub>:<viewerSub>` (the key ids).
-- Every read checks the key, then the live grant: unknown, revoked or expired keys, a revoked
-  or ended grant, or a new grant after a revoke answer 401; the scope turned off answers 403.
-  Each key has 60 reads an hour (`arl:…`, 429 with `Retry-After`). Every read of a known key
-  writes one audit row for the captain; going over the limit writes one.
+- The deck pushes a separate, redacted projection (skills when a grant has `skills`, notes and
+  memory when one has `notes`) to `lib:<sub>`, a hash with an `index` field (with a short
+  content hash per item) and one `i:<key>` field per item, kept 2 hours past the last push.
+  The relay re-applies the allow-list (`lib/library.js`) and gives each grant only its kinds.
+- `kver:<sub>` is each account's knowledge version: bumped on a grant change for that email and
+  when a library push changes content for its grants. Deck auth reads it in the same `MGET` as
+  the captain record and returns it with grants and pushes, so an unchanged check is free or
+  one command. `GET /v1/knowledge` lists, per captain sharing with the account, a hash over what
+  that grant may read; `GET /v1/knowledge/<captainSub>` returns the items and writes one
+  `agent sync` audit row. Access that ended answers 403; 401 means only that the device token
+  is gone.
+- Agent keys (optional, for agents without Ship Deck) are `sdak1.<captainSub>.<random>`, made
+  by a signed-in viewer whose grant has `skills` or `notes`, at most 3 per viewer per deck,
+  returned once. The relay stores `agk:<sha256(key)>` (label, created, last used, the grant's
+  id) and `agks:<captainSub>:<viewerSub>` (the key ids).
+- Every key read checks the key, then the live grant: unknown, revoked or expired keys, a
+  revoked or ended grant, or a new grant after a revoke answer 401; neither `skills` nor
+  `notes` granted answers 403. Each key has 60 reads an hour (`arl:…`, 429 with `Retry-After`).
+  Every read of a known key writes one audit row for the captain; going over the limit writes one.
 
 ## Data and retention
 
@@ -216,9 +235,9 @@ One Redis database: `user:<email>` (account, scrypt hash), `sess:<hash>` (7 days
 `inv:<hash>` (24 h), `cap:<sub>` (the captain's devices and grants), `snap:<sub>` (latest
 snapshot, 1 h, overwritten, never versioned), `vix:<email>` (captains sharing with an email),
 `aud:<sub>` and `aud:auth` (audit rows, added with `ZADD` only and aged out after 90 days),
-`aseen:…` (15-minute audit de-dupe), `fail:…` (15-minute lockout counters), `lib:<sub>` (agent
-library, 2 h), `agk:<hash>`/`agks:<sub>:<viewerSub>` (agent keys, 30 days at most), `arl:…`
-(hourly agent rate counters).
+`aseen:…` (15-minute audit de-dupe), `fail:…` (15-minute lockout counters), `lib:<sub>`
+(knowledge library, 2 h), `kver:<sub>` (knowledge version, 35 days), `agk:<hash>`/`agks:<sub>:<viewerSub>`
+(agent keys, 30 days at most), `arl:…` (hourly agent rate counters).
 
 ## Failure modes
 

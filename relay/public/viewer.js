@@ -14,7 +14,7 @@
   const MAX_BACKOFF = 15 * 60e3;
   const DAY = 86400e3;
   const MARK_RE = /(\[(?:token|key|secret|path|link) hidden\])/;
-  const SCOPE_NAME = { board: 'Board', updates: 'Updates', model: 'Model and effort', skills: 'Skills', terminal: 'Terminal output', notes: 'Notes and memory', chat: 'Chat and activity', agentLibrary: 'Agent keys' };
+  const SCOPE_NAME = { board: 'Board', updates: 'Updates', model: 'Model and effort', skills: 'Skills', terminal: 'Terminal output', notes: 'Notes and memory', chat: 'Chat and activity' };
 
   let viewer = null;
   let decks = [];
@@ -240,11 +240,10 @@
       const rows = [
         [has('board'), has('updates') ? 'Board and updates' : 'Board'],
         [has('model'), 'Model and effort'],
-        [has('skills'), 'Skills, names only'],
+        [has('skills'), 'Skills, which your agent can use'],
         [has('terminal'), 'Terminal output, redacted'],
         [has('notes'), 'Notes and memory'],
         [has('chat'), 'Chat and activity'],
-        [has('agentLibrary'), has('notes') ? 'Your agent can read skills and notes' : 'Your agent can read skills'],
       ];
       for (const [yes, text] of rows) list.append(h('li', { class: yes ? 'yes' : 'no' }, icon(yes ? 'i-check' : 'i-dash'), text));
       list.append(h('li', { class: 'no' }, icon('i-lock'), 'Attachments, paths, sessions'));
@@ -253,7 +252,8 @@
       for (const [k, ic] of [['skills', 'i-book'], ['notes', 'i-book'], ['chat', 'i-chat']]) {
         if (has(k)) extras.append(h('button', { class: 'btn sm', type: 'button', onclick: (e) => openScope(k, e.currentTarget) }, icon(ic), SCOPE_NAME[k]));
       }
-      if (has('agentLibrary')) extras.append(h('button', { class: 'btn sm', type: 'button', onclick: (e) => openKeys(e.currentTarget) }, icon('i-lock'), SCOPE_NAME.agentLibrary));
+      // Ship Deck syncs skills and notes into the viewer's agent on its own; keys are for agents without it.
+      if (has('skills') || has('notes')) extras.append(h('button', { class: 'btn sm', type: 'button', onclick: (e) => openKeys(e.currentTarget) }, icon('i-lock'), 'Agent keys'));
     }
     $('aside-ask').textContent = `You can look but not act. To ask ${first(name)} something, message them directly.`;
     const box = $('decks');
@@ -346,13 +346,14 @@
     const deck = current;
     const name = first((board && board.captain.name) || (decks.find((x) => x.captainSub === deck) || {}).name);
     const r = await get(`/v1/decks/${encodeURIComponent(deck)}/agent-keys`);
-    if (r.status !== 200) { body.append(h('p', { class: 'empty', text: r.status === 403 ? `${name} has not turned on agent access for you.` : 'Not available right now' })); return; }
+    if (r.status !== 200) { body.append(h('p', { class: 'empty', text: r.status === 403 ? `${name} does not share skills or notes with you.` : 'Not available right now' })); return; }
     renderKeys(body, deck, name, r.data, null);
   }
   function renderKeys(body, deck, name, d, fresh) {
     body.textContent = '';
-    const what = d.notes ? 'skills, notes and memory' : 'skills';
-    body.append(h('p', { class: 'fine', text: `A key lets your AI agent read ${possessive(name)} ${what}, read only, up to ${d.perHour} times an hour. Every read shows in ${possessive(name)} log. Keys end when your access ends.` }));
+    const what = d.skills && d.notes ? 'skills, notes and memory' : d.notes ? 'notes and memory' : 'skills';
+    body.append(h('p', { class: 'fine', text: `Your own Ship Deck already gives your agent ${possessive(name)} ${what}: sign in under Settings > Sharing and keep "Use knowledge shared with me" on. You need a key only for an agent that runs without Ship Deck.` }));
+    body.append(h('p', { class: 'fine', text: `A key lets that agent read them, read only, up to ${d.perHour} times an hour. Every read shows in ${possessive(name)} log. Keys end when your access ends.` }));
     if (fresh) {
       const field = h('input', { class: 'input', readonly: true, value: fresh.token, 'aria-label': `Agent key ${fresh.key.label}` });
       body.append(h('section', { class: 'invite-out' },
