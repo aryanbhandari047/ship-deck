@@ -10,6 +10,8 @@ function loadConfig(env = process.env) {
     ownerEmail: String(env.OWNER_EMAIL || '').trim().toLowerCase() || null,
     // One-time owner setup link (GET /api/auth/setup), unset once the owner has an account.
     setupCode: String(env.SETUP_CODE || ''),
+    // With SETUP_CODE, lets the link run while accounts exist: an owner password reset.
+    setupAllowReset: env.SETUP_ALLOW_RESET === '1',
     authProvider: env.AUTH_PROVIDER || 'password',
     upstash: {
       url: env.UPSTASH_REDIS_REST_URL || env.KV_REST_API_URL || '',

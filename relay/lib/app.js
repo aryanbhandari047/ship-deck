@@ -5,7 +5,7 @@
 //   user:<email> account   sess:<hash> session   cap:<sub> captain record (devices + grants)
 //   snap:<sub> latest snapshot (1 h TTL)   vix:<email> captains sharing with an email
 //   aud:<sub> / aud:auth append-only audit (90 days)   aseen:... 15-minute audit de-dupe
-//   setup:used the one-time owner setup link was spent
+//   setup:used:<sha256(code)> that owner setup code was spent (legacy setup:used blocks all)
 const crypto = require('node:crypto');
 const { createAuth, AuthError } = require('../auth');
 const { MAX_FAILURES, LOCK_SEC } = require('../auth/password');
@@ -111,9 +111,14 @@ function createRelay({ config, store, now = Date.now, log = (m) => console.error
     if (config.setupCode.length < 32 || !config.ownerEmail || !auth.emailAllowed(config.ownerEmail) || !auth.provider.createInvite) return notFound();
     const ip = clientIp(req, config.trustProxy);
     const ki = 'fail:ip:' + ip;
-    const [used, fails] = await store.cmd(['MGET', 'setup:used', ki]);
-    if (used || (await hasAccounts())) return notFound();
-    const audit = (result, reason) => store.pipeline(auditCmds('auth', { who: 'owner setup link', what: 'Owner setup link opened', result, reason, ip }));
+    // Single use per code; the legacy global flag keeps the original code dead.
+    const usedKey = 'setup:used:' + sha256(config.setupCode);
+    const [legacy, used, fails] = await store.cmd(['MGET', 'setup:used', usedKey, ki]);
+    if (legacy || used) return notFound();
+    const reset = await hasAccounts();
+    if (reset && !config.setupAllowReset) return notFound();
+    const what = reset ? 'Owner password reset via setup link' : 'Owner setup link opened';
+    const audit = (result, reason) => store.pipeline(auditCmds('auth', { who: 'owner setup link', what, result, reason, ip }));
     if (Number(fails) >= MAX_FAILURES) { await audit('refused', 'locked for 15 minutes'); return notFound(); }
     if (!codeMatches(url.searchParams.get('code') || '', config.setupCode)) {
       const [n] = await store.pipeline([['INCR', ki], ['EXPIRE', ki, LOCK_SEC]]);
@@ -121,9 +126,11 @@ function createRelay({ config, store, now = Date.now, log = (m) => console.error
       return notFound();
     }
     // NX makes the link single-use even when two clicks race.
-    if ((await store.cmd(['SET', 'setup:used', String(now()), 'NX'])) !== 'OK') return notFound();
+    if ((await store.cmd(['SET', usedKey, String(now()), 'NX'])) !== 'OK') return notFound();
     const inv = await auth.provider.createInvite({ email: config.ownerEmail, by: 'setup' });
-    await audit('ok', 'invite created for ' + inv.email);
+    // A reset also lifts the owner's lockout so they can sign in right after.
+    if (reset) await store.pipeline([['DEL', 'fail:e:' + config.ownerEmail], ['DEL', ki]]);
+    await audit('ok', (reset ? 'owner password reset via setup link, invite created for ' : 'invite created for ') + inv.email);
     res.writeHead(302, { ...BASE_HEADERS, Location: inv.link, 'Content-Length': 0 });
     res.end();
   }

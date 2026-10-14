@@ -5,9 +5,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const { startRelay } = require('./helpers');
+const { sha256 } = require('../auth/tokens');
 
 const CODE = 'S'.repeat(16) + crypto.randomBytes(24).toString('base64url');
 const ENV = { SETUP_CODE: CODE, OWNER_EMAIL: 'Ada@Keychain.com' };
+const usedKey = (code = CODE) => 'setup:used:' + sha256(code);
 const setup = (r, code = CODE) => r.browser().call('GET', '/api/auth/setup?code=' + encodeURIComponent(code));
 const authRows = (r) => [...(r.store.peek('aud:auth') || new Map()).keys()].map((s) => JSON.parse(s));
 
@@ -17,7 +19,7 @@ test('setup: disabled (plain 404) without SETUP_CODE, with a short one, or witho
     const res = await setup(r, env.SETUP_CODE || CODE);
     assert.equal(res.status, 404, JSON.stringify(env));
     assert.deepEqual(res.data, { error: 'not found' });
-    assert.equal(r.store.peek('setup:used'), null);
+    assert.equal(r.store.peek(usedKey(env.SETUP_CODE || CODE)), null);
     assert.equal(r.store.peek('invfor:ada@keychain.com'), null);
   }
 });
@@ -42,7 +44,7 @@ test('setup: a wrong code is a 404, audited, and locks the IP after 5 tries', as
   assert.equal(rows.filter((x) => x.result === 'refused').length, 5);
   assert.ok(rows.every((x) => x.ip && !JSON.stringify(x).includes(CODE.slice(0, 20))), 'audited per IP, code never stored');
   assert.equal((await setup(r)).status, 404, 'locked even with the right code');
-  assert.equal(r.store.peek('setup:used'), null);
+  assert.equal(r.store.peek(usedKey()), null);
   assert.equal((await r.browser().call('POST', '/api/auth/login', { email: 'ada@keychain.com', password: 'whatever password' })).status, 429, 'shares the login lockout');
   r.clock.t += 15 * 60e3 + 1;
   assert.equal((await setup(r)).status, 302, 'lock lifts after 15 minutes');
@@ -61,7 +63,7 @@ test('setup: the right code redirects once to an invite for OWNER_EMAIL only', a
   assert.match(loc, new RegExp('^' + r.base + '/invite#[A-Za-z0-9_-]{43}$'));
   assert.equal(res.headers.get('cache-control'), 'no-store');
   const token = loc.split('#')[1];
-  assert.ok(r.store.peek('setup:used'));
+  assert.ok(r.store.peek(usedKey()));
   assert.ok(r.store.peek('invfor:ada@keychain.com'));
   assert.ok(authRows(r).some((x) => x.what === 'Owner setup link opened' && x.result === 'ok'), 'audited');
 
@@ -84,4 +86,63 @@ test('setup: the code is compared in constant time', async (t) => {
   assert.equal(spy.mock.callCount(), 1, 'used even for a code of a different length');
   assert.equal((await setup(r)).status, 302);
   assert.equal(spy.mock.callCount(), 2);
+});
+
+const ipFails = async (r) => (await r.store.cmd(['SCAN', '0', 'MATCH', 'fail:ip:*', 'COUNT', 1000]))[1].length;
+const RESET = { ...ENV, SETUP_ALLOW_RESET: '1' };
+const login = (r, email, password) => r.browser().call('POST', '/api/auth/login', { email, password });
+
+test('reset: with SETUP_ALLOW_RESET the link resets the existing owner and lifts the lockout', async (t) => {
+  const r = await startRelay(t, { env: RESET });
+  await r.person('ada@keychain.com', 'the old password 1');
+  await r.person('grace@keychain.com', 'grace password 1');
+  // Four misses from this IP (a fifth would lock the IP, which also gates the link), and the
+  // email locked by misses from elsewhere.
+  for (let i = 0; i < 4; i++) await login(r, 'ada@keychain.com', 'wrong password ' + i);
+  assert.equal(await ipFails(r), 1);
+  await r.store.cmd(['SET', 'fail:e:ada@keychain.com', '9']);
+  assert.equal((await login(r, 'ada@keychain.com', 'the old password 1')).status, 429, 'owner locked');
+  assert.ok(r.store.peek('fail:e:ada@keychain.com'));
+
+  const res = await setup(r);
+  assert.equal(res.status, 302);
+  assert.equal(r.store.peek('fail:e:ada@keychain.com'), null, 'email lockout cleared');
+  assert.equal(await ipFails(r), 0, 'ip lockout cleared');
+  assert.ok(authRows(r).some((x) => x.what === 'Owner password reset via setup link' && x.result === 'ok'), 'audited');
+  const token = res.headers.get('location').split('#')[1];
+  assert.equal((await r.browser().call('POST', '/api/auth/accept', { token, password: 'a brand new password' })).status, 200);
+  assert.equal((await login(r, 'ada@keychain.com', 'a brand new password')).status, 200);
+  assert.equal((await login(r, 'grace@keychain.com', 'grace password 1')).status, 200, 'other accounts untouched');
+  assert.equal(r.store.peek('invfor:grace@keychain.com'), null);
+  assert.equal((await setup(r)).status, 404, 'single use');
+});
+
+test('reset: each code works once; a new code works again; the legacy flag keeps the old code dead', async (t) => {
+  const r = await startRelay(t, { env: RESET });
+  await r.person('ada@keychain.com');
+  assert.equal((await setup(r)).status, 302);
+  assert.equal((await setup(r)).status, 404);
+  assert.ok(r.store.peek(usedKey()));
+
+  const CODE2 = 'T'.repeat(48);
+  const r2 = await startRelay(t, { env: { ...RESET, SETUP_CODE: CODE2 } });
+  await r2.person('ada@keychain.com');
+  assert.equal((await setup(r2, CODE2)).status, 302, 'a fresh code works');
+  assert.equal((await setup(r2, CODE2)).status, 404);
+
+  const r3 = await startRelay(t, { env: RESET });
+  await r3.store.cmd(['SET', 'setup:used', '1']);
+  assert.equal((await setup(r3)).status, 404, 'legacy global flag still blocks');
+});
+
+test('reset: the wrong code is still a 404 and audited; non-owner emails never get an invite', async (t) => {
+  const r = await startRelay(t, { env: RESET });
+  await r.person('grace@keychain.com');
+  assert.equal((await setup(r, CODE.slice(0, -1) + '!')).status, 404);
+  assert.ok(authRows(r).some((x) => x.result === 'refused' && x.reason === 'wrong code'));
+  assert.equal(r.store.peek(usedKey()), null);
+  const res = await setup(r);
+  assert.equal(res.status, 302);
+  assert.equal(r.store.peek('invfor:grace@keychain.com'), null, 'only OWNER_EMAIL is invited');
+  assert.ok(r.store.peek('invfor:ada@keychain.com'));
 });

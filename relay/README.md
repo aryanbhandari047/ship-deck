@@ -88,6 +88,10 @@ number of viewers watching at once; nothing bills either way.
    accounts. Fallback, from this folder on your own computer:
    `UPSTASH_REDIS_REST_URL=… UPSTASH_REDIS_REST_TOKEN=… PUBLIC_BASE_URL=https://<project>.vercel.app node scripts/bootstrap-owner.js you@keychain.com`,
    then open the printed link (24 h, single use).
+   **Owner password reset** (no database credentials needed): set a new `SETUP_CODE` and
+   `SETUP_ALLOW_RESET=1`, redeploy, open the same setup link and set a new password. This
+   also lifts the owner's sign-in lockout. Then remove both variables and redeploy. Each code
+   works once, so a later reset needs a fresh code.
 6. **Share.** Start Ship Deck with `--share --share-relay https://<project>.vercel.app`,
    open Settings > Sharing (the share button in the top bar), sign in, add teammates, and send
    each new person the invite link it shows (Slack or email; the relay sends no email).
@@ -100,7 +104,8 @@ number of viewers watching at once; nothing bills either way.
 | `ALLOWED_HD` | `keychain.com`. The only email domain that can hold an account, exact match. |
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | From Upstash. `KV_REST_API_URL`/`KV_REST_API_TOKEN` (Marketplace names) also work. |
 | `OWNER_EMAIL` | Optional. This account also sees every sign-in attempt (failures, lockouts) in its audit log. |
-| `SETUP_CODE` | Only for the first account (step 5): 32+ random characters (48 suggested). Remove it once you have signed in. |
+| `SETUP_CODE` | Only for the first account (step 5) or an owner reset: 32+ random characters (48 suggested). Remove it once you have signed in. |
+| `SETUP_ALLOW_RESET` | `1` lets the setup link run while accounts exist, as an owner password reset. Remove it with `SETUP_CODE`. |
 | `AUTH_PROVIDER` | Optional, `password` (the only one today). |
 
 The relay refuses to serve (503 "relay not configured", reason in the function log) when it
@@ -136,9 +141,12 @@ fails when they drift.
   fragment, so it never reaches logs. Opening it sets the password and signs in. Re-inviting
   an existing account is the password reset and ends its other sessions.
 - **Owner setup link.** `GET /api/auth/setup?code=<SETUP_CODE>` answers only while
-  `SETUP_CODE` (32+ characters) and `OWNER_EMAIL` are set and no account exists. The code is
-  compared in constant time; a match creates the usual invite for `OWNER_EMAIL`, redirects
-  (302) to it and records `setup:used`, so the link works once. Every refusal is the same
+  `SETUP_CODE` (32+ characters) and `OWNER_EMAIL` are set and no account exists, or, with
+  `SETUP_ALLOW_RESET=1`, also while accounts exist (an owner password reset that also clears
+  the owner's email lockout and the caller's IP lockout, audited as "Owner password reset via
+  setup link"). The code is compared in constant time; a match creates the usual invite for
+  `OWNER_EMAIL` only, redirects (302) to it and records `setup:used:<sha256(code)>`, so each
+  code works once (the older global `setup:used` flag still blocks every code). Every refusal is the same
   404; wrong codes are audited to `OWNER_EMAIL`'s log and count toward the per-IP lockout.
 - **Passwords:** at least 12 characters, scrypt (N=16384, r=8, p=1) with a random salt per
   user, constant-time compare, never logged, stored or returned.
