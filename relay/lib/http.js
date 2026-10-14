@@ -18,6 +18,11 @@ function sendJson(res, status, obj, headers = {}) {
   res.end(body);
 }
 
+function sendText(res, status, text, type, headers = {}) {
+  res.writeHead(status, { ...BASE_HEADERS, 'Content-Type': type + '; charset=utf-8', 'Content-Length': Buffer.byteLength(text), ...headers });
+  res.end(text);
+}
+
 // The JSON body, at most max bytes. Bodies are never logged.
 function readJson(req, max) {
   return new Promise((resolve, reject) => {
@@ -58,4 +63,4 @@ function bearer(req) {
   return m ? m[1] : null;
 }
 
-module.exports = { HttpError, BASE_HEADERS, sendJson, readJson, clientIp, sameOrigin, bearer };
+module.exports = { HttpError, BASE_HEADERS, sendJson, sendText, readJson, clientIp, sameOrigin, bearer };

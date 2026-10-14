@@ -4,6 +4,7 @@
 // every viewer request. Default deny: no grant, no data.
 const { SCOPES } = require('./snapshot');
 const { emailAllowed, normalizeEmail } = require('../auth/domain');
+const { randomId } = require('../auth/tokens');
 
 const MAX_DAYS = 30;
 const DAY = 86400e3;
@@ -31,9 +32,12 @@ function validateGrant(viewer, body, { domain, captainEmail, now = Date.now(), p
   if (!Number.isFinite(expiresAt)) expiresAt = max;
   if (expiresAt <= now) throw new GrantError('The end date is in the past.');
   expiresAt = Math.min(expiresAt, max);
+  const same = previous && previous.viewerEmail === email;
   return {
     viewerEmail: email,
-    viewerSub: previous && previous.viewerEmail === email ? previous.viewerSub || null : null,
+    // A grant's identity across edits; a revoke and re-grant makes a new one (agent keys bind to it).
+    gid: (same && previous.gid) || randomId(9),
+    viewerSub: same ? previous.viewerSub || null : null,
     scopes,
     projects: projects.includes('*') ? ['*'] : projects,
     expiresAt,
@@ -66,4 +70,7 @@ function checkAccess({ cap, viewer, scope, project, domain, now = Date.now() }) 
   return { ok: true, grant };
 }
 
-module.exports = { MAX_DAYS, NEVER, GrantError, validateGrant, findGrant, checkAccess };
+// Grants made before gid existed fall back to their creation time.
+const grantId = (g) => (g ? g.gid || 'c' + g.createdAt : null);
+
+module.exports = { grantId, MAX_DAYS, NEVER, GrantError, validateGrant, findGrant, checkAccess };

@@ -1,6 +1,6 @@
 'use strict';
-// The teammate's read-only view of a shared deck. Reads only: every request is a GET to /v1/decks
-// (plus sign-in/out). All deck text is set with textContent; redaction markers become grey chips.
+// The teammate's read-only view of a shared deck. Deck data is GET only from /v1/decks; the only
+// writes are sign-in/out and the viewer's own agent keys. All deck text is set with textContent; redaction markers become grey chips.
 // Polls at most every 30 s while the tab is visible, pauses after 10 idle minutes and backs off
 // when the relay is over its free limit, so the free tiers are never pushed.
 
@@ -14,7 +14,7 @@
   const MAX_BACKOFF = 15 * 60e3;
   const DAY = 86400e3;
   const MARK_RE = /(\[(?:token|key|secret|path|link) hidden\])/;
-  const SCOPE_NAME = { board: 'Board', updates: 'Updates', model: 'Model and effort', skills: 'Skills', terminal: 'Terminal output', notes: 'Notes and memory', chat: 'Chat and activity' };
+  const SCOPE_NAME = { board: 'Board', updates: 'Updates', model: 'Model and effort', skills: 'Skills', terminal: 'Terminal output', notes: 'Notes and memory', chat: 'Chat and activity', agentLibrary: 'Agent keys' };
 
   let viewer = null;
   let decks = [];
@@ -79,8 +79,8 @@
     try { r = await fetch(p, { cache: 'no-store', credentials: 'same-origin' }); } catch { return { status: 0, data: {} }; }
     return { status: r.status, data: await r.json().catch(() => ({})), retryAfter: Number(r.headers.get('retry-after')) || 0 };
   }
-  async function post(p, body) {
-    const r = await fetch(p, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).catch(() => null);
+  async function post(p, body, method = 'POST') {
+    const r = await fetch(p, { method, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).catch(() => null);
     return { status: r ? r.status : 0, data: r ? await r.json().catch(() => ({})) : {} };
   }
 
@@ -244,6 +244,7 @@
         [has('terminal'), 'Terminal output, redacted'],
         [has('notes'), 'Notes and memory'],
         [has('chat'), 'Chat and activity'],
+        [has('agentLibrary'), has('notes') ? 'Your agent can read skills and notes' : 'Your agent can read skills'],
       ];
       for (const [yes, text] of rows) list.append(h('li', { class: yes ? 'yes' : 'no' }, icon(yes ? 'i-check' : 'i-dash'), text));
       list.append(h('li', { class: 'no' }, icon('i-lock'), 'Attachments, paths, sessions'));
@@ -252,6 +253,7 @@
       for (const [k, ic] of [['skills', 'i-book'], ['notes', 'i-book'], ['chat', 'i-chat']]) {
         if (has(k)) extras.append(h('button', { class: 'btn sm', type: 'button', onclick: (e) => openScope(k, e.currentTarget) }, icon(ic), SCOPE_NAME[k]));
       }
+      if (has('agentLibrary')) extras.append(h('button', { class: 'btn sm', type: 'button', onclick: (e) => openKeys(e.currentTarget) }, icon('i-lock'), SCOPE_NAME.agentLibrary));
     }
     $('aside-ask').textContent = `You can look but not act. To ask ${first(name)} something, message them directly.`;
     const box = $('decks');
@@ -335,6 +337,53 @@
       body.append(h('section', null, h('h3', { text: 'Chat' }), h('ul', { class: 'v-list' }, (d.chat || []).map((c) => h('li', null, h('span', { class: 'when', text: `${c.from === 'firstmate' ? 'First mate' : first(board.captain.name)}${c.ts ? ' · ' + c.ts : ''}` }), h('span', null, rtext(c.text)))))));
       body.append(h('section', null, h('h3', { text: 'Activity' }), h('ul', { class: 'v-list' }, (d.activity || []).slice().reverse().map((a) => h('li', null, h('span', { class: 'when', text: a.ts ? new Date(a.ts).toLocaleTimeString() : '' }), h('span', null, rtext(a.label)))))));
     }
+  }
+
+  // ---------- agent keys: read-only keys for the viewer's own AI agent ----------
+  // A new key is shown once and never again; the relay keeps only its hash.
+  async function openKeys(from) {
+    const body = openSheet('Agent keys', from);
+    const deck = current;
+    const name = first((board && board.captain.name) || (decks.find((x) => x.captainSub === deck) || {}).name);
+    const r = await get(`/v1/decks/${encodeURIComponent(deck)}/agent-keys`);
+    if (r.status !== 200) { body.append(h('p', { class: 'empty', text: r.status === 403 ? `${name} has not turned on agent access for you.` : 'Not available right now' })); return; }
+    renderKeys(body, deck, name, r.data, null);
+  }
+  function renderKeys(body, deck, name, d, fresh) {
+    body.textContent = '';
+    const what = d.notes ? 'skills, notes and memory' : 'skills';
+    body.append(h('p', { class: 'fine', text: `A key lets your AI agent read ${possessive(name)} ${what}, read only, up to ${d.perHour} times an hour. Every read shows in ${possessive(name)} log. Keys end when your access ends.` }));
+    if (fresh) {
+      const field = h('input', { class: 'input', readonly: true, value: fresh.token, 'aria-label': `Agent key ${fresh.key.label}` });
+      body.append(h('section', { class: 'invite-out' },
+        h('p', { class: 'hint', text: 'Copy this key now: it is shown only once. Put it in SHIP_DECK_LIBRARY_KEY for your agent (see docs/AGENT-LIBRARY.md).' }),
+        h('div', { class: 'invite-link' }, field, h('button', { class: 'btn sm', type: 'button', onclick: async () => {
+          try { await navigator.clipboard.writeText(fresh.token); } catch { field.select(); }
+        } }, icon('i-copy'), 'Copy'))));
+    }
+    const list = h('ul', { class: 'v-list' }, d.keys.map((k) => h('li', null,
+      h('b', { text: k.label }),
+      h('span', { class: 'muted', text: `Made ${fmtDate(k.createdAt)} · ${k.lastUsed ? `last used ${ago(k.lastUsed)} ago` : 'never used'} · ends ${fmtDate(k.expiresAt)}` }),
+      h('div', null, h('button', { class: 'btn sm danger', type: 'button', text: 'Revoke', onclick: async () => {
+        const res = await post(`/v1/decks/${encodeURIComponent(deck)}/agent-keys/${encodeURIComponent(k.id)}`, undefined, 'DELETE');
+        if (res.status !== 200) return;
+        const again = await get(`/v1/decks/${encodeURIComponent(deck)}/agent-keys`);
+        if (again.status === 200) renderKeys(body, deck, name, again.data, null);
+      } })))));
+    body.append(h('section', null, h('h3', { text: `Your keys (${d.keys.length} of ${d.max})` }), d.keys.length ? list : h('p', { class: 'empty', text: 'No keys yet' })));
+    if (d.keys.length < d.max) {
+      const label = h('input', { class: 'input', maxlength: '40', placeholder: 'Label, e.g. work laptop', 'aria-label': 'Key label' });
+      const err = h('p', { class: 'v-error', role: 'alert', hidden: true });
+      const form = h('form', { class: 'invite-link' }, label, h('button', { class: 'btn sm primary', type: 'submit', text: 'Create agent key' }));
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const res = await post(`/v1/decks/${encodeURIComponent(deck)}/agent-keys`, { label: label.value });
+        if (res.status !== 200) { err.textContent = res.data.error || 'The relay could not be reached.'; err.hidden = false; return; }
+        renderKeys(body, deck, name, res.data, { token: res.data.token, key: res.data.key });
+      });
+      body.append(h('section', null, form, err));
+    }
+    body.append(h('p', { class: 'fine' }, 'Endpoint: ', h('code', { text: d.endpoint })));
   }
 
   // ---------- sign in / out ----------

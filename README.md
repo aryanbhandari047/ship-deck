@@ -474,8 +474,9 @@ stripped), 64 KB per snapshot. Workers are keyed by an HMAC of their id.
 | Terminal (40 redacted lines, every 30 s) | off | |
 | Captain notes and memory | off | |
 | First mate chat and activity (labels only) | off | |
+| Agent library access (their AI agent reads your skills, plus notes if Notes is on, with a read-only key) | off | see [`docs/AGENT-LIBRARY.md`](docs/AGENT-LIBRARY.md) |
 | Attachments, paths, worktrees, windows, session ids, orders | never | not in the allow-list |
-| Sending anything | never | the relay has no viewer write route |
+| Sending anything | never | viewers can only make and revoke their own agent keys; `/v1/agent` is GET only |
 
 Nothing is pushed until someone has an active grant. The share agent pushes only when the
 redacted snapshot changes, at most every 30 s, plus a keep-alive every 10 minutes; on quota,
@@ -519,9 +520,11 @@ orders, thread or attachments whatever the toggles), redaction of known secret s
 caps, HMAC refs, grant unions, the agent's push pacing and back-off, and that the relay's
 allow-list and UI copies match the deck. `test/share-e2e.test.js` runs a real deck with
 `--share` against the relay dev server: sign-in, grant, push, a granted viewer, a refused one
-and the audit. `relay/test/` covers auth (domain, invites, scrypt, lockout, sessions, no
+and the audit. It also covers the agent library projection (skills only unless notes is on,
+redacted, capped) and its push and removal. `relay/test/` covers auth (domain, invites, scrypt, lockout, sessions, no
 password leaks) and the relay routes (grant checks, append-only audit, no viewer write route,
-Redis commands per request).
+Redis commands per request) and agent library keys (`relay/test/agent.test.js`: scope off,
+revoked or expired keys, notes gating, one audit row per read, the hourly limit, GET only).
 
 `test/actions.test.js` covers the orders queue, CLI and wake check (temp
 `HOME`), window lookup, peek/send with an injected executor (fm-send is never

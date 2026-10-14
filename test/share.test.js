@@ -211,6 +211,10 @@ test('the relay keeps the same allow-list, and its UI copies match the deck', ()
   assert.deepEqual(relaySnap.WORKER_KEYS, share.WORKER_KEYS);
   assert.deepEqual(relaySnap.SNAPSHOT_KEYS, share.SNAPSHOT_KEYS);
   assert.deepEqual(relaySnap.SCOPES, share.SCOPES);
+  const relayLib = require('../relay/lib/library');
+  assert.deepEqual(relayLib.ITEM_KEYS, share.LIBRARY_ITEM_KEYS);
+  assert.equal(relayLib.KEY_RE.source, share.LIBRARY_KEY_RE.source);
+  assert.equal(relayLib.MAX_TEXT, share.LIMITS.libraryText);
   for (const f of require('../relay/scripts/sync-ui.js').FILES) {
     assert.equal(fs.readFileSync(path.join(ROOT, 'relay/public', f), 'utf8'), fs.readFileSync(path.join(ROOT, 'public', f), 'utf8'), `relay/public/${f} drifted: run node relay/scripts/sync-ui.js`);
   }
@@ -250,6 +254,7 @@ function fakeRelay({ grants = [{ viewerEmail: 'grace@keychain.com', scopes: ['bo
     if (p === '/v1/device/login') return reply(200, { token: 'sdt1.test', account: { sub: 'ada-sub', email: 'ada@keychain.com', name: 'Ada' } });
     if (p === '/v1/grants' || p.startsWith('/v1/grants/')) return reply(200, { grants });
     if (p === '/v1/snapshot') return reply(200, { ok: true, grants });
+    if (p === '/v1/library') return reply(200, { ok: true });
     return reply(404, { error: 'not found' });
   };
   return { fetchImpl, calls, setFail: (f) => { fail = f; } };
@@ -387,4 +392,86 @@ test('push hash ignores the build time and the first mate busy flag, not real ch
   assert.equal(share.snapshotHash(a), share.snapshotHash(same));
   assert.notEqual(share.snapshotHash(a), share.snapshotHash({ ...a, fleet: { ...a.fleet, monitoring: 'late' } }));
   assert.notEqual(share.snapshotHash(a), share.snapshotHash({ ...a, workers: [{ ref: 'r', title: 'y' }] }));
+});
+
+// ---------- agent library (scope agentLibrary) ----------
+
+const LIBRARY = [
+  { key: 'skill:captain:deploy', title: 'Deploy', description: 'Reads /Users/ada/secrets.env', text: `# Deploy\nexport GH=ghp_abcdefghijklmnopqrstuvwxyz0123456789\nsee ${HOME}/firstmate/AGENTS.md and https://example.com/x?token=1\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\nkey sdak1.abcdefgh12.${'Q'.repeat(43)}`, path: HOME + '/.claude/skills/deploy/SKILL.md' },
+  { key: 'memory:fleet-habits.md', title: 'Fleet habits', description: '', text: 'password=hunter2hunter2' },
+  { key: '/etc/passwd', title: 'bad', text: 'root' },
+];
+
+test('library projection: skills only unless notes is on, redacted, allow-listed, capped', () => {
+  const off = share.projectLibrary(LIBRARY, { home: HOME });
+  assert.deepEqual(off.items.map((i) => i.key), ['skill:captain:deploy']);
+  const on = share.projectLibrary(LIBRARY, { home: HOME, notes: true });
+  assert.deepEqual(on.items.map((i) => i.key), ['skill:captain:deploy', 'memory:fleet-habits.md']);
+  for (const it of on.items) assert.deepEqual(Object.keys(it), share.LIBRARY_ITEM_KEYS);
+  const text = stringsDeep(on).join('\n');
+  for (const bad of [HOME, '/Users/ada', 'ghp_', 'hunter2', 'BEGIN PRIVATE', 'example.com', 'sdak1.', 'Q'.repeat(43)]) assert.ok(!text.includes(bad), bad + ' leaked');
+  assert.match(on.items[0].text, /\[token hidden\]/);
+  assert.match(on.items[0].text, /\[key hidden\]/);
+  const big = share.projectLibrary(Array.from({ length: 40 }, (_, i) => ({ key: 'skill:captain:s' + i, title: 's', text: 'word '.repeat(10000) })), { home: HOME });
+  assert.ok(big.items.every((i) => i.text.length <= share.LIMITS.libraryText));
+  assert.ok(Buffer.byteLength(JSON.stringify(big.items)) <= share.LIMITS.library);
+  assert.ok(big.trimmed > 0);
+});
+
+test('libraryNeeds: skills with any agentLibrary grant, notes only when the same grant has notes', () => {
+  const g = (scopes, expiresAt = 2e12) => ({ scopes, expiresAt });
+  assert.deepEqual(share.libraryNeeds([g(['board', 'notes'])], 1e12), { on: false, notes: false });
+  assert.deepEqual(share.libraryNeeds([g(['agentLibrary']), g(['notes'])], 1e12), { on: true, notes: false });
+  assert.deepEqual(share.libraryNeeds([g(['agentLibrary', 'notes'])], 1e12), { on: true, notes: true });
+  assert.deepEqual(share.libraryNeeds([g(['agentLibrary', 'notes'], 1)], 1e12), { on: false, notes: false }, 'expired');
+  assert.ok(!share.DEFAULT_SCOPES.includes('agentLibrary'), 'off by default');
+});
+
+test('agent: pushes the library only for agentLibrary grants, on change or hourly, and removes it when no grant needs it', async (t) => {
+  const clock = { t: 1e12 };
+  const grants = [{ viewerEmail: 'grace@keychain.com', scopes: ['board', 'agentLibrary'], projects: ['*'], expiresAt: 2e12 }];
+  const relay = fakeRelay({ grants });
+  const dir = tempDir(t);
+  const fleet = await richFleet();
+  const asked = [];
+  let lib = LIBRARY;
+  const agent = share.createShareAgent({
+    relayUrl: 'https://relay.example', dir, home: HOME, fetchImpl: relay.fetchImpl, now: () => clock.t,
+    readFleet: async () => fleet, readTerminal: async () => 'pane', readExtras: async () => ({}),
+    readLibrary: async (need) => { asked.push(need); return lib; },
+  });
+  await agent.signIn({ email: 'ada@keychain.com', password: 'pw' });
+  const libCalls = () => relay.calls.filter((c) => c.path === '/v1/library');
+  await agent.tick();
+  assert.equal(libCalls().length, 1);
+  assert.deepEqual(asked[0], { notes: false });
+  assert.deepEqual(libCalls()[0].body.items.map((i) => i.key), ['skill:captain:deploy']);
+  assert.ok(!JSON.stringify(libCalls()[0].body).includes(HOME));
+  clock.t += 61e3;
+  await agent.tick();
+  assert.equal(libCalls().length, 1, 'unchanged: not sent again');
+  lib = [...LIBRARY, { key: 'skill:captain:new', title: 'New', text: 'x' }];
+  clock.t += 61e3;
+  await agent.tick();
+  assert.equal(libCalls().length, 2, 'changed: sent');
+  clock.t += 61 * 60e3;
+  await agent.tick();
+  assert.equal(libCalls().length, 3, 'hourly keep-alive');
+  grants[0].scopes = ['board'];
+  await agent.putGrant({ email: 'grace@keychain.com', scopes: ['board'], projects: ['*'] });
+  await agent.tick();
+  assert.equal(libCalls().at(-1).method, 'DELETE', 'no grant needs it: removed from the relay');
+  const n = libCalls().length;
+  clock.t += 61e3;
+  await agent.tick();
+  assert.equal(libCalls().length, n);
+  // Pausing takes it down too.
+  grants[0].scopes = ['agentLibrary', 'notes'];
+  await agent.putGrant({ email: 'grace@keychain.com', scopes: ['agentLibrary', 'notes'], projects: ['*'] });
+  await agent.tick();
+  assert.deepEqual(asked.at(-1), { notes: true });
+  assert.equal(libCalls().at(-1).method, 'POST');
+  agent.setPaused(true);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(libCalls().at(-1).method, 'DELETE');
 });

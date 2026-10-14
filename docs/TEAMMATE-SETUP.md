@@ -65,8 +65,7 @@ install Ship Deck below.
 
 ## 3. Install Ship Deck (one command)
 
-The Ship Deck repo is private: you'll need to be added as a collaborator
-first; ask Aryan. Once you have access:
+The Ship Deck repo is public, so anyone can clone it:
 
 ```sh
 git clone https://github.com/aryanbhandari047/ship-deck.git ~/ship-deck && sh ~/ship-deck/bin/install.sh

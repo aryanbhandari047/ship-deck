@@ -262,6 +262,9 @@ function createServer(opts) {
   }
 
   // Sharing (--share): readers hand the agent data; it never gets orders, wake or fm-send.
+  const isSkill = (e) => e.exists && e.key.startsWith('skill:');
+  const isNote = (e) => e.exists && (SHARE_NOTES.includes(e.key) || e.key.startsWith('memory:'));
+  const readEntryText = (e) => { const r = library.readLibraryEntry(opts.home, memoryDir, e.key, libOpts); return (r && r.text) || ''; };
   const agent = opts.share ? share.createShareAgent({
     relayUrl: opts.shareRelay,
     dir: ordersDir,
@@ -275,19 +278,18 @@ function createServer(opts) {
       const fm = feed.view(NaN);
       const out = { firstMateWorking: !!fm.working };
       const lib = needs.skills || needs.notes ? library.listLibrary(opts.home, memoryDir, libOpts) : [];
-      if (needs.skills) out.skills = lib.filter((e) => e.key.startsWith('skill:') && e.exists).map((e) => ({ key: e.key, title: e.title, description: e.description }));
-      if (needs.notes) {
-        out.notes = lib.filter((e) => e.exists && (SHARE_NOTES.includes(e.key) || e.key.startsWith('memory:'))).map((e) => {
-          const r = library.readLibraryEntry(opts.home, memoryDir, e.key, libOpts);
-          return { key: e.key, title: e.title, text: (r && r.text) || '' };
-        });
-      }
+      if (needs.skills) out.skills = lib.filter(isSkill).map((e) => ({ key: e.key, title: e.title, description: e.description }));
+      if (needs.notes) out.notes = lib.filter(isNote).map((e) => ({ key: e.key, title: e.title, text: readEntryText(e) }));
       if (needs.chat) {
         out.thread = orders.buildThread(ordersDir, { limit: 30 });
         out.activity = fm.events;
       }
       return out;
     },
+    // The agent library (grant scope agentLibrary): skills with their text, notes only when asked.
+    readLibrary: async ({ notes }) => library.listLibrary(opts.home, memoryDir, libOpts)
+      .filter((e) => isSkill(e) || (notes && isNote(e)))
+      .map((e) => ({ key: e.key, title: e.title, description: e.description || '', text: readEntryText(e) })),
   }) : null;
 
   // Relay errors come back as plain messages; 401/4xx keep their status, the rest are 502.

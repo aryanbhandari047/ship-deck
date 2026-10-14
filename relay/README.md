@@ -3,7 +3,8 @@
 A small Vercel project that lets Keychain teammates watch each other's Ship Deck, read-only.
 A captain's deck pushes a redacted snapshot out to the relay (`ship-deck --share`); teammates
 the captain named sign in here and see it. The captain's computer never accepts a connection,
-and nothing a viewer does can reach a deck: viewer routes are GET only.
+and nothing a viewer does can reach a deck: deck data routes are GET only, and the only viewer
+writes are their own read-only agent keys (see [Agent library access](#agent-library-access)).
 
 ```
 Captain's laptop                       Relay (Vercel + Upstash Redis)            Teammate's browser
@@ -44,6 +45,8 @@ Redis commands per request (asserted in `relay/test/relay.test.js`):
 | Deck grant refresh (`GET /v1/grants?brief=1`, every 30 min) | 1 |
 | Viewer read (`GET /v1/decks/<sub>/<scope>`) | 1, plus 3 when it writes an audit row (first look at that item in 15 min) |
 | Viewer deck list (`GET /v1/decks`, on load and every 30 min) | 2 |
+| Agent read (`GET /v1/agent/library[/…]`) | 6: key + deck + item, rate counter, audit row; 7 when it also stamps last-used (at most every 10 min); 2 for an unknown key |
+| Deck library push (`POST /v1/library`, on change or hourly) | 4-5 |
 
 Assumptions: each deck runs 10 h a day and its board changes on average every 3 minutes
 (pushes happen only on change, at most every 30 s, plus a keep-alive every 10 minutes); each
@@ -55,6 +58,12 @@ pauses after 10 idle minutes) and opens 5 workers.
 | 10 decks: 230 pushes + 20 grant refreshes each | 2,500 requests | 4,800 | 2,500 |
 | 50 viewers: 60 polls, 2 lists, 10 worker reads, 12 audit rows each | 3,600 requests | 5,500 | 3,600 |
 | **Total** | | **≈ 10,300 (≈ 310,000/month, 62% of 500K)** | **≈ 6,100 (≈ 183,000/month, 18% of 1M)** |
+
+Agent library: 10 agent keys reading 20 items a day each is 200 reads, about 1,300
+commands a day (≈ 40,000/month, 8%), plus at most 10 library pushes a day per deck (≈ 15,000/month).
+Library items are capped at 16,000 characters, so reads move little data. The 60 reads/hour
+limit per key is the ceiling: a key read flat out all day would cost about 9,000 commands, so
+watch the Upstash console if teammates script their agents; nothing bills either way.
 
 Active CPU: a request does a JSON parse and one Redis round trip, ≤ 10 ms of CPU, so about
 30 minutes a month (13% of 4 h); sign-ins cost about 50 ms each (scrypt). Data: snapshots are
@@ -173,13 +182,33 @@ fails when they drift.
 | `POST /v1/invites` | deck token | a one-time invite link |
 | `GET /v1/decks` | viewer session | decks shared with me |
 | `GET /v1/decks/<captainSub>/<scope>[?ref=]` | viewer session | one scope: `board`, `updates`, `model`, `skills`, `terminal`, `notes`, `chat` |
+| `GET`, `POST /v1/decks/<captainSub>/agent-keys`, `DELETE …/agent-keys/<id>` | viewer session | the viewer's own agent keys for that deck (`POST` returns the key once) |
+| `POST /v1/library`, `DELETE /v1/library` | deck token | store or remove the agent library projection (re-sanitised, 256 KB) |
+| `GET /v1/agent/library`, `GET /v1/agent/library/<captainSub>/<key>` | agent key | the library list (JSON) and one item (markdown) |
 
-Nothing else is routed. Viewer routes answer 405 to every other method. A grant is authored
+Nothing else is routed. Viewer deck routes and `/v1/agent` answer 405 to every other method. A grant is authored
 only through the owning captain's deck token and is checked on every viewer request: grant
 present (revoke deletes it), not expired (30 days at most), scope granted, and the worker's
 project granted. The first person to use a grant binds it to their account, so a recycled
 email does not inherit it. Every view and refusal is audited; repeats of the same view collapse
 into one row per 15 minutes to stay inside the free tier.
+
+## Agent library access
+
+Grant scope `agentLibrary` (off by default) lets the teammate's AI agent read the captain's
+library; usage, curl and a skill stub are in [`../docs/AGENT-LIBRARY.md`](../docs/AGENT-LIBRARY.md).
+
+- The deck pushes a separate, redacted projection (skills; notes and memory only when one
+  grant has both `agentLibrary` and `notes`) to `lib:<sub>`, a hash with an `index` field and
+  one `i:<key>` field per item, kept 2 hours past the last push. The relay re-applies the
+  allow-list (`lib/library.js`) and serves notes only to grants that also have `notes`.
+- Keys are `sdak1.<captainSub>.<random>`, made by a signed-in viewer whose grant has the scope,
+  at most 3 per viewer per deck, returned once. The relay stores `agk:<sha256(key)>` (label,
+  created, last used, the grant's id) and `agks:<captainSub>:<viewerSub>` (the key ids).
+- Every read checks the key, then the live grant: unknown, revoked or expired keys, a revoked
+  or ended grant, or a new grant after a revoke answer 401; the scope turned off answers 403.
+  Each key has 60 reads an hour (`arl:…`, 429 with `Retry-After`). Every read of a known key
+  writes one audit row for the captain; going over the limit writes one.
 
 ## Data and retention
 
@@ -187,7 +216,9 @@ One Redis database: `user:<email>` (account, scrypt hash), `sess:<hash>` (7 days
 `inv:<hash>` (24 h), `cap:<sub>` (the captain's devices and grants), `snap:<sub>` (latest
 snapshot, 1 h, overwritten, never versioned), `vix:<email>` (captains sharing with an email),
 `aud:<sub>` and `aud:auth` (audit rows, added with `ZADD` only and aged out after 90 days),
-`aseen:…` (15-minute audit de-dupe), `fail:…` (15-minute lockout counters).
+`aseen:…` (15-minute audit de-dupe), `fail:…` (15-minute lockout counters), `lib:<sub>` (agent
+library, 2 h), `agk:<hash>`/`agks:<sub>:<viewerSub>` (agent keys, 30 days at most), `arl:…`
+(hourly agent rate counters).
 
 ## Failure modes
 
