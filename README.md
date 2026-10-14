@@ -36,11 +36,26 @@ configure, no dependencies and no build step.
 
 ## Install and run (from scratch)
 
-You need Node 18+ and a firstmate home. Then either:
+Ship Deck needs no hosting: everyone runs their own firstmate and their own
+Ship Deck on their own laptop, at `127.0.0.1`. **Keychain teammates: follow
+[docs/TEAMMATE-SETUP.md](docs/TEAMMATE-SETUP.md)** (prerequisites, firstmate,
+a one-command install, first run, the chat, sharing).
+
+The installer (`sh bin/install.sh [--home DIR] [--from GIT_URL] [--autostart]
+[--edit-path]`, macOS and Linux, no sudo, safe to re-run) checks Node 18+,
+git, tmux, the Claude Code and GitHub CLIs and the firstmate home (printing
+the clone command if there is none), copies the app to `~/.ship-deck/app` (from
+this checkout, or a fresh clone of `--from`, by default
+`https://github.com/aryanbhandari047/ship-deck.git` when not run from a
+checkout) and writes a `ship-deck` launcher to `~/.local/bin`. Only
+`--autostart` adds a LaunchAgent or systemd user unit, and only `--edit-path`
+touches a shell rc file.
+
+Without the installer you need Node 18+ and a firstmate home. Then either:
 
 ```sh
 # from a clone of this repo
-git clone <ship-deck repo url> ship-deck && cd ship-deck
+git clone https://github.com/aryanbhandari047/ship-deck.git ship-deck && cd ship-deck
 npx .                      # or: npm install -g . && ship-deck
 ```
 
@@ -108,10 +123,11 @@ echo "done: sample finished" >> /tmp/ship-deck-sample/state/delta-block.status  
 
 `bin/start.sh` checks whether Ship Deck already answers (on 4747 and the next
 19 ports) first, so it is safe to run repeatedly; it logs to
-`~/.ship-deck/server.log`. A LaunchAgent example (not installed by Ship Deck;
+`~/.ship-deck/server.log`. `sh bin/install.sh --autostart` installs this for you
+(and a systemd user unit on Linux). To do it by hand,
 replace the path with your clone, save it as
 `~/Library/LaunchAgents/local.ship-deck.plist` and run
-`launchctl load ~/Library/LaunchAgents/local.ship-deck.plist`):
+`launchctl load ~/Library/LaunchAgents/local.ship-deck.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -544,6 +560,11 @@ append shows up in the next `/api/fleet` response.
 dir derived from the home, the captain's name from git config files, task
 titles, the plain-language labels and summaries, port fallback, the
 first-run server and `bin/start.sh` falling back to a free port.
+`test/install.test.js` runs `bin/install.sh` in a temp `HOME` with a fixture
+firstmate home and shimmed `launchctl`/`systemctl`/`uname` (no network): the app
+copy and launcher, idempotent re-runs, the clone hint, `--home`, `--edit-path`,
+and that nothing outside `~/.ship-deck` and `~/.local/bin` is written without
+`--autostart`.
 
 ## What it reads
 
@@ -642,6 +663,8 @@ bin/orders.js      Orders, replies, thread and sessions CLI for the first mate
 bin/orders-check.sh  Watcher wake check (POSIX sh)
 bin/ship-deck.js   `ship-deck` / `npx` entry (same flags as server.js)
 bin/start.sh       Start the server in the background unless it already answers
+bin/install.sh     Per-person install: prerequisites, ~/.ship-deck/app, launcher, opt-in autostart
+docs/TEAMMATE-SETUP.md  Setup guide for Keychain teammates
 public/            index.html, style.css, app.js, board.js (flags + Board grouping), markdown.js, labels.js, ansi.js (no build step)
 test/              node:test suites and fabricated fixtures
 ```
