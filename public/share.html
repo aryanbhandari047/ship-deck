@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Share your deck · Ship Deck</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="share-page">
+  <!-- Same symbols as index.html (test/share.test.js keeps shared ids identical). -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="flag-k" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="15" height="20" style="fill:var(--signal-yellow)"/><rect x="15" width="15" height="20" style="fill:var(--signal-blue)"/></g></symbol>
+      <symbol id="flag-v" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="30" height="20" style="fill:var(--flag-white)"/><path d="M0 0L30 20M30 0L0 20" style="stroke:var(--signal-red)" stroke-width="5"/></g><rect x=".5" y=".5" width="29" height="19" rx="1.5" fill="none" style="stroke:var(--flag-edge)"/></symbol>
+      <symbol id="flag-p" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="30" height="20" style="fill:var(--signal-blue)"/><rect x="10" y="6.5" width="10" height="7" style="fill:var(--flag-white)"/></g></symbol>
+      <symbol id="flag-x" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="30" height="20" style="fill:var(--flag-white)"/><rect x="12" width="6" height="20" style="fill:var(--signal-blue)"/><rect y="7" width="30" height="6" style="fill:var(--signal-blue)"/></g><rect x=".5" y=".5" width="29" height="19" rx="1.5" fill="none" style="stroke:var(--flag-edge)"/></symbol>
+      <symbol id="flag-c" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="30" height="20" style="fill:var(--signal-blue)"/><rect y="4" width="30" height="12" style="fill:var(--flag-white)"/><rect y="8" width="30" height="4" style="fill:var(--signal-red)"/></g></symbol>
+      <symbol id="flag-o" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="30" height="20" style="fill:var(--signal-yellow)"/><path d="M0 0H30V20Z" style="fill:var(--signal-red)"/></g></symbol>
+      <symbol id="flag-q0" viewBox="0 0 30 20"><rect x="1" y="1" width="28" height="18" rx="1.5" fill="none" style="stroke:var(--quiet-edge)" stroke-width="2" stroke-dasharray="4 3"/></symbol>
+      <symbol id="i-share" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="7" r="3"/><path d="M2.5 16.5c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5M15 6v5M12.5 8.5h5"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="4" y="9" width="12" height="8.5" rx="1.5"/><path d="M6.5 9V6.5a3.5 3.5 0 0 1 7 0V9"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M10 4v12M4 10h12"/></symbol>
+      <symbol id="i-back" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 5l-5 5 5 5"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M13 4.5V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h.5"/></symbol>
+      <symbol id="i-eye" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1.8 10S5 4.5 10 4.5 18.2 10 18.2 10 15 15.5 10 15.5 1.8 10 1.8 10z"/><circle cx="10" cy="10" r="2.5"/></symbol>
+      <symbol id="i-check" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 10.5l3.5 3.5 7.5-8"/></symbol>
+      <symbol id="i-dash" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5.5 10h9"/></symbol>
+      <symbol id="i-x" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 5l10 10M15 5L5 15"/></symbol>
+      <symbol id="i-board" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="2.5" y="3.5" width="4" height="13" rx="1"/><rect x="8" y="3.5" width="4" height="9" rx="1"/><rect x="13.5" y="3.5" width="4" height="11" rx="1"/></symbol>
+      <symbol id="i-ext" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4h5v5M16 4l-7 7M14 12v3.5a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5v-9a.5.5 0 0 1 .5-.5H8"/></symbol>
+    </defs>
+  </svg>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"><svg class="flag"><use href="#flag-k"/></svg><svg class="flag"><use href="#flag-p"/></svg><svg class="flag"><use href="#flag-c"/></svg></span>
+      <div class="brand-text"><h1>Ship Deck</h1><p class="home">Settings</p></div>
+    </div>
+    <a class="btn ghost" href="/"><svg><use href="#i-back"/></svg>Back to the deck</a>
+  </header>
+
+  <main class="settings">
+    <nav class="s-nav" aria-label="Settings">
+      <h2>Settings</h2>
+      <a href="share.html" aria-current="page"><svg><use href="#i-share"/></svg>Sharing</a>
+    </nav>
+    <div class="s-main">
+      <div class="s-col">
+        <div class="s-title">
+          <div class="s-title-text">
+            <h1>Share your deck</h1>
+            <p>Let named teammates at Keychain watch your fleet. They can look, never act: no answers, no messages, no merges. Nothing is shared until you add someone.</p>
+          </div>
+          <button class="toggle" id="share-toggle" type="button" role="switch" aria-checked="false" aria-label="Sharing on" hidden></button>
+        </div>
+
+        <div id="share-state" aria-live="polite"></div>
+
+        <section class="panel-box" id="signin-box" aria-labelledby="signin-h" hidden>
+          <div class="pb-head"><h2 id="signin-h">Sign in to the Keychain relay</h2></div>
+          <form class="signin-form" id="signin-form">
+            <label>Keychain email <input class="input" id="signin-email" type="email" autocomplete="username" required placeholder="you@keychain.com"></label>
+            <label>Password <input class="input" id="signin-password" type="password" autocomplete="current-password" required minlength="1"></label>
+            <button class="btn primary" type="submit">Sign in</button>
+          </form>
+          <p class="hint pb-foot">Your password goes straight to the relay and is not kept on this computer; Ship Deck keeps a device token you can sign out at any time. No account yet? Ask a teammate who already shares to send you an invite link.</p>
+        </section>
+
+        <section class="panel-box" id="people-box" aria-labelledby="people-h" hidden>
+          <div class="pb-head"><h2 id="people-h">People with access</h2><span class="count" id="people-count">0</span></div>
+          <table class="tbl" id="people-table">
+            <thead><tr><th>Teammate</th><th>Can see</th><th>Projects</th><th>Access ends</th><th>Last viewed</th><th><span class="sr-only">Actions</span></th></tr></thead>
+            <tbody id="people"></tbody>
+          </table>
+          <p class="empty-row" id="people-empty">Nobody yet. Add a teammate below; nothing leaves this computer until you do.</p>
+          <div class="invite-out" id="invite-out" hidden></div>
+          <form class="add-row" id="add-form">
+            <label class="sr-only" for="add-email">Teammate's Keychain email</label>
+            <input class="input" id="add-email" type="email" placeholder="Teammate's Keychain email" autocomplete="off" required>
+            <label class="sr-only" for="add-days">Access length</label>
+            <select class="input" id="add-days"><option value="30">For 30 days</option><option value="7">For 7 days</option><option value="1">For 1 day</option></select>
+            <button class="btn primary" id="add-btn" type="submit"><svg><use href="#i-plus"/></svg><span id="add-label">Give view access</span></button>
+            <button class="btn" id="add-cancel" type="button" hidden>Cancel</button>
+          </form>
+        </section>
+
+        <section class="panel-box" id="what-box" aria-labelledby="what-h" hidden>
+          <div class="pb-head"><h2 id="what-h">What they can see</h2><span class="hint" id="what-sub">For the person you add next; use Edit on a row to change someone's access</span></div>
+          <div class="twocol">
+            <div id="perm-left"></div>
+            <div id="perm-right"></div>
+          </div>
+          <div class="perm perm-projects">
+            <b>Projects</b>
+            <p>Work in other projects is never sent to them.</p>
+            <div class="proj-list" id="proj-list" role="group" aria-label="Projects to share"></div>
+          </div>
+          <div class="pb-foot preview-row">
+            <button class="btn sm" id="preview-btn" type="button"><svg><use href="#i-eye"/></svg>Preview what leaves this computer</button>
+            <span class="hint" id="preview-size"></span>
+          </div>
+          <pre class="preview" id="preview" hidden></pre>
+        </section>
+
+        <section class="panel-box" id="log-box" aria-labelledby="log-h" hidden>
+          <div class="pb-head"><h2 id="log-h">Who viewed what</h2><span class="hint">Kept 90 days by the relay</span><button class="btn sm" id="log-refresh" type="button">Refresh</button><button class="btn sm" id="log-csv" type="button">Export CSV</button></div>
+          <table class="tbl">
+            <thead><tr><th>When</th><th>Who</th><th>What</th><th>Result</th></tr></thead>
+            <tbody id="log"></tbody>
+          </table>
+          <p class="empty-row" id="log-empty">No views yet.</p>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script src="share.js"></script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="no-referrer">
+  <title>Ship Deck · set your password</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="viewer.css">
+</head>
+<body class="viewer-page">
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="flag-k" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="15" height="20" style="fill:var(--signal-yellow)"/><rect x="15" width="15" height="20" style="fill:var(--signal-blue)"/></g></symbol>
+      <symbol id="flag-p" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="30" height="20" style="fill:var(--signal-blue)"/><rect x="10" y="6.5" width="10" height="7" style="fill:var(--flag-white)"/></g></symbol>
+      <symbol id="flag-c" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="30" height="20" style="fill:var(--signal-blue)"/><rect y="4" width="30" height="12" style="fill:var(--flag-white)"/><rect y="8" width="30" height="4" style="fill:var(--signal-red)"/></g></symbol>
+      <symbol id="i-lock" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="4" y="9" width="12" height="8.5" rx="1.5"/><path d="M6.5 9V6.5a3.5 3.5 0 0 1 7 0V9"/></symbol>
+      <symbol id="i-check" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 10.5l3.5 3.5 7.5-8"/></symbol>
+    </defs>
+  </svg>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"><svg class="flag"><use href="#flag-k"/></svg><svg class="flag"><use href="#flag-p"/></svg><svg class="flag"><use href="#flag-c"/></svg></span>
+      <div class="brand-text"><h1>Ship Deck</h1><p class="home">Shared decks</p></div>
+    </div>
+  </header>
+  <main class="v-center">
+    <form class="box v-card" id="invite-form">
+      <h1>Set your password</h1>
+      <p class="fine">A Keychain teammate invited you to view their Ship Deck. Choose a password of at least 12 characters. This link works once and expires 24 hours after it was made.</p>
+      <label>New password <input class="input" id="pw" type="password" autocomplete="new-password" minlength="12" required></label>
+      <label>Type it again <input class="input" id="pw2" type="password" autocomplete="new-password" minlength="12" required></label>
+      <p class="v-error" id="invite-error" role="alert" hidden></p>
+      <button class="btn primary" type="submit">Set password and sign in</button>
+      <p class="fine"><svg class="ico" aria-hidden="true"><use href="#i-lock"/></svg> Shared decks are read-only. Nobody can act on a teammate's work from here.</p>
+    </form>
+  </main>
+  <script src="invite.js"></script>
+</body>
+</html>

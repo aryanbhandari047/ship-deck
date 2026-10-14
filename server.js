@@ -3,10 +3,11 @@
 // Ship Deck: a live view of a firstmate fleet and the captain's control surface.
 //   node server.js [--home <FM_HOME>] [--port 4747] [--stale-days 7] [--no-tmux] [--no-open]
 //                  [--orders-dir ~/.ship-deck] [--memory-dir <dir>] [--claude-dir ~/.claude]
-//                  [--captain-name <name>]
+//                  [--captain-name <name>] [--share --share-relay <https url>]
 // Binds to 127.0.0.1 only. Writes to FM_HOME only one wake line per order (lib/wake.js,
 // --no-wake); other file writes go to the orders dir (~/.ship-deck). The only commands run are tmux list-windows,
 // tmux capture-pane and <home>/bin/fm-send.sh (see lib/actions.js), plus the browser opener at startup.
+// --share (off by default) adds one outbound HTTPS client: lib/share.js pushes a redacted snapshot.
 
 const http = require('node:http');
 const fs = require('node:fs');
@@ -23,6 +24,7 @@ const config = require('./lib/config');
 const attachments = require('./lib/attachments');
 const activity = require('./lib/activity');
 const homes = require('./lib/home');
+const share = require('./lib/share');
 
 const DEFAULT_PORT = 4747;
 const PORT_TRIES = 20;
@@ -30,7 +32,10 @@ const MAX_BODY = 16 * 1024;
 const ORDERS_IN_SNAPSHOT = 60;
 const THREAD_LIMIT = 300;
 const POST_ROUTES = new Set(['/api/send', '/api/orders', '/api/config']);
-const USAGE = 'usage: ship-deck [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--no-open] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR] [--captain-name NAME] [--no-wake]';
+const SHARE_POST = new Set(['/api/share/signin', '/api/share/signout', '/api/share/grant', '/api/share/revoke', '/api/share/invite', '/api/share/pause']);
+// Library files a "notes and memory" grant may carry (plus memory/*).
+const SHARE_NOTES = ['home:data/captain.md', 'home:data/captain-shared.md', 'home:data/learnings.md'];
+const USAGE = 'usage: ship-deck [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--no-open] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR] [--captain-name NAME] [--no-wake] [--share --share-relay URL]';
 
 // env and cwd are injectable for tests; the home falls back per lib/home.js detectHome.
 function parseArgs(argv, { env = process.env, cwd = process.cwd() } = {}) {
@@ -45,6 +50,8 @@ function parseArgs(argv, { env = process.env, cwd = process.cwd() } = {}) {
     captainName: env.SHIP_DECK_CAPTAIN || undefined, // undefined = git config user.name
     wake: true,
     open: !env.SHIP_DECK_NO_OPEN,
+    share: !!env.SHIP_DECK_SHARE,
+    shareRelay: env.SHIP_DECK_RELAY || null,
   };
   let homeFlag = null;
   for (let i = 0; i < argv.length; i++) {
@@ -61,6 +68,8 @@ function parseArgs(argv, { env = process.env, cwd = process.cwd() } = {}) {
     else if (flag === '--captain-name') opts.captainName = val();
     else if (flag === '--no-wake') opts.wake = false;
     else if (flag === '--no-open') opts.open = false;
+    else if (flag === '--share') opts.share = true;
+    else if (flag === '--share-relay') opts.shareRelay = val();
     else if (flag === '--help' || flag === '-h') {
       console.log(USAGE);
       process.exit(0);
@@ -76,6 +85,12 @@ function parseArgs(argv, { env = process.env, cwd = process.cwd() } = {}) {
   if (!Number.isFinite(opts.staleDays) || opts.staleDays <= 0) {
     console.error('invalid --stale-days (expected a positive number of days)');
     process.exit(2);
+  }
+  if (opts.share) {
+    try { opts.shareRelay = share.checkRelayUrl(opts.shareRelay || ''); } catch (e) {
+      console.error('--share needs --share-relay <https://relay> (or SHIP_DECK_RELAY): ' + e.message);
+      process.exit(2);
+    }
   }
   const found = homes.detectHome({ flag: homeFlag, env, cwd });
   opts.home = found.home;
@@ -227,6 +242,94 @@ function createServer(opts) {
   const tracker = sessions.createTracker({ home: opts.home, claudeDir, ordersDir });
   const feed = activity.createActivity({ home: opts.home, claudeDir });
 
+  // The /api/fleet object (the share agent projects the same object).
+  async function fleetSnapshot() {
+    const snap = await buildSnapshot(opts.home, { tmux: opts.tmux, staleDays: opts.staleDays });
+    const list = orders.listOrders(ordersDir);
+    snap.orders = { dir: ordersDir, pending: list.filter((o) => o.pending).length, total: list.length, list: list.slice(0, ORDERS_IN_SNAPSHOT) };
+    const replies = orders.readReplies(ordersDir);
+    snap.thread = { sig: orders.threadSignature(ordersDir), replies: replies.length, lastReplyId: replies.length ? replies[replies.length - 1].id : null };
+    const known = tracker.get(snap.tasks);
+    for (const t of snap.tasks) {
+      t.session = sessionView(known[t.id], t.harness);
+      t.config = config.currentConfig(t, list);
+    }
+    snap.configOptions = config.options();
+    snap.captain = { name: captain };
+    snap.homeLabel = tildePath(opts.home);
+    snap.firstmate = { session: sessionView(known[sessions.FIRST_MATE_KEY], 'claude') };
+    return snap;
+  }
+
+  // Sharing (--share): readers hand the agent data; it never gets orders, wake or fm-send.
+  const agent = opts.share ? share.createShareAgent({
+    relayUrl: opts.shareRelay,
+    dir: ordersDir,
+    home: os.homedir(),
+    fetchImpl: opts.shareFetch,
+    now: opts.shareNow,
+    log: (m) => console.warn(m),
+    readFleet: fleetSnapshot,
+    readTerminal: async (id) => (await actions.peekPane(opts.home, id, exec)).text,
+    readExtras: async (needs) => {
+      const fm = feed.view(NaN);
+      const out = { firstMateWorking: !!fm.working };
+      const lib = needs.skills || needs.notes ? library.listLibrary(opts.home, memoryDir, libOpts) : [];
+      if (needs.skills) out.skills = lib.filter((e) => e.key.startsWith('skill:') && e.exists).map((e) => ({ key: e.key, title: e.title, description: e.description }));
+      if (needs.notes) {
+        out.notes = lib.filter((e) => e.exists && (SHARE_NOTES.includes(e.key) || e.key.startsWith('memory:'))).map((e) => {
+          const r = library.readLibraryEntry(opts.home, memoryDir, e.key, libOpts);
+          return { key: e.key, title: e.title, text: (r && r.text) || '' };
+        });
+      }
+      if (needs.chat) {
+        out.thread = orders.buildThread(ordersDir, { limit: 30 });
+        out.activity = fm.events;
+      }
+      return out;
+    },
+  }) : null;
+
+  // Relay errors come back as plain messages; 401/4xx keep their status, the rest are 502.
+  function shareError(res, e) {
+    const status = e instanceof share.RelayError ? (e.status >= 400 && e.status < 500 ? e.status : 502) : 400;
+    return json(res, status, { ok: false, error: e.message });
+  }
+  async function handleShareGet(req, res, url) {
+    if (url.pathname === '/api/share') {
+      if (!agent) return json(res, 200, { enabled: false });
+      const snap = await buildSnapshot(opts.home, { tmux: false });
+      const names = new Set(snap.projects.map((p) => p.name));
+      for (const t of snap.tasks) if (t.project && t.project !== 'unassigned') names.add(t.project);
+      return json(res, 200, { ...agent.status(), fleetProjects: [...names].sort((a, b) => a.localeCompare(b)) });
+    }
+    if (!agent) return json(res, 404, { error: 'sharing is off (start Ship Deck with --share)' });
+    try {
+      if (url.pathname === '/api/share/grants') return json(res, 200, { grants: await agent.listGrants() });
+      if (url.pathname === '/api/share/audit') return json(res, 200, { rows: await agent.audit(url.searchParams.get('since')) });
+      if (url.pathname === '/api/share/preview') {
+        const list = (k) => (url.searchParams.get(k) || '').split(',').filter(Boolean);
+        const snapshot = await agent.preview({ scopes: list('scopes'), projects: list('projects') });
+        return json(res, 200, { snapshot, bytes: Buffer.byteLength(JSON.stringify(snapshot)) });
+      }
+    } catch (e) { return shareError(res, e); }
+    return json(res, 404, { error: 'not found' });
+  }
+  async function handleSharePost(req, res, url) {
+    const why = postGuard(req);
+    if (why) return json(res, 403, { ok: false, error: why });
+    if (!agent) return json(res, 404, { ok: false, error: 'sharing is off (start Ship Deck with --share)' });
+    const body = await readBody(req);
+    try {
+      if (url.pathname === '/api/share/signin') return json(res, 200, { ok: true, status: await agent.signIn({ email: body.email, password: body.password }) });
+      if (url.pathname === '/api/share/signout') return json(res, 200, { ok: true, status: await agent.signOut() });
+      if (url.pathname === '/api/share/grant') return json(res, 200, { ok: true, grants: await agent.putGrant(body) });
+      if (url.pathname === '/api/share/revoke') return json(res, 200, { ok: true, grants: await agent.revoke(body.viewer) });
+      if (url.pathname === '/api/share/invite') return json(res, 200, { ok: true, invite: await agent.invite(body.email) });
+      if (url.pathname === '/api/share/pause') return json(res, 200, { ok: true, status: agent.setPaused(!!body.paused) });
+    } catch (e) { return shareError(res, e); }
+  }
+
   // POST /api/attachments?name=<file name>: raw body, stored after a magic-byte check.
   // POST /api/attachments?parent=<id>&name=frame-0001.jpg|index.json: a video's extracted stills.
   async function handleUpload(req, res, url) {
@@ -290,31 +393,17 @@ function createServer(opts) {
     }
   }
 
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     if (!hostOk(req)) return send(res, 421, 'misdirected request', 'text/plain');
     const url = new URL(req.url, 'http://127.0.0.1');
     try {
       if (req.method === 'POST' && url.pathname === '/api/attachments') return await handleUpload(req, res, url);
       if (req.method === 'POST' && POST_ROUTES.has(url.pathname)) return await handlePost(req, res, url);
+      if (req.method === 'POST' && SHARE_POST.has(url.pathname)) return await handleSharePost(req, res, url);
       if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'method not allowed', 'text/plain');
       if (url.pathname === '/api/health') return json(res, 200, { app: 'ship-deck', ok: true, home: opts.home });
-      if (url.pathname === '/api/fleet') {
-        const snap = await buildSnapshot(opts.home, { tmux: opts.tmux, staleDays: opts.staleDays });
-        const list = orders.listOrders(ordersDir);
-        snap.orders = { dir: ordersDir, pending: list.filter((o) => o.pending).length, total: list.length, list: list.slice(0, ORDERS_IN_SNAPSHOT) };
-        const replies = orders.readReplies(ordersDir);
-        snap.thread = { sig: orders.threadSignature(ordersDir), replies: replies.length, lastReplyId: replies.length ? replies[replies.length - 1].id : null };
-        const known = tracker.get(snap.tasks);
-        for (const t of snap.tasks) {
-          t.session = sessionView(known[t.id], t.harness);
-          t.config = config.currentConfig(t, list);
-        }
-        snap.configOptions = config.options();
-        snap.captain = { name: captain };
-        snap.homeLabel = tildePath(opts.home);
-        snap.firstmate = { session: sessionView(known[sessions.FIRST_MATE_KEY], 'claude') };
-        return json(res, 200, snap);
-      }
+      if (url.pathname === '/api/fleet') return json(res, 200, await fleetSnapshot());
+      if (url.pathname === '/api/share' || url.pathname.startsWith('/api/share/')) return await handleShareGet(req, res, url);
       if (url.pathname === '/api/thread') {
         return json(res, 200, { sig: orders.threadSignature(ordersDir), items: orders.buildThread(ordersDir, { limit: THREAD_LIMIT }) });
       }
@@ -367,6 +456,8 @@ function createServer(opts) {
       send(res, 500, String(e && e.message || e), 'text/plain');
     }
   });
+  server.shareAgent = agent;
+  return server;
 }
 
 // Listens on port, or the next free one (up to PORT_TRIES); resolves with the bound port.
@@ -403,8 +494,10 @@ async function main(argv) {
     console.warn(`warning: ${opts.home}/state not found; the deck will be empty`);
   }
   let port;
+  let server;
   try {
-    port = await listen(createServer(opts), opts.port);
+    server = createServer(opts);
+    port = await listen(server, opts.port);
   } catch (e) {
     console.error(`Ship Deck could not listen on 127.0.0.1:${opts.port}-${opts.port + PORT_TRIES - 1}: ${e.message}`);
     process.exit(1);
@@ -415,6 +508,10 @@ async function main(argv) {
     console.log(`  messages: ${opts.ordersDir}   library memory: ${opts.memoryDir || '(none)'}   claude: ${opts.claudeDir}`);
   }
   if (port !== opts.port) console.log(`  port ${opts.port} is taken; using ${port}`);
+  if (server.shareAgent) {
+    server.shareAgent.start();
+    console.log(`  sharing: on (relay ${opts.shareRelay}); manage it at ${'http://127.0.0.1:' + port}/share.html`);
+  }
   console.log(`Ship Deck: ${url}`);
   if (opts.open) openBrowser(url);
 }

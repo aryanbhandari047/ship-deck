@@ -1,0 +1,52 @@
+/* Viewer additions on top of the deck's style.css (Chart room tokens; synced copy). Tokens only. */
+.viewer-page { min-height: 100vh; }
+.viewer-page .topbar .spacer { flex: 1; }
+.v-center { min-height: calc(100vh - 56px); display: grid; place-items: center; padding: var(--s8) var(--s4); }
+.v-card { width: min(440px, 100%); }
+.v-card h1 { margin: 0; font: 700 var(--t-2xl)/1.15 var(--font-instr); }
+.v-card label { display: grid; gap: 4px; font-size: var(--t-sm); font-weight: 600; color: var(--ink-2); }
+.v-card .btn.primary { height: 36px; }
+.v-card .fine { margin: 0; color: var(--ink-2); font-size: var(--t-sm); }
+.v-card .fine .ico { vertical-align: -3px; margin-right: 4px; }
+.v-error { margin: 0; padding: 8px 10px; border-radius: var(--r-ctl); background: var(--blocked-bg); color: var(--blocked-fg); font-size: var(--t-sm); font-weight: 600; }
+
+.viewbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 8px var(--s5); background: var(--primary-soft); border-bottom: 1px solid var(--line); color: var(--ink); font-size: var(--t-sm); }
+.viewbar .ro { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: var(--r-pill); background: var(--surface); color: var(--ink-2); font-weight: 600; }
+.viewbar .ro svg { width: 13px; height: 13px; }
+.viewbar .age { margin-left: auto; color: var(--ink-2); }
+.v-main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: calc(100vh - 96px); }
+.v-hidden { font-size: var(--t-sm); }
+.v-aside { display: grid; align-content: start; gap: var(--s5); padding: var(--s5); background: var(--surface); border-left: 1px solid var(--line); min-width: 0; }
+.v-aside h2 { margin: 0; font: 700 var(--t-lg)/1.2 var(--font-instr); }
+.v-aside .fine { margin: 4px 0 0; color: var(--ink-2); font-size: var(--t-sm); }
+.v-scopes { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: var(--t-sm); }
+.v-scopes li { display: flex; align-items: center; gap: 8px; }
+.v-scopes svg { width: 15px; height: 15px; flex: none; }
+.v-scopes .yes { color: var(--ink); }
+.v-scopes .yes svg { color: var(--done-fg); }
+.v-scopes .no { color: var(--ink-3); }
+.v-extras { display: flex; flex-wrap: wrap; gap: 6px; }
+.v-extras:empty { display: none; }
+.decks { display: grid; gap: 6px; }
+.deck-link { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--r-ctl); border: 1px solid var(--line); color: var(--ink); text-decoration: none; min-width: 0; }
+.deck-link:hover { border-color: var(--line-strong); }
+.deck-link[aria-current="page"] { border-color: var(--primary); background: var(--primary-soft); }
+.deck-link div { min-width: 0; font-weight: 600; }
+.deck-link span:not(.av) { display: block; font-weight: 400; font-size: var(--t-xs); color: var(--ink-3); }
+.av { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--primary-soft); color: var(--ink); font: 700 var(--t-sm)/1 var(--font-instr); flex: none; }
+.opt-ro { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; gap: 8px; min-height: 30px; padding: 4px 8px; border-radius: var(--r-ctl); border: 1px dashed var(--line-strong); color: var(--ink-2); overflow-wrap: anywhere; }
+.opt-ro b { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 5px; background: var(--sunken); color: var(--ink); font: 700 var(--t-sm)/1 var(--font-instr); }
+.redact { display: inline-block; padding: 0 5px; border-radius: 4px; background: var(--sunken); color: var(--ink-2); font-size: .92em; font-style: italic; }
+.ci { width: 7px; height: 7px; border-radius: 50%; background: var(--line-strong); }
+.v-sheet { width: min(720px, calc(100vw - 32px)); }
+.v-sheet-body { display: grid; gap: var(--s4); padding: var(--s4) var(--s5) var(--s5); min-width: 0; }
+.v-sheet-body h3 { margin: 0 0 6px; font: 700 var(--t-md)/1.2 var(--font-instr); }
+.v-sheet-body .peek { height: auto; max-height: 420px; }
+.v-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.v-list li { display: grid; gap: 2px; padding-bottom: 10px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.v-list li:last-child { border-bottom: 0; }
+.v-list .when { font-size: var(--t-xs); color: var(--ink-3); }
+@media (max-width: 900px) {
+  .v-main { grid-template-columns: minmax(0, 1fr); }
+  .v-aside { border-left: 0; border-top: 1px solid var(--line); }
+}

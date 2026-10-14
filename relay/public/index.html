@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="no-referrer">
+  <title>Ship Deck · shared decks</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="viewer.css">
+</head>
+<body class="viewer-page">
+  <!-- Same symbols as the deck's public/index.html (test/share.test.js keeps shared ids identical). -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="flag-k" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="15" height="20" style="fill:var(--signal-yellow)"/><rect x="15" width="15" height="20" style="fill:var(--signal-blue)"/></g></symbol>
+      <symbol id="flag-v" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="30" height="20" style="fill:var(--flag-white)"/><path d="M0 0L30 20M30 0L0 20" style="stroke:var(--signal-red)" stroke-width="5"/></g><rect x=".5" y=".5" width="29" height="19" rx="1.5" fill="none" style="stroke:var(--flag-edge)"/></symbol>
+      <symbol id="flag-p" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="30" height="20" style="fill:var(--signal-blue)"/><rect x="10" y="6.5" width="10" height="7" style="fill:var(--flag-white)"/></g></symbol>
+      <symbol id="flag-x" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="30" height="20" style="fill:var(--flag-white)"/><rect x="12" width="6" height="20" style="fill:var(--signal-blue)"/><rect y="7" width="30" height="6" style="fill:var(--signal-blue)"/></g><rect x=".5" y=".5" width="29" height="19" rx="1.5" fill="none" style="stroke:var(--flag-edge)"/></symbol>
+      <symbol id="flag-c" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="30" height="20" style="fill:var(--signal-blue)"/><rect y="4" width="30" height="12" style="fill:var(--flag-white)"/><rect y="8" width="30" height="4" style="fill:var(--signal-red)"/></g></symbol>
+      <symbol id="flag-o" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="30" height="20" style="fill:var(--signal-yellow)"/><path d="M0 0H30V20Z" style="fill:var(--signal-red)"/></g></symbol>
+      <symbol id="flag-q0" viewBox="0 0 30 20"><rect x="1" y="1" width="28" height="18" rx="1.5" fill="none" style="stroke:var(--quiet-edge)" stroke-width="2" stroke-dasharray="4 3"/></symbol>
+      <symbol id="i-eye" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1.8 10S5 4.5 10 4.5 18.2 10 18.2 10 15 15.5 10 15.5 1.8 10 1.8 10z"/><circle cx="10" cy="10" r="2.5"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="4" y="9" width="12" height="8.5" rx="1.5"/><path d="M6.5 9V6.5a3.5 3.5 0 0 1 7 0V9"/></symbol>
+      <symbol id="i-check" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 10.5l3.5 3.5 7.5-8"/></symbol>
+      <symbol id="i-dash" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5.5 10h9"/></symbol>
+      <symbol id="i-search" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M13 13l4.5 4.5"/></symbol>
+      <symbol id="i-pr" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="5.5" cy="4.5" r="2"/><circle cx="5.5" cy="15.5" r="2"/><circle cx="14.5" cy="15.5" r="2"/><path d="M5.5 6.5v7M14.5 13.5V8a2.5 2.5 0 0 0-2.5-2.5H9M10.5 3.8L9 5.5l1.5 1.7"/></symbol>
+      <symbol id="i-x" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 5l10 10M15 5L5 15"/></symbol>
+      <symbol id="i-board" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="2.5" y="3.5" width="4" height="13" rx="1"/><rect x="8" y="3.5" width="4" height="9" rx="1"/><rect x="13.5" y="3.5" width="4" height="11" rx="1"/></symbol>
+      <symbol id="i-term" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M6 8l2.5 2L6 12M10.5 12.5h3.5"/></symbol>
+      <symbol id="i-book" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3 4.5c2.5-1 5-1 7 .5v11c-2-1.5-4.5-1.5-7-.5zM17 4.5c-2.5-1-5-1-7 .5v11c2-1.5 4.5-1.5 7-.5z"/></symbol>
+      <symbol id="i-chat" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3.5 4.5h13v9h-7l-4 3v-3h-2z"/></symbol>
+      <symbol id="i-ext" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4h5v5M16 4l-7 7M14 12v3.5a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5v-9a.5.5 0 0 1 .5-.5H8"/></symbol>
+      <symbol id="i-back" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 5l-5 5 5 5"/></symbol>
+    </defs>
+  </svg>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"><svg class="flag"><use href="#flag-k"/></svg><svg class="flag"><use href="#flag-p"/></svg><svg class="flag"><use href="#flag-c"/></svg></span>
+      <div class="brand-text"><h1>Ship Deck</h1><p class="home" id="who">Shared decks</p></div>
+    </div>
+    <label class="search" id="search-box" hidden>
+      <span class="sr-only">Filter shared work</span>
+      <svg class="ico" aria-hidden="true"><use href="#i-search"/></svg>
+      <input id="search" type="search" placeholder="Filter shared work…" autocomplete="off" spellcheck="false">
+    </label>
+    <span class="spacer"></span>
+    <button class="btn ghost" id="signout" type="button" hidden>Sign out</button>
+  </header>
+
+  <main class="v-center" id="signin" hidden aria-labelledby="signin-title">
+    <form class="box v-card" id="signin-form">
+      <h1 id="signin-title">Sign in to see shared decks</h1>
+      <p class="fine">Keychain teammates share read-only views of their Ship Deck here. Accounts are invite-only: a teammate who shares with you sends you a link to set your password.</p>
+      <label>Keychain email <input class="input" id="signin-email" type="email" autocomplete="username" required placeholder="you@keychain.com"></label>
+      <label>Password <input class="input" id="signin-password" type="password" autocomplete="current-password" required></label>
+      <p class="v-error" id="signin-error" role="alert" hidden></p>
+      <button class="btn primary" type="submit">Sign in</button>
+    </form>
+  </main>
+
+  <main class="v-center" id="nodecks" hidden>
+    <div class="box v-card">
+      <h1>Nobody shares a deck with you yet</h1>
+      <p class="fine">When a teammate gives you view access from their Ship Deck settings, their deck shows up here. You can look, never act.</p>
+    </div>
+  </main>
+
+  <div id="deck" hidden>
+    <div class="viewbar" role="status">
+      <svg class="ico" aria-hidden="true"><use href="#i-eye"/></svg>
+      <span>You are viewing <b id="vb-name"></b> deck</span>
+      <span class="ro"><svg aria-hidden="true"><use href="#i-lock"/></svg>Read-only</span>
+      <span class="age" id="vb-age"></span>
+    </div>
+    <main class="v-main">
+      <section class="board" aria-labelledby="board-title">
+        <div class="board-head">
+          <h2 class="board-title" id="board-title"></h2>
+          <div class="filters" id="filters" role="group" aria-label="Project"></div>
+          <span class="muted v-hidden" id="hidden-note"></span>
+        </div>
+        <p class="callout warn" id="board-note" hidden></p>
+        <div class="cols" id="cols"></div>
+      </section>
+      <aside class="v-aside" aria-label="About this view">
+        <div><h2 id="aside-title"></h2><p class="fine" id="aside-until"></p></div>
+        <ul class="v-scopes" id="aside-scopes"></ul>
+        <div class="v-extras" id="aside-extras"></div>
+        <p class="fine" id="aside-ask"></p>
+        <div>
+          <h2>Decks shared with you</h2>
+          <div class="decks" id="decks"></div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <div class="sheet-scrim" id="sheet-scrim" hidden></div>
+  <section class="sheet v-sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" hidden tabindex="-1">
+    <header class="sheet-head">
+      <h2 id="sheet-title"></h2>
+      <button class="btn ghost icon-btn" id="sheet-close" type="button" aria-label="Close"><svg><use href="#i-x"/></svg></button>
+    </header>
+    <div class="v-sheet-body" id="sheet-body"></div>
+  </section>
+
+  <script src="markdown.js"></script>
+  <script src="board.js"></script>
+  <script src="viewer.js"></script>
+</body>
+</html>
