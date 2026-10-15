@@ -122,7 +122,7 @@ read and answer the chat:
 > `node ~/.ship-deck/app/bin/orders.js list --pending`, answer with
 > `node ~/.ship-deck/app/bin/orders.js reply <id> --ack done "text"`. The full
 > contract is the "Messages and the Bridge" section of
-> `~/.ship-deck/app/README.md`. Check for messages every 30 seconds.
+> `~/.ship-deck/app/docs/REFERENCE.md`. Check for messages every 30 seconds.
 
 After that, everything the buttons do (answer a question, merge, clean up,
 start a new job) is a chat message your first mate acts on. Ship Deck never
