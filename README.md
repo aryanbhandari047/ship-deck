@@ -9,14 +9,16 @@ Running many AI coding workers at once quickly turns into terminal juggling.
 Ship Deck fixes that:
 
 - **No more tab-hopping.** Every worker is on one board instead of spread over
-  a dozen tmux windows.
+  a dozen terminal windows.
 - **Know who needs you.** Workers waiting on a decision, blocked or failed rise
   to a **Needs you** column; the rest sit under **Working**, **Waiting** or
   **Done**.
 - **Answer without a terminal.** Pick a worker's option or type a reply right
   on its card. Merge, clean up or start new work with one click.
 - **See what's happening.** A live peek at each worker's terminal and a feed of
-  what the orchestrating agent is doing right now.
+  what the lead agent is doing right now.
+- **Share what your agent knows.** Teammates' agents pick up your skills and
+  notes automatically, so the whole team works with the same context.
 
 ## What it does
 
@@ -24,7 +26,8 @@ Ship Deck fixes that:
   title, latest update, pull request and tool. Filter by project or search.
 - **Ship view**: the same fleet drawn as a nautical chart, one berth per worker
   flying its status flag.
-- **Chat with the first mate**: send messages and read its markdown replies.
+- **Chat with the lead agent** (the "first mate"): send messages and read its
+  markdown replies.
   Paste, drop or attach screenshots and screen recordings; videos are turned
   into stills the agent can read.
 - **One-click actions**: answer a decision, ask for status, merge a PR, clean
@@ -38,11 +41,16 @@ Ship Deck fixes that:
   live from an allow-list; other tools get it on relaunch.
 - **Library**: the first mate's context files, memory and skills, rendered as
   readable pages.
-- **Activity feed**: the first mate's tool calls and replies, live from its
-  own transcript.
-- **Read-only sharing** (opt-in): let a teammate watch your board through a
-  relay, with secrets scrubbed and every view logged. Shared skills and notes
-  can flow into their own agent as read-only skills.
+- **Activity feed**: what the first mate is doing and saying, live.
+- **Team context sharing** (opt-in): grant a teammate by email and choose
+  what to share: your skills, your notes and memory, or both. Their own Ship
+  Deck pulls what you granted and installs it for their agent as read-only
+  skills, automatically. When you change a skill, the update reaches them;
+  they cannot change your copy; secrets are scrubbed before anything leaves
+  your machine; and every view and sync is logged. Revoke, or let the grant
+  expire, and it is removed from their machine.
+- **Read-only board view** (opt-in): let a teammate watch your board in their
+  browser. They can look, never send.
 - **Comfort**: status is a signal flag, a colour and a word (readable without
   colour); light and dark themes that pass WCAG AA; keyboard shortcuts (press
   `?`); browser notifications on request.
@@ -59,9 +67,9 @@ Ship Deck fixes that:
 
 ## Quick start
 
-You need **Node.js 18+**, **git**, **tmux**, the **Claude Code** and **GitHub**
-CLIs, and a [firstmate](https://github.com/kunchenguid/firstmate) home
-(ideally at `~/firstmate`).
+You need **Node.js 18+**, **git**, **tmux** (the workers run in it), the
+**Claude Code** and **GitHub** CLIs, and an agent fleet run by firstmate (see
+[Inspiration](#inspiration); ideally installed at `~/firstmate`).
 
 ```sh
 git clone https://github.com/aryanbhandari047/ship-deck.git ~/ship-deck
@@ -71,7 +79,7 @@ ship-deck                         # opens http://127.0.0.1:4747/
 
 The installer checks the prerequisites, copies the app to `~/.ship-deck/app`
 and adds a `ship-deck` launcher to `~/.local/bin`. Add `--autostart` to start
-it at login, or `--home DIR` if your firstmate lives elsewhere.
+it at login, or `--home DIR` if your fleet lives elsewhere.
 
 Without the installer, run it straight from the clone: `npx .` or
 `node server.js --home ~/firstmate`.
@@ -89,17 +97,32 @@ node server.js --home /tmp/ship-deck-sample --orders-dir /tmp/ship-deck-orders
   [docs/REFERENCE.md](docs/REFERENCE.md)
 - Letting other agents read a shared library: [docs/AGENT-LIBRARY.md](docs/AGENT-LIBRARY.md)
 
+## Share with your team
+
+Sharing goes through a small relay service you deploy once for your team
+(steps in [`relay/README.md`](relay/README.md)).
+
+1. **Turn on sharing**: start with `ship-deck --share --share-relay <relay URL>`
+   and sign in from the share button in the top bar.
+2. **Invite by email**: add a teammate and pick how long they get access
+   (1, 7 or 30 days). New people get a one-time invite link to send them.
+3. **Choose what to share**: the board, live updates, terminals, and your
+   skills or notes. Skills and notes reach their agent automatically once
+   their own Ship Deck is signed in.
+
+The full walkthrough, from both sides: [docs/TEAMMATE-SETUP.md](docs/TEAMMATE-SETUP.md)
+(steps 8 and 9) and the Sharing section of [docs/REFERENCE.md](docs/REFERENCE.md#sharing-read-only-opt-in).
+
 ## How it works
 
-Ship Deck is a small Node server that runs on your own machine and listens on
-`127.0.0.1` only. It reads your firstmate home (worker records, queue,
-projects, briefs) and the first mate's Claude Code transcripts read-only, and
-polls every 3 seconds. Your messages go to `~/.ship-deck/` as an append-only
-log the first mate reads and answers, plus a one-line wake signal in its
-`state/` folder. The only commands it runs are `tmux list-windows`,
-`tmux capture-pane` and firstmate's own `fm-send.sh`. There are no
-dependencies and no build step. Nothing leaves your machine unless you turn on
-sharing with `--share`.
+Ship Deck is a small Node server that runs on your own machine and is
+reachable only from it. It reads your agents' status, queue, projects and
+briefs without changing them, refreshing every 3 seconds, and shows each
+worker's live terminal. Your chat messages and actions are handed to the lead
+agent, which does the work and reports back on the board; the only things sent
+straight to a worker are a one-line message or a model/effort change you make
+yourself. There are no dependencies and no build step. Nothing leaves your
+machine unless you turn on sharing. Exact files, commands and limits: [docs/REFERENCE.md](docs/REFERENCE.md).
 
 ## Inspiration
 
