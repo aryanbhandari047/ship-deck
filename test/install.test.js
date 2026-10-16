@@ -1,8 +1,9 @@
 'use strict';
 // bin/install.sh in a temp HOME with a fixture firstmate home: the app copy and launcher,
 // idempotent re-runs, nothing outside ~/.ship-deck and ~/.local/bin unless --autostart or
-// --edit-path is passed, and the autostart files with launchctl/systemctl/uname shims.
-// No network: it installs from this checkout. Temp dirs and fabricated data only.
+// --edit-path is passed, the autostart files with launchctl/systemctl/uname shims, and setting
+// up firstmate from a local FIRSTMATE_REPO. No network: it installs from this checkout and
+// curl/brew are logging fakes. Temp dirs and fabricated data only.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -21,8 +22,9 @@ function tempDir(t) {
 }
 
 // A temp HOME (optionally with ~/firstmate) and a shim dir first on PATH: node and git
-// link to the real ones; launchctl, systemctl and uname are fakes that log their argv.
-function sandbox(t, { firstmate = true, uname = null } = {}) {
+// link to the real ones; launchctl, systemctl, curl, uname (and brew) are fakes that log their argv.
+// FIRSTMATE_REPO points at a local repo shaped like firstmate.
+function sandbox(t, { firstmate = true, uname = null, brew = false } = {}) {
   const base = tempDir(t);
   const home = path.join(base, 'home');
   const shims = path.join(base, 'shims');
@@ -32,7 +34,7 @@ function sandbox(t, { firstmate = true, uname = null } = {}) {
   fs.symlinkSync(process.execPath, path.join(shims, 'node'));
   const git = spawnSync('/bin/sh', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim();
   if (git) fs.symlinkSync(git, path.join(shims, 'git'));
-  for (const cmd of ['launchctl', 'systemctl']) {
+  for (const cmd of ['launchctl', 'systemctl', 'curl', ...(brew ? ['brew'] : [])]) {
     fs.writeFileSync(path.join(shims, cmd), `#!/bin/sh\necho "${cmd} $*" >> '${log}'\n`, { mode: 0o755 });
   }
   if (uname) fs.writeFileSync(path.join(shims, 'uname'), `#!/bin/sh\necho ${uname}\n`, { mode: 0o755 });
@@ -43,7 +45,13 @@ function sandbox(t, { firstmate = true, uname = null } = {}) {
     fs.mkdirSync(path.join(fm, 'bin'));
     fs.writeFileSync(path.join(fm, 'bin', 'fm-spawn.sh'), '#!/bin/sh\nexit 0\n');
   }
-  const env = { HOME: home, PATH: `${shims}:/usr/bin:/bin`, SHELL: '/bin/zsh' };
+  const repo = path.join(base, 'firstmate-repo');
+  fs.mkdirSync(path.join(repo, 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'AGENTS.md'), '# Sample firstmate\n');
+  fs.writeFileSync(path.join(repo, 'bin', 'fm-spawn.sh'), '#!/bin/sh\nexit 0\n');
+  const g = (...a) => execFileSync(git, ['-C', repo, ...a], { stdio: 'ignore' });
+  g('init', '-q'); g('add', '.'); g('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'init');
+  const env = { HOME: home, PATH: `${shims}:/usr/bin:/bin`, SHELL: '/bin/zsh', FIRSTMATE_REPO: repo };
   const run = (...args) => {
     const r = spawnSync('/bin/sh', [INSTALL, ...args], { env, cwd: base, encoding: 'utf8' });
     return { code: r.status, out: r.stdout + r.stderr };
@@ -72,7 +80,7 @@ test('install.sh copies the app and writes a working launcher; re-runs are idemp
   const first = s.run();
   assert.equal(first.code, 0, first.out);
   assert.match(first.out, new RegExp(`Firstmate home: ${path.join(s.home, 'firstmate')} \\(default\\)`));
-  assert.doesNotMatch(first.out, /git clone/, 'home found: no clone hint');
+  assert.doesNotMatch(first.out, /Setting up firstmate/, 'home found: no clone');
   assert.match(first.out, /is not on your PATH/);
 
   const app = path.join(s.home, '.ship-deck', 'app');
@@ -97,16 +105,47 @@ test('install.sh copies the app and writes a working launcher; re-runs are idemp
   assert.deepEqual(fs.readdirSync(s.home).sort(), ['.local', '.ship-deck', 'firstmate']);
   assert.deepEqual(fs.readdirSync(path.join(s.home, '.local')), ['bin']);
   assert.deepEqual(fingerprint(path.join(s.home, 'firstmate')), fmBefore);
-  assert.equal(s.calls(), '', 'no launchctl/systemctl without --autostart');
+  assert.doesNotMatch(s.calls(), /launchctl|systemctl/, 'no launchctl/systemctl without --autostart');
 });
 
-test('install.sh without a firstmate home prints the clone command and still installs', (t) => {
+test('install.sh without a firstmate home sets one up at ~/firstmate, then leaves it alone', (t) => {
   const s = sandbox(t, { firstmate: false });
   const r = s.run();
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /git clone https:\/\/github\.com\/kunchenguid\/firstmate ~\/firstmate/);
-  assert.ok(!fs.existsSync(path.join(s.home, 'firstmate')), 'never clones firstmate itself');
-  assert.ok(fs.existsSync(path.join(s.home, '.local', 'bin', 'ship-deck')));
+  const fm = path.join(s.home, 'firstmate');
+  assert.match(r.out, new RegExp(`Setting up firstmate .* in ${fm}`));
+  assert.ok(fs.existsSync(path.join(fm, '.git')) && fs.existsSync(path.join(fm, 'bin', 'fm-spawn.sh')), 'cloned');
+  for (const d of ['state', 'data', 'projects']) assert.equal(fs.statSync(path.join(fm, d)).mode & 0o777, 0o700, d);
+  assert.ok(require('../lib/home').looksLikeHome(fm), 'Ship Deck finds it');
+  assert.doesNotMatch(fs.readFileSync(path.join(s.home, '.local', 'bin', 'ship-deck'), 'utf8'), /FM_HOME=/);
+
+  fs.writeFileSync(path.join(fm, 'state', 'w.status'), 'working: x\n');
+  const before = fingerprint(fm);
+  const again = s.run();
+  assert.equal(again.code, 0, again.out);
+  assert.doesNotMatch(again.out, /Setting up firstmate/);
+  assert.deepEqual(fingerprint(fm), before, 'an existing home is left exactly as is');
+});
+
+test('install.sh refuses a non-empty folder that is not firstmate and installs nothing', (t) => {
+  const s = sandbox(t, { firstmate: false });
+  const fm = path.join(s.home, 'firstmate');
+  fs.mkdirSync(fm);
+  fs.writeFileSync(path.join(fm, 'notes.txt'), 'mine\n');
+  const r = s.run();
+  assert.notEqual(r.code, 0);
+  assert.match(r.out, /is not empty and is not firstmate; it was left as is/);
+  assert.deepEqual(fs.readdirSync(fm), ['notes.txt']);
+  assert.ok(!fs.existsSync(path.join(s.home, '.ship-deck')), 'stopped before installing');
+});
+
+test('install.sh installs missing tools with Homebrew and the Claude Code installer', (t) => {
+  const s = sandbox(t, { brew: true });
+  const r = s.run();
+  assert.equal(r.code, 0, r.out);
+  assert.match(s.calls(), /^brew install tmux gh$/m);
+  assert.match(s.calls(), /^curl -fsSL https:\/\/claude\.ai\/install\.sh$/m);
+  assert.match(r.out, /MISSING claude .*: run {2}curl -fsSL https:\/\/claude\.ai\/install\.sh \| bash/, 'still missing: the exact command');
 });
 
 test('install.sh --home elsewhere remembers it in the launcher; a foreign app dir is refused', (t) => {
@@ -116,6 +155,12 @@ test('install.sh --home elsewhere remembers it in the launcher; a foreign app di
   const r = s.run('--home', other);
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, new RegExp(`Firstmate home: ${other} \\(--home\\)`));
+  const fresh = path.join(s.base, 'fm-new');
+  const made = s.run('--home', fresh);
+  assert.equal(made.code, 0, made.out);
+  assert.ok(require('../lib/home').looksLikeHome(fresh), 'set up at --home');
+  assert.match(fs.readFileSync(path.join(s.home, '.local', 'bin', 'ship-deck'), 'utf8'), new RegExp(`FM_HOME='${fresh}'`));
+  assert.equal(s.run('--home', other).code, 0);
   assert.match(fs.readFileSync(path.join(s.home, '.local', 'bin', 'ship-deck'), 'utf8'), new RegExp(`FM_HOME='${other}'`));
 
   fs.rmSync(path.join(s.home, '.ship-deck', 'app', '.ship-deck-install'));

@@ -1,8 +1,11 @@
 #!/bin/sh
 # Installs Ship Deck for one person on their own computer (macOS or Linux), no sudo:
-#   - checks Node >= 18 (required), git, tmux, the Claude Code CLI and the GitHub CLI (warned);
-#   - checks for a firstmate home (--home, else FM_HOME, else ~/firstmate) and prints the clone
-#     command when there is none (it never clones firstmate itself);
+#   - checks Node >= 18 (required); installs missing git, tmux, gh (Homebrew) and the Claude Code
+#     CLI (its official installer) when that needs no sudo, else prints the one command to run;
+#   - finds the firstmate home (--home, else FM_HOME, else ~/firstmate); when there is none it
+#     clones firstmate there ($FIRSTMATE_REPO overrides the URL) and adds its private state/,
+#     data/ and projects/ folders; an existing home is never changed, and a non-empty folder
+#     that is not firstmate stops the install;
 #   - copies the app into ~/.ship-deck/app, from this checkout, or from a git clone of --from
 #     (default: the Ship Deck repo below) when not run from a checkout;
 #   - writes the `ship-deck` launcher into ~/.local/bin (warns when that is not on PATH);
@@ -13,7 +16,8 @@
 set -eu
 
 DEFAULT_REPO=https://github.com/aryanbhandari047/ship-deck.git
-FIRSTMATE_REPO=https://github.com/kunchenguid/firstmate
+FIRSTMATE_REPO=${FIRSTMATE_REPO:-https://github.com/kunchenguid/firstmate}
+CLAUDE_INSTALLER=https://claude.ai/install.sh
 
 say() { printf '%s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
@@ -21,7 +25,7 @@ die() { printf 'ship-deck install: %s\n' "$*" >&2; exit 1; }
 
 usage() {
   say "usage: sh bin/install.sh [--home DIR] [--from GIT_URL] [--autostart] [--edit-path]"
-  say "  --home DIR      your firstmate home (default: \$FM_HOME, else ~/firstmate)"
+  say "  --home DIR      your firstmate home, set up there when missing (default: \$FM_HOME, else ~/firstmate)"
   say "  --from GIT_URL  install from a fresh clone of this repo instead of this checkout"
   say "                  (default when not run from a checkout: $DEFAULT_REPO)"
   say "  --autostart     also start Ship Deck at login (LaunchAgent on macOS, systemd user unit on Linux)"
@@ -60,14 +64,38 @@ node_bin=$(command -v node 2>/dev/null || true)
 "$node_bin" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' \
   || die "Node.js 18 or newer is required; found $("$node_bin" --version)"
 say "  ok    node $("$node_bin" --version)"
+has() { command -v "$1" >/dev/null 2>&1 || [ -x "$HOME/.local/bin/$1" ]; }
+brew_bin=$(command -v brew 2>/dev/null || true)
+need=
+for c in git tmux gh; do has "$c" || need="$need $c"; done
+if [ -n "$need" ] && [ -n "$brew_bin" ]; then
+  say "  installing$need with Homebrew"
+  # shellcheck disable=SC2086 # one word per tool
+  "$brew_bin" install $need || warn "brew install$need failed"
+fi
+if ! has claude && command -v curl >/dev/null 2>&1; then
+  say "  installing Claude Code (its official installer, no sudo)"
+  curl -fsSL "$CLAUDE_INSTALLER" | bash || warn "the Claude Code installer failed"
+fi
+# The one command to run for a tool that is still missing.
+fix_for() {
+  case $1 in
+    claude) say "curl -fsSL $CLAUDE_INSTALLER | bash" ;;
+    *) if [ -n "$brew_bin" ] || [ "$os" = macos ]; then say "brew install $1"
+       elif command -v apt-get >/dev/null 2>&1; then say "sudo apt-get install -y $1"
+       elif command -v dnf >/dev/null 2>&1; then say "sudo dnf install -y $1"
+       else say "install $1 with your package manager"; fi ;;
+  esac
+}
 missing=
 check() { # check <command> <what it is for>
-  if command -v "$1" >/dev/null 2>&1; then say "  ok    $1"; else say "  MISSING $1 ($2)"; missing="$missing $1"; fi
+  if has "$1"; then say "  ok    $1"; else say "  MISSING $1 ($2): run  $(fix_for "$1")"; missing="$missing $1"; fi
 }
-check git "firstmate and worker branches"
-check tmux "firstmate runs its workers in tmux"
-check claude "the Claude Code CLI: https://docs.claude.com/en/docs/claude-code"
-check gh "the GitHub CLI: https://cli.github.com, then gh auth login"
+check git "to get firstmate and run worker branches"
+check tmux "the workers run in it"
+check claude "the Claude Code CLI"
+check gh "the GitHub CLI; then run gh auth login"
+[ "$os" = macos ] && [ -z "$brew_bin" ] && case $missing in *git*|*tmux*|*gh*) say "  (no Homebrew: get it from https://brew.sh first)" ;; esac
 
 # ---------- firstmate home ----------
 if [ -n "$home_flag" ]; then home=$home_flag; how="--home"
@@ -75,23 +103,24 @@ elif [ -n "${FM_HOME:-}" ]; then home=$FM_HOME; how="FM_HOME"
 else home=$HOME/firstmate; how="default"
 fi
 case $home in "~"/*) home=$HOME/${home#"~/"} ;; esac
-if [ -d "$home" ]; then home=$(cd "$home" && pwd -P); fi
-# Same test as lib/home.js looksLikeHome.
-if [ -f "$home/AGENTS.md" ] && [ -f "$home/bin/fm-spawn.sh" ] && [ -d "$home/state" ]; then
-  home_ok=1
+is_fm() { [ -f "$1/AGENTS.md" ] && [ -f "$1/bin/fm-spawn.sh" ]; }
+if [ -e "$home" ] && [ ! -d "$home" ]; then die "$home ($how) is a file, not a firstmate folder; pass --home DIR to use another folder"; fi
+if [ -d "$home" ] && [ -n "$(ls -A "$home" 2>/dev/null)" ] && ! is_fm "$home"; then
+  die "$home ($how) is not empty and is not firstmate; it was left as is. Move it away or pass --home DIR for another folder, then run this again"
+fi
+if ! is_fm "$home"; then
+  has git || die "git is needed to set up firstmate: run  $(fix_for git)  then run this again"
+  say "Setting up firstmate (the engine that runs your agents) in $home"
+  mkdir -p "$(dirname "$home")"
+  git clone --quiet "$FIRSTMATE_REPO" "$home" || die "could not clone $FIRSTMATE_REPO into $home"
+fi
+home=$(cd "$home" && pwd -P)
+# Same test as lib/home.js looksLikeHome; a fresh clone lacks its private (git-ignored) folders.
+if [ -d "$home/state" ]; then
   say "Firstmate home: $home ($how)"
 else
-  home_ok=0
-  say "No firstmate home at $home ($how)."
-  if [ "$how" = default ]; then
-    say "  Get firstmate with:"
-    say "    git clone $FIRSTMATE_REPO ~/firstmate"
-  else
-    say "  Get firstmate with:"
-    say "    git clone $FIRSTMATE_REPO '$home'"
-  fi
-  say "  then follow its README to start your first mate. Ship Deck installs anyway and shows"
-  say "  its first-run screen until the folder exists."
+  (umask 077 && mkdir -p "$home/state" "$home/data" "$home/projects")
+  say "Firstmate home: $home ($how, ready)"
 fi
 
 # ---------- the app ----------
@@ -141,7 +170,7 @@ mkdir -p "$bindir"
 fm_line=
 # A non-default home is remembered so the launcher and autostart find it without flags;
 # FM_HOME, --home and a firstmate folder as the current directory still win.
-if [ "$home_ok" = 1 ] && [ "$home" != "$HOME/firstmate" ]; then
+if [ "$home" != "$HOME/firstmate" ]; then
   fm_line="[ -n \"\${FM_HOME:-}\" ] || case \" \$* \" in *' --home'*) ;; *) [ -f ./bin/fm-spawn.sh ] || { FM_HOME='$home'; export FM_HOME; } ;; esac"
 fi
 cat > "$launcher.tmp" <<EOF
@@ -250,10 +279,10 @@ fi
 # ---------- summary ----------
 say ""
 if [ -n "$missing" ]; then
-  say "Still to install before firstmate can run:$missing"
+  say "Still to install before your agents can run:$missing (commands above)"
 fi
-[ "$home_ok" = 1 ] || say "Then clone firstmate (above)."
 say "Start Ship Deck with:  ship-deck        (opens http://127.0.0.1:4747/; Ctrl+C stops it)"
+say "Your first mate:       cd '$home' && claude   (Ship Deck's chat reaches it while it runs)"
 say "In the background:     sh $app/bin/start.sh"
 say "Guide: $app/docs/TEAMMATE-SETUP.md"
 say "Already running? Restart it to use this version."

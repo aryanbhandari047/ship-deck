@@ -67,9 +67,7 @@ Ship Deck fixes that:
 
 ## Quick start
 
-You need **Node.js 18+**, **git**, **tmux** (the workers run in it), the
-**Claude Code** and **GitHub** CLIs, and an agent fleet run by firstmate (see
-[Inspiration](#inspiration); ideally installed at `~/firstmate`).
+You need **Node.js 18+** and **git**. Everything else is set up for you:
 
 ```sh
 git clone https://github.com/aryanbhandari047/ship-deck.git ~/ship-deck
@@ -77,9 +75,11 @@ sh ~/ship-deck/bin/install.sh     # macOS/Linux, no sudo, safe to re-run
 ship-deck                         # opens http://127.0.0.1:4747/
 ```
 
-The installer checks the prerequisites, copies the app to `~/.ship-deck/app`
-and adds a `ship-deck` launcher to `~/.local/bin`. Add `--autostart` to start
-it at login, or `--home DIR` if your fleet lives elsewhere.
+The installer adds the tools your agents need (the Claude Code and GitHub
+CLIs among them) when it can, or prints the one command to run. It sets up the
+agent engine, [firstmate](#inspiration), at `~/firstmate`, copies the app to
+`~/.ship-deck/app` and adds a `ship-deck` command. Add `--autostart` to start
+it at login, or `--home DIR` to keep the engine elsewhere.
 
 Without the installer, run it straight from the clone: `npx .` or
 `node server.js --home ~/firstmate`.
@@ -91,7 +91,7 @@ cp -R test/fixtures/home /tmp/ship-deck-sample
 node server.js --home /tmp/ship-deck-sample --orders-dir /tmp/ship-deck-orders
 ```
 
-- Full setup, including firstmate and teaching your first mate to read the
+- Full setup, including teaching your first mate to read the
   chat: [docs/TEAMMATE-SETUP.md](docs/TEAMMATE-SETUP.md)
 - Flags, home detection, the message contract, sharing, security and more:
   [docs/REFERENCE.md](docs/REFERENCE.md)

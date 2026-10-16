@@ -11,6 +11,11 @@ and `fm-send.sh`), `state/` (one record per worker) and `data/` (the queue,
 projects, briefs and reports). Ship Deck only reads it, with one exception:
 each new message appends one wake line to `state/ship-deck-inbox.status` so
 the first mate notices it quickly (`--no-wake` turns that off).
+`bin/install.sh` sets one up when none exists: it clones firstmate
+(`FIRSTMATE_REPO` overrides the URL) into `~/firstmate` (or the `--home`
+/ `FM_HOME` folder when that is missing or empty) and adds the git-ignored
+`state/`, `data/` and `projects/` folders. An existing home is never changed,
+and a non-empty folder that is not firstmate stops the install.
 
 ## Which firstmate home it reads
 
@@ -22,8 +27,9 @@ The first of these wins:
    `AGENTS.md`, `bin/fm-spawn.sh` and a `state/` folder)
 4. `~/firstmate`, if it looks like a firstmate home
 
-If none matches, the page shows a first-run screen listing where it looked
-and how to point it at your home. The Claude Code data for the home (the
+If none matches, the page shows a first-run screen listing where it looked,
+pointing to `sh ~/ship-deck/bin/install.sh` to set one up, and how to point it
+at an existing home. The Claude Code data for the home (the
 first mate's transcripts and its memory folder) is found from the home path,
 the same way Claude Code names its project folders
 (`~/.claude/projects/<home path with / and . as ->/`), so nothing is
@@ -565,9 +571,11 @@ dir derived from the home, the captain's name from git config files, task
 titles, the plain-language labels and summaries, port fallback, the
 first-run server and `bin/start.sh` falling back to a free port.
 `test/install.test.js` runs `bin/install.sh` in a temp `HOME` with a fixture
-firstmate home and shimmed `launchctl`/`systemctl`/`uname` (no network): the app
-copy and launcher, idempotent re-runs, the clone hint, `--home`, `--edit-path`,
-and that nothing outside `~/.ship-deck` and `~/.local/bin` is written without
+firstmate home and shimmed `launchctl`/`systemctl`/`curl`/`brew`/`uname` (no
+network): the app copy and launcher, idempotent re-runs, setting up firstmate
+from a local `FIRSTMATE_REPO` (and leaving an existing home alone), refusing a
+foreign folder, installing missing tools, `--home`, `--edit-path`, and that
+nothing outside `~/.ship-deck` and `~/.local/bin` is written without
 `--autostart`.
 
 ## What it reads
@@ -614,7 +622,7 @@ bin/orders.js      Orders, replies, thread and sessions CLI for the first mate
 bin/orders-check.sh  Watcher wake check (POSIX sh)
 bin/ship-deck.js   `ship-deck` / `npx` entry (same flags as server.js)
 bin/start.sh       Start the server in the background unless it already answers
-bin/install.sh     Per-person install: prerequisites, ~/.ship-deck/app, launcher, opt-in autostart
+bin/install.sh     Per-person install: prerequisites, firstmate home, ~/.ship-deck/app, launcher, opt-in autostart
 docs/TEAMMATE-SETUP.md  Step-by-step setup guide
 docs/REFERENCE.md  This reference
 public/            index.html, style.css, app.js, board.js (flags + Board grouping), markdown.js, labels.js, ansi.js (no build step)

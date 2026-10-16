@@ -229,6 +229,8 @@ test('no home: the first-run server explains itself and refuses the fleet APIs',
   assert.equal(post.status, 503);
   const page = await (await fetch(base + '/')).text();
   assert.match(page, /id="first-run"/);
+  assert.match(page, /Run <code>sh ~\/ship-deck\/bin\/install\.sh<\/code> again/, 'points to the installer, not a manual clone');
+  assert.doesNotMatch(page, /git clone/);
   assert.match(page, /labels\.js/);
   const status = await new Promise((r) => http.get({ host: '127.0.0.1', port: server.address().port, path: '/', headers: { Host: 'evil.example' } }, (res) => { res.resume(); r(res.statusCode); }));
   assert.equal(status, 421, 'Host guard still applies');

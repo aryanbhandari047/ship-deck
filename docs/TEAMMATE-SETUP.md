@@ -6,7 +6,7 @@ Everything runs on your laptop. There is nothing to host, no server to share
 and no one else's fleet to reach: your Ship Deck talks only to your first mate,
 at `http://127.0.0.1:4747/`, the same way the captain's does.
 
-Setup takes about 15 minutes, most of it firstmate itself.
+Setup is three commands and a couple of sign-ins.
 
 ## What you will see (60 seconds)
 
@@ -41,49 +41,49 @@ Press `?` any time for keyboard shortcuts. It follows your Mac's dark mode.
 
 ## 1. Before you start
 
-You need, on your laptop:
+You need **Node.js 18 or newer** (`node --version`) and **git**. The installer
+sets up everything else.
 
-- **Claude Code**, installed and signed in: run `claude` once and finish the
-  sign-in.
-- **GitHub CLI**, signed in: `gh auth login` (firstmate opens pull requests
-  with it).
-- **tmux**: `brew install tmux` on a Mac, `sudo apt install tmux` on Ubuntu.
-- **Node.js 18 or newer** (`node --version`) and **git**.
-
-## 2. Install firstmate
-
-firstmate is the open-source first mate that Ship Deck shows. Put it at
-`~/firstmate` and Ship Deck finds it on its own:
-
-```sh
-git clone https://github.com/kunchenguid/firstmate ~/firstmate
-```
-
-Then follow its README to start your first mate once in a terminal. If you
-keep it somewhere else, that is fine: pass `--home /that/folder` when you
-install Ship Deck below.
-
-## 3. Install Ship Deck (one command)
+## 2. Install Ship Deck (one command)
 
 The Ship Deck repo is public, so anyone can clone it:
 
 ```sh
-git clone https://github.com/aryanbhandari047/ship-deck.git ~/ship-deck && sh ~/ship-deck/bin/install.sh
+git clone https://github.com/aryanbhandari047/ship-deck.git ~/ship-deck
+sh ~/ship-deck/bin/install.sh
 ```
 
-The installer checks the tools above, tells you if firstmate is missing (with
-the exact command to get it), copies Ship Deck to `~/.ship-deck/app` and adds a
-`ship-deck` command in `~/.local/bin`. It never uses `sudo` and changes nothing
-outside those folders unless you ask:
+The installer:
+
+- adds the tools your agents need when they are missing: tmux and the GitHub
+  CLI with Homebrew, and Claude Code with its official installer. When it
+  cannot (no Homebrew, or Linux), it prints the one command to run;
+- sets up firstmate, the open-source engine that runs your first mate and its
+  workers, at `~/firstmate`. An existing firstmate there is used as is, and a
+  folder there that is not firstmate stops the install untouched;
+- copies Ship Deck to `~/.ship-deck/app` and adds a `ship-deck` command in
+  `~/.local/bin`.
+
+It never uses `sudo` and changes nothing else unless you ask:
 
 | Add this | To |
 | --- | --- |
-| `--home /path/to/firstmate` | use a firstmate folder that is not `~/firstmate` |
+| `--home /path/to/firstmate` | keep firstmate in another folder (set up there when it is missing; Ship Deck remembers it) |
 | `--edit-path` | add `~/.local/bin` to your PATH in your shell settings (otherwise it prints the line for you to add) |
 | `--autostart` | start Ship Deck at login (a LaunchAgent on a Mac, a systemd user service on Linux) |
 
 To update later: `git -C ~/ship-deck pull && sh ~/ship-deck/bin/install.sh`,
 then restart Ship Deck. Running the installer again is always safe.
+
+## 3. Sign in and start your first mate
+
+Once: run `claude` and finish the sign-in, and run `gh auth login` (your
+first mate opens pull requests with it). Then start your first mate in its
+folder and leave that terminal open:
+
+```sh
+cd ~/firstmate && claude
+```
 
 ## 4. First run
 
@@ -96,8 +96,8 @@ prints which). Ctrl+C stops it. To keep it running in the background instead:
 `sh ~/.ship-deck/app/bin/start.sh`.
 
 If Ship Deck cannot find your firstmate folder, it shows **Connect Ship Deck to
-your first mate** with the places it looked. Stop it and start it again with
-your folder:
+your first mate** with the places it looked. Run `sh ~/ship-deck/bin/install.sh`
+again to set one up, or, if yours lives elsewhere, start it with that folder:
 
 ```sh
 ship-deck --home ~/path/to/firstmate
@@ -213,3 +213,4 @@ you want them gone. If you used `--autostart`, also remove
 `launchctl bootout gui/$(id -u)/local.ship-deck`) or run
 `systemctl --user disable --now ship-deck.service` and delete
 `~/.config/systemd/user/ship-deck.service`.
+The installer's `~/firstmate` is yours to keep or delete separately.
