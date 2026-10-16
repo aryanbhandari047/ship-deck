@@ -73,7 +73,12 @@ You need **Node.js 18+** and **git**. Everything else is set up for you:
 git clone https://github.com/aryanbhandari047/ship-deck.git ~/ship-deck
 sh ~/ship-deck/bin/install.sh     # macOS/Linux, no sudo, safe to re-run
 ship-deck                         # opens http://127.0.0.1:4747/
+cd ~/firstmate && claude          # in a second terminal: starts your first mate
 ```
+
+`ship-deck` keeps running in its terminal, so start the first mate in a second
+terminal and leave both open. First time only, sign in to Claude Code there and
+run `gh auth login`.
 
 The installer adds the tools your agents need (the Claude Code and GitHub
 CLIs among them) when it can, or prints the one command to run. It sets up the
