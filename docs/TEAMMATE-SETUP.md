@@ -69,7 +69,7 @@ It never uses `sudo` and changes nothing else unless you ask:
 | Add this | To |
 | --- | --- |
 | `--home /path/to/firstmate` | keep firstmate in another folder (set up there when it is missing; Ship Deck remembers it) |
-| `--edit-path` | add `~/.local/bin` to your PATH in your shell settings (otherwise it prints the line for you to add) |
+| `--no-edit-path` | do not add `~/.local/bin` to your PATH in your shell settings (it does by default when missing; with this it prints the line for you to add) |
 | `--autostart` | start Ship Deck at login (a LaunchAgent on a Mac, a systemd user service on Linux) |
 
 To update later: `git -C ~/ship-deck pull && sh ~/ship-deck/bin/install.sh`,

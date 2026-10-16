@@ -574,9 +574,9 @@ first-run server and `bin/start.sh` falling back to a free port.
 firstmate home and shimmed `launchctl`/`systemctl`/`curl`/`brew`/`uname` (no
 network): the app copy and launcher, idempotent re-runs, setting up firstmate
 from a local `FIRSTMATE_REPO` (and leaving an existing home alone), refusing a
-foreign folder, installing missing tools, `--home`, `--edit-path`, and that
-nothing outside `~/.ship-deck` and `~/.local/bin` is written without
-`--autostart`.
+foreign folder, installing missing tools, `--home`, the default PATH line
+(and `--no-edit-path`), and that nothing outside `~/.ship-deck`,
+`~/.local/bin` and the shell rc file is written without `--autostart`.
 
 ## What it reads
 

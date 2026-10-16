@@ -1,7 +1,7 @@
 'use strict';
 // bin/install.sh in a temp HOME with a fixture firstmate home: the app copy and launcher,
-// idempotent re-runs, nothing outside ~/.ship-deck and ~/.local/bin unless --autostart or
-// --edit-path is passed, the autostart files with launchctl/systemctl/uname shims, and setting
+// idempotent re-runs, nothing outside ~/.ship-deck, ~/.local/bin and the PATH line in ~/.zshrc
+// unless --autostart is passed (--no-edit-path skips the rc), the autostart files with launchctl/systemctl/uname shims, and setting
 // up firstmate from a local FIRSTMATE_REPO. No network: it installs from this checkout and
 // curl/brew are logging fakes. Temp dirs and fabricated data only.
 const test = require('node:test');
@@ -77,7 +77,7 @@ function fingerprint(dir) {
 test('install.sh copies the app and writes a working launcher; re-runs are idempotent', (t) => {
   const s = sandbox(t);
   const fmBefore = fingerprint(path.join(s.home, 'firstmate'));
-  const first = s.run();
+  const first = s.run('--no-edit-path');
   assert.equal(first.code, 0, first.out);
   assert.match(first.out, new RegExp(`Firstmate home: ${path.join(s.home, 'firstmate')} \\(default\\)`));
   assert.doesNotMatch(first.out, /Setting up firstmate/, 'home found: no clone');
@@ -97,7 +97,7 @@ test('install.sh copies the app and writes a working launcher; re-runs are idemp
   assert.doesNotMatch(text, /FM_HOME=/, 'the default home is auto-detected, not baked in');
   assert.match(execFileSync(launcher, ['--help'], { env: s.env, encoding: 'utf8' }), /^usage: ship-deck/);
 
-  const again = s.run();
+  const again = s.run('--no-edit-path');
   assert.equal(again.code, 0, again.out);
   assert.equal(fs.readFileSync(launcher, 'utf8'), text, 'same launcher');
   assert.deepEqual(fs.readdirSync(path.join(s.home, '.ship-deck')).sort(), ['app'], 'no staging or clone leftovers');
@@ -170,10 +170,12 @@ test('install.sh --home elsewhere remembers it in the launcher; a foreign app di
   assert.ok(fs.existsSync(path.join(s.home, '.ship-deck', 'app', 'server.js')), 'left in place');
 });
 
-test('install.sh --edit-path adds one PATH line to the shell rc file', (t) => {
+test('install.sh adds one PATH line to the shell rc file by default', (t) => {
   const s = sandbox(t);
-  assert.equal(s.run('--edit-path').code, 0);
-  assert.equal(s.run('--edit-path').code, 0);
+  const r = s.run();
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /Added ~\/\.local\/bin to PATH in .*\.zshrc/);
+  assert.equal(s.run('--edit-path').code, 0, 'old flag still accepted');
   const rc = fs.readFileSync(path.join(s.home, '.zshrc'), 'utf8');
   assert.equal(rc.match(/added by ship-deck install/g).length, 1, rc);
   assert.match(rc, /export PATH="\$HOME\/\.local\/bin:\$PATH"/);

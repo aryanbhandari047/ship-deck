@@ -10,9 +10,9 @@
 #     (default: the Ship Deck repo below) when not run from a checkout;
 #   - writes the `ship-deck` launcher into ~/.local/bin (warns when that is not on PATH);
 #   - only with --autostart: a macOS LaunchAgent or a systemd user unit;
-#   - only with --edit-path: adds ~/.local/bin to PATH in your shell rc file.
+#   - adds ~/.local/bin to PATH in your shell rc file when missing (--no-edit-path to skip).
 # Safe to re-run: it replaces its own files and nothing else.
-#   sh bin/install.sh [--home DIR] [--from GIT_URL] [--autostart] [--edit-path]
+#   sh bin/install.sh [--home DIR] [--from GIT_URL] [--autostart] [--no-edit-path]
 set -eu
 
 DEFAULT_REPO=https://github.com/aryanbhandari047/ship-deck.git
@@ -24,18 +24,18 @@ warn() { printf 'warning: %s\n' "$*" >&2; }
 die() { printf 'ship-deck install: %s\n' "$*" >&2; exit 1; }
 
 usage() {
-  say "usage: sh bin/install.sh [--home DIR] [--from GIT_URL] [--autostart] [--edit-path]"
+  say "usage: sh bin/install.sh [--home DIR] [--from GIT_URL] [--autostart] [--no-edit-path]"
   say "  --home DIR      your firstmate home, set up there when missing (default: \$FM_HOME, else ~/firstmate)"
   say "  --from GIT_URL  install from a fresh clone of this repo instead of this checkout"
   say "                  (default when not run from a checkout: $DEFAULT_REPO)"
   say "  --autostart     also start Ship Deck at login (LaunchAgent on macOS, systemd user unit on Linux)"
-  say "  --edit-path     add ~/.local/bin to PATH in your shell rc file if it is missing"
+  say "  --no-edit-path  do not add ~/.local/bin to PATH in your shell rc file (added by default when missing)"
 }
 
 home_flag=
 from=
 autostart=0
-edit_path=0
+edit_path=1
 while [ $# -gt 0 ]; do
   case $1 in
     --home) [ $# -ge 2 ] || die "--home needs a folder"; home_flag=$2; shift ;;
@@ -43,7 +43,8 @@ while [ $# -gt 0 ]; do
     --from) [ $# -ge 2 ] || die "--from needs a git URL"; from=$2; shift ;;
     --from=*) from=${1#--from=} ;;
     --autostart) autostart=1 ;;
-    --edit-path) edit_path=1 ;;
+    --edit-path) edit_path=1 ;; # old flag, now the default
+    --no-edit-path) edit_path=0 ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "unknown option: $1" ;;
   esac
@@ -204,7 +205,7 @@ if [ "$on_path" = 0 ]; then
       say "Added ~/.local/bin to PATH in $rc (open a new terminal)"
     fi
   else
-    warn "$bindir is not on your PATH. Add this line to your shell rc file (or re-run with --edit-path):"
+    warn "$bindir is not on your PATH. Add this line to your shell rc file (or re-run without --no-edit-path):"
     warn "  $path_line"
   fi
 fi
