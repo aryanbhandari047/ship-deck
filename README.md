@@ -68,8 +68,9 @@ Ship Deck fixes that:
 ## Quick start
 
 You need **Node.js 18+** and **git**. Everything else is set up for you
-(macOS/Linux, no sudo, safe to re-run). The last line opens
-http://127.0.0.1:4747/:
+(macOS/Linux, no sudo, safe to re-run).
+
+**1. Install and start Ship Deck.** In one terminal, and leave it running:
 
 ```sh
 git clone https://github.com/aryanbhandari047/ship-deck.git ~/ship-deck
@@ -77,13 +78,20 @@ sh ~/ship-deck/bin/install.sh
 ~/.local/bin/ship-deck
 ```
 
-`ship-deck` keeps running in its terminal (in new terminals plain `ship-deck`
-works), so start your first mate in a second terminal and leave both open:
+It opens http://127.0.0.1:4747/. In new terminals, plain `ship-deck` works.
+
+**2. Start your first mate.** In a second terminal (first time only, sign in
+to Claude Code when asked):
 
 ```sh
 cd ~/firstmate && claude
-``` First time only, sign in to Claude Code there and
-run `gh auth login`.
+```
+
+**3. First time only, sign in to GitHub:**
+
+```sh
+gh auth login
+```
 
 The installer adds the tools your agents need (the Claude Code and GitHub
 CLIs among them) when it can, or prints the one command to run. It sets up the
