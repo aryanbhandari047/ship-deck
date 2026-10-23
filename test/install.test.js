@@ -181,6 +181,18 @@ test('install.sh adds one PATH line to the shell rc file by default', (t) => {
   assert.match(rc, /export PATH="\$HOME\/\.local\/bin:\$PATH"/);
 });
 
+test('install.sh ignores a pasted trailing # comment but still rejects unknown options', (t) => {
+  const s = sandbox(t);
+  // zsh without interactivecomments passes "# macOS/Linux, ..." on as arguments.
+  const r = s.run('--no-edit-path', '#', 'macOS/Linux,', 'no', 'sudo,', '--bogus');
+  assert.equal(r.code, 0, r.out);
+  assert.ok(fs.existsSync(path.join(s.home, '.local', 'bin', 'ship-deck')));
+  assert.ok(!fs.existsSync(path.join(s.home, '.zshrc')), 'flags before the comment still apply');
+  const bad = s.run('--bogus');
+  assert.notEqual(bad.code, 0);
+  assert.match(bad.out, /unknown option: --bogus/);
+});
+
 test('install.sh --autostart writes a LaunchAgent on macOS and loads it', (t) => {
   const s = sandbox(t, { uname: 'Darwin' });
   const r = s.run('--autostart');

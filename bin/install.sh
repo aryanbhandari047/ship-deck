@@ -46,6 +46,7 @@ while [ $# -gt 0 ]; do
     --edit-path) edit_path=1 ;; # old flag, now the default
     --no-edit-path) edit_path=0 ;;
     -h|--help) usage; exit 0 ;;
+    \#*) break ;; # a pasted "# comment" (zsh without interactivecomments): ignore the rest
     *) usage >&2; die "unknown option: $1" ;;
   esac
   shift

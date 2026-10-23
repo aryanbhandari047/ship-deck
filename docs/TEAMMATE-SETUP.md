@@ -88,10 +88,10 @@ cd ~/firstmate && claude
 ## 4. First run
 
 ```sh
-ship-deck
+~/.local/bin/ship-deck
 ```
 
-It opens `http://127.0.0.1:4747/` in your browser (or the next free port, and
+(In a terminal opened after the install, plain `ship-deck` works too.) It opens `http://127.0.0.1:4747/` in your browser (or the next free port, and
 prints which). Ctrl+C stops it. To keep it running in the background instead:
 `sh ~/.ship-deck/app/bin/start.sh`.
 

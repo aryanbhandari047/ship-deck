@@ -42,18 +42,30 @@ config files; Ship Deck runs no git command).
 ## Command-line flags
 
 ```sh
-ship-deck --home /path/to/home        # or FM_HOME=/path/to/home ship-deck
-ship-deck --port 4800                 # first port to try, default 4747 (or SHIP_DECK_PORT)
-ship-deck --no-open                   # don't open the browser (or SHIP_DECK_NO_OPEN=1)
-ship-deck --captain-name "Your Name"  # name on the bridge (or SHIP_DECK_CAPTAIN)
-ship-deck --no-tmux                   # skip the terminal liveness probe
-ship-deck --stale-days 14             # "Quiet for N days" after this many days, default 7 (or SHIP_DECK_STALE_DAYS)
-ship-deck --orders-dir DIR            # where messages are kept, default ~/.ship-deck (or SHIP_DECK_ORDERS_DIR)
-ship-deck --memory-dir DIR            # first mate memory for the Ship's Library, default derived from the home
-ship-deck --claude-dir DIR            # Claude Code data dir, default ~/.claude (transcripts, skills)
-ship-deck --no-wake                   # don't append wake lines to <home>/state/ship-deck-inbox.status
-ship-deck --share --share-relay https://<relay>   # opt in to read-only sharing (or SHIP_DECK_SHARE=1, SHIP_DECK_RELAY)
-sh bin/start.sh [flags...]            # start in the background unless it already runs; prints the URL
+# or FM_HOME=/path/to/home ship-deck
+ship-deck --home /path/to/home
+# first port to try, default 4747 (or SHIP_DECK_PORT)
+ship-deck --port 4800
+# don't open the browser (or SHIP_DECK_NO_OPEN=1)
+ship-deck --no-open
+# name on the bridge (or SHIP_DECK_CAPTAIN)
+ship-deck --captain-name "Your Name"
+# skip the terminal liveness probe
+ship-deck --no-tmux
+# "Quiet for N days" after this many days, default 7 (or SHIP_DECK_STALE_DAYS)
+ship-deck --stale-days 14
+# where messages are kept, default ~/.ship-deck (or SHIP_DECK_ORDERS_DIR)
+ship-deck --orders-dir DIR
+# first mate memory for the Ship's Library, default derived from the home
+ship-deck --memory-dir DIR
+# Claude Code data dir, default ~/.claude (transcripts, skills)
+ship-deck --claude-dir DIR
+# don't append wake lines to <home>/state/ship-deck-inbox.status
+ship-deck --no-wake
+# opt in to read-only sharing (or SHIP_DECK_SHARE=1, SHIP_DECK_RELAY)
+ship-deck --share --share-relay https://<relay>
+# start in the background unless it already runs; prints the URL
+sh bin/start.sh [flags...]
 ```
 
 `node server.js [flags]` is the same as `ship-deck [flags]`. The page polls
@@ -65,7 +77,8 @@ Try it on the sample fleet without touching a real one:
 ```sh
 cp -R test/fixtures/home /tmp/ship-deck-sample
 ship-deck --home /tmp/ship-deck-sample --port 4748 --orders-dir /tmp/ship-deck-orders --captain-name "Sample Captain"
-echo "done: sample finished" >> /tmp/ship-deck-sample/state/delta-block.status   # updates within ~3 s
+# updates within ~3 s
+echo "done: sample finished" >> /tmp/ship-deck-sample/state/delta-block.status
 ```
 
 ## Start at login (macOS)
@@ -289,15 +302,23 @@ The UI asks for confirmation before every order; for `merge`, `cleanup` and
 acting.
 
 ```sh
-node bin/orders.js list [--pending] [--json]       # pending = no ack yet; payload shown under each order
+# pending = no ack yet; payload shown under each order
+node bin/orders.js list [--pending] [--json]
 node bin/orders.js ack <id> <acknowledged|done|declined> [note...]
-node bin/orders.js reply <order-id> [--ack done] "text"   # reply in the Bridge (optionally ack too)
-node bin/orders.js reply - "text"                  # unprompted message from the first mate
-node bin/orders.js reply <order-id|-> --file report.md    # long markdown (--file - reads stdin)
-node bin/orders.js reply <order-id|-> --attach shot.png [--attach demo.mp4] "text"   # with images/videos
-node bin/orders.js thread [--limit 30] [--json]    # the conversation as the captain sees it
-node bin/orders.js sessions [--json]               # recorded resume commands
-sh bin/orders-check.sh    # prints "ship-deck: N new captain order(s)" or nothing
+# reply in the Bridge (optionally ack too)
+node bin/orders.js reply <order-id> [--ack done] "text"
+# unprompted message from the first mate
+node bin/orders.js reply - "text"
+# long markdown (--file - reads stdin)
+node bin/orders.js reply <order-id|-> --file report.md
+# with images/videos
+node bin/orders.js reply <order-id|-> --attach shot.png [--attach demo.mp4] "text"
+# the conversation as the captain sees it
+node bin/orders.js thread [--limit 30] [--json]
+# recorded resume commands
+node bin/orders.js sessions [--json]
+# prints "ship-deck: N new captain order(s)" or nothing
+sh bin/orders-check.sh
 ```
 
 Replies are markdown (max 64 KB): paragraphs, lists, **bold**, `code`, fenced
@@ -516,7 +537,8 @@ itself (Vercel + Upstash free tiers, deploy steps, cost estimate) is in
 ## Tests
 
 ```sh
-npm test            # same as: node --test test/*.test.js relay/test/*.test.js
+# same as: node --test test/*.test.js relay/test/*.test.js
+npm test
 ```
 
 `test/share.test.js` covers the share projection (no home, worktree, window, session, files,

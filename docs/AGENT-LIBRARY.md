@@ -99,7 +99,8 @@ hour, and each read is one row in the captain's log.
 Every other method under `/v1/agent` answers 405.
 
 ```sh
-export SHIP_DECK_LIBRARY_KEY='sdak1.…'          # from "Create agent key"
+# from "Create agent key"
+export SHIP_DECK_LIBRARY_KEY='sdak1.…'
 RELAY=https://<relay>.vercel.app
 
 curl -fsS -H "Authorization: Bearer $SHIP_DECK_LIBRARY_KEY" "$RELAY/v1/agent/library"

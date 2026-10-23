@@ -138,9 +138,11 @@ and add `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and the redirect URIs
 ## Local development
 
 ```sh
-node dev.js --port 3000 --invite you@keychain.com   # memory store; prints an invite link
+# memory store; prints an invite link
+node dev.js --port 3000 --invite you@keychain.com
 ship-deck --share --share-relay http://localhost:3000 --orders-dir /tmp/sd-orders ...
-npm test                                            # from relay/ (the repo's npm test runs it too)
+# from relay/ (the repo's npm test runs it too)
+npm test
 ```
 
 `dev.js` serves `public/` and the same handler as Vercel, with the same headers. It uses
