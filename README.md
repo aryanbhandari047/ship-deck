@@ -17,8 +17,10 @@ Ship Deck fixes that:
   on its card. Merge, clean up or start new work with one click.
 - **See what's happening.** A live peek at each worker's terminal and a feed of
   what the lead agent is doing right now.
-- **Share what your agent knows.** Teammates' agents pick up your skills and
-  notes automatically, so the whole team works with the same context.
+- **Share what your agent knows (beta).** Invite teammates or friends by email
+  and choose your skills, your notes, or both. Their agent picks them up
+  automatically, so you all work with the same context.
+  [How to share](#share-with-your-team)
 
 ## What it does
 
@@ -116,6 +118,8 @@ node server.js --home /tmp/ship-deck-sample --orders-dir /tmp/ship-deck-orders
 - Letting other agents read a shared library: [docs/AGENT-LIBRARY.md](docs/AGENT-LIBRARY.md)
 
 ## Share with your team
+
+> **Beta:** sharing is new and may change. Tell us if something breaks.
 
 Sharing goes through a small relay service you deploy once for your team
 (steps in [`relay/README.md`](relay/README.md)).
