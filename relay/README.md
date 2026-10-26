@@ -77,8 +77,10 @@ watch the Upstash console if teammates script their agents; nothing bills either
 Active CPU: a request does a JSON parse and one Redis round trip, ≤ 10 ms of CPU, so about
 30 minutes a month (13% of 4 h); sign-ins cost about 50 ms each (scrypt). Data: snapshots are
 2-10 KB, so about 1.2 GB/month of Redis bandwidth (12% of 10 GB) and about 1 GB of Vercel
-transfer (1% of 100 GB). Storage: 10 snapshots of at most 64 KB plus about 60,000 audit rows
-of 300 bytes kept 90 days, about 20 MB (8% of 250 MB).
+transfer (1% of 100 GB). Knowledge libraries are at most 512 KB per deck: 10 decks pushing a
+full one hourly for 10 h is about 1.5 GB/month more Redis bandwidth (15%), and 5 MB stored.
+Storage: 10 snapshots of at most 64 KB plus about 60,000 audit rows of 300 bytes kept 90 days,
+about 20 MB (8% of 250 MB).
 
 The expensive switch is **Terminal**: its pane changes every capture, so a deck sharing it
 pushes every 30 s while workers print (about 2,400 commands per deck per 10 h day). Keep it
@@ -194,7 +196,7 @@ fails when they drift.
 | `GET /v1/decks` | viewer session | decks shared with me |
 | `GET /v1/decks/<captainSub>/<scope>[?ref=]` | viewer session | one scope: `board`, `updates`, `model`, `skills`, `terminal`, `notes`, `chat` |
 | `GET`, `POST /v1/decks/<captainSub>/agent-keys`, `DELETE …/agent-keys/<id>` | viewer session | the viewer's own agent keys for that deck (`POST` returns the key once) |
-| `POST /v1/library`, `DELETE /v1/library` | deck token | store or remove the knowledge library projection (re-sanitised, 256 KB) |
+| `POST /v1/library`, `DELETE /v1/library` | deck token | store or remove the knowledge library projection (re-sanitised, 512 KB) |
 | `GET /v1/knowledge[?since=<version>]`, `GET /v1/knowledge/<captainSub>` | deck token | a teammate's own deck: what every captain shares with this account (hashes), and one captain's granted skills and notes with their text |
 | `GET /v1/agent/library`, `GET /v1/agent/library/<captainSub>/<key>` | agent key | the library list (JSON) and one item (markdown) |
 

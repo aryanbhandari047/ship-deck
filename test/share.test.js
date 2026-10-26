@@ -227,6 +227,8 @@ test('the relay keeps the same allow-list, and its UI copies match the deck', ()
   assert.deepEqual(relayLib.ITEM_KEYS, share.LIBRARY_ITEM_KEYS);
   assert.equal(relayLib.KEY_RE.source, share.LIBRARY_KEY_RE.source);
   assert.equal(relayLib.MAX_TEXT, share.LIMITS.libraryText);
+  assert.equal(share.LIMITS.library, 512 * 1024);
+  assert.equal(relayLib.MAX_BYTES, share.LIMITS.library, 'the relay takes the largest library a deck sends');
   for (const f of require('../relay/scripts/sync-ui.js').FILES) {
     assert.equal(fs.readFileSync(path.join(ROOT, 'relay/public', f), 'utf8'), fs.readFileSync(path.join(ROOT, 'public', f), 'utf8'), `relay/public/${f} drifted: run node relay/scripts/sync-ui.js`);
   }

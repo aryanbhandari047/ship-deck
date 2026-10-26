@@ -19,6 +19,18 @@ const LIB = {
   ],
 };
 
+test('library push: a full 512 KB library is stored; a bigger body is refused', async (t) => {
+  const r = await startRelay(t);
+  const ada = await r.captain('ada@keychain.com');
+  const item = (i) => ({ key: 'skill:captain:s' + i, title: 's' + i, description: '', text: 'x'.repeat(L.MAX_TEXT) });
+  const fits = Math.floor(L.MAX_BYTES / JSON.stringify(item(10)).length);
+  const full = { v: 1, items: Array.from({ length: fits }, (_, i) => item(i)), trimmed: 0 };
+  assert.ok(Buffer.byteLength(JSON.stringify(full)) > 400 * 1024, 'more than the old 256 KB cap');
+  assert.equal((await r.deckCall(ada.token, 'POST', '/v1/library', full)).status, 200);
+  const over = { ...full, items: Array.from({ length: fits + 2 }, (_, i) => item(i)) };
+  assert.equal((await r.deckCall(ada.token, 'POST', '/v1/library', over)).status, 413);
+});
+
 async function setup(t, scopes = ['board', 'skills']) {
   const r = await startRelay(t);
   const ada = await r.captain('ada@keychain.com');

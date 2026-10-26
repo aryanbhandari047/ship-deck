@@ -21,7 +21,7 @@ other scopes they have; that flag is ignored.
 
 While at least one grant has Skills or Notes, Ship Deck pushes a separate library
 projection to the relay: checked every minute, sent when it changes (hourly
-otherwise), at most 16,000 characters per file and 200 KB in all, only the kinds some
+otherwise), at most 16,000 characters per file and 512 KB in all (skills first), only the kinds some
 grant needs. It goes through the same redaction as everything else (tokens, keys,
 `password=` values, absolute paths, links other than github.com and linear.app). The
 relay keeps it for 2 hours past the last push and gives each teammate only what their
