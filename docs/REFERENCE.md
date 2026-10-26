@@ -62,8 +62,10 @@ ship-deck --memory-dir DIR
 ship-deck --claude-dir DIR
 # don't append wake lines to <home>/state/ship-deck-inbox.status
 ship-deck --no-wake
-# opt in to read-only sharing (or SHIP_DECK_SHARE=1, SHIP_DECK_RELAY)
+# read-only sharing (or SHIP_DECK_SHARE=1, SHIP_DECK_RELAY); installs turn it on
 ship-deck --share --share-relay https://<relay>
+# skip sharing for this run
+ship-deck --no-share
 # start in the background unless it already runs; prints the URL
 sh bin/start.sh [flags...]
 ```
@@ -459,11 +461,13 @@ under 10 min old, or a transcript line in the last 20 s), and the chat shows
 
 ## Sharing (read-only, opt-in)
 
-Off unless Ship Deck starts with `--share --share-relay https://<relay>` (or
-`SHIP_DECK_SHARE=1` and `SHIP_DECK_RELAY`). `bin/install.sh --share` (or `--share-relay URL`)
-records the relay as `share_relay=` in `~/.ship-deck/app/.ship-deck-install`: the launcher and
-`bin/start.sh` (autostart) then set those variables unless `SHIP_DECK_SHARE` is already set
-(empty skips one run), and re-runs keep it until `--no-share`. Then the share
+`node server.js` shares only with `--share --share-relay https://<relay>` (or
+`SHIP_DECK_SHARE=1` and `SHIP_DECK_RELAY`). Installs turn it on: `bin/install.sh` records the
+relay (the Keychain relay, or `--share-relay URL`) as `share_relay=` in
+`~/.ship-deck/app/.ship-deck-install`, or `off` with `--no-share`; re-runs keep it until
+`--share`. The launcher and `bin/start.sh` (autostart) set those variables unless
+`SHIP_DECK_SHARE` is already set (empty skips one run, as does `--no-share`). Nothing is
+sent until you sign in. Then the share
 button in the top bar opens **Settings > Sharing** (`/share.html`):
 
 1. Sign in with your relay account (invite-only, limited to the relay's email domain, `ALLOWED_HD`). The password goes
@@ -532,7 +536,7 @@ itself (Vercel + Upstash free tiers, deploy steps, cost estimate) is in
 - File views only serve regular files directly under `data/<id>/` (symlinks out
   are refused). The Ship's Library serves only a server-side allow-list (see
   below), addressed by key, never by path.
-- Sharing (`--share`, off by default) only makes outbound HTTPS requests to the configured
+- Sharing (`--share`; on in installs, `--no-share` turns it off) only makes outbound HTTPS requests to the configured
   relay (http only for localhost). `POST /api/share/*` has the same `X-Ship-Deck`, Origin and
   Sec-Fetch-Site checks. The sign-in password is passed to the relay once and never stored.
 - Order payloads are validated against the live home: crew ids need a meta,
@@ -602,7 +606,7 @@ firstmate home and shimmed `launchctl`/`systemctl`/`curl`/`brew`/`uname` (no
 network): the app copy and launcher, idempotent re-runs, setting up firstmate
 from a local `FIRSTMATE_REPO` (and leaving an existing home alone), refusing a
 foreign folder, installing missing tools, `--home`, the default PATH line
-(and `--no-edit-path`), `--share` remembered until `--no-share`, and that nothing outside `~/.ship-deck`,
+(and `--no-edit-path`), sharing on by default and `--no-share` remembered until `--share`, and that nothing outside `~/.ship-deck`,
 `~/.local/bin` and the shell rc file is written without `--autostart`.
 
 ## What it reads

@@ -2289,7 +2289,7 @@
         onclick: () => openLibraryEntry(e.key),
       }, h('span', { class: 'lib-line' }, h('span', { class: 'lib-name', text: e.title || e.label }), h('span', { class: 'lib-age', text: e.exists ? agoLong(e.mtime) : 'Not created yet' })),
       e.description ? h('span', { class: 'lib-desc', text: e.description }) : h('span', { class: 'lib-desc mono', text: e.where || e.label }))))))) : [h('p', { class: 'empty', text: 'Nothing matches.' })]),
-    ...(libSharing ? [] : [h('p', { class: 'hint' }, 'Skills teammates share with you arrive only with sharing on: run ', h('code', { text: 'sh ~/ship-deck/bin/install.sh --share' }), ', then restart Ship Deck.')]));
+    ...(libSharing ? [] : [h('p', { class: 'hint' }, 'Sharing is off, so skills teammates share with you do not arrive. Turn it back on with ', h('code', { text: 'sh ~/ship-deck/bin/install.sh --share' }), ' and restart Ship Deck.')]));
   }
   async function openLibraryEntry(key) {
     libKey = key;

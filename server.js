@@ -3,11 +3,12 @@
 // Ship Deck: a live view of a firstmate fleet and the captain's control surface.
 //   node server.js [--home <FM_HOME>] [--port 4747] [--stale-days 7] [--no-tmux] [--no-open]
 //                  [--orders-dir ~/.ship-deck] [--memory-dir <dir>] [--claude-dir ~/.claude]
-//                  [--captain-name <name>] [--share --share-relay <https url>]
+//                  [--captain-name <name>] [--share --share-relay <https url> | --no-share]
 // Binds to 127.0.0.1 only. Writes to FM_HOME only one wake line per order (lib/wake.js,
 // --no-wake); other file writes go to the orders dir (~/.ship-deck). The only commands run are tmux list-windows,
 // tmux capture-pane and <home>/bin/fm-send.sh (see lib/actions.js), plus the browser opener at startup.
-// --share (off by default) adds one outbound HTTPS client: lib/share.js pushes a redacted snapshot.
+// --share (off here; the installed launcher turns it on unless install.sh --no-share) adds one
+// outbound HTTPS client: lib/share.js pushes a redacted snapshot.
 
 const http = require('node:http');
 const fs = require('node:fs');
@@ -35,7 +36,7 @@ const POST_ROUTES = new Set(['/api/send', '/api/orders', '/api/config']);
 const SHARE_POST = new Set(['/api/share/signin', '/api/share/signout', '/api/share/grant', '/api/share/revoke', '/api/share/invite', '/api/share/pause', '/api/share/knowledge']);
 // Library files a "notes and memory" grant may carry (plus memory/*).
 const SHARE_NOTES = ['home:data/captain.md', 'home:data/captain-shared.md', 'home:data/learnings.md'];
-const USAGE = 'usage: ship-deck [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--no-open] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR] [--captain-name NAME] [--no-wake] [--share --share-relay URL]';
+const USAGE = 'usage: ship-deck [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--no-open] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR] [--captain-name NAME] [--no-wake] [--share --share-relay URL | --no-share]';
 
 // env and cwd are injectable for tests; the home falls back per lib/home.js detectHome.
 function parseArgs(argv, { env = process.env, cwd = process.cwd() } = {}) {
@@ -70,6 +71,7 @@ function parseArgs(argv, { env = process.env, cwd = process.cwd() } = {}) {
     else if (flag === '--no-open') opts.open = false;
     else if (flag === '--share') opts.share = true;
     else if (flag === '--share-relay') opts.shareRelay = val();
+    else if (flag === '--no-share') opts.share = false;
     else if (flag === '--help' || flag === '-h') {
       console.log(USAGE);
       process.exit(0);

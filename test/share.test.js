@@ -396,6 +396,8 @@ test('share flags: off by default; --share needs an https relay', () => {
   const o = parseArgs(['--home', FIX, '--share', '--share-relay', 'https://relay.example/x'], { env });
   assert.equal(o.share, true);
   assert.equal(o.shareRelay, 'https://relay.example');
+  // The installed launcher sets SHIP_DECK_SHARE; --no-share skips sharing for one run.
+  assert.equal(parseArgs(['--home', FIX, '--no-share'], { env: { SHIP_DECK_SHARE: '1', SHIP_DECK_RELAY: 'https://relay.example' } }).share, false);
   assert.throws(() => share.checkRelayUrl('http://relay.example'), /https/);
   assert.equal(share.checkRelayUrl('http://localhost:3000'), 'http://localhost:3000');
 });

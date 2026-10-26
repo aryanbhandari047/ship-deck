@@ -19,9 +19,9 @@ while [ "$p" -lt $((port + 20)) ]; do
   fi
   p=$((p + 1))
 done
-# An install with --share (bin/install.sh) starts with sharing, unless SHIP_DECK_SHARE is set.
+# An install (bin/install.sh) starts with sharing unless it chose --no-share or SHIP_DECK_SHARE is set.
 relay=$(sed -n 's/^share_relay=//p' "$here/.ship-deck-install" 2>/dev/null || true)
-if [ -n "$relay" ] && [ -z "${SHIP_DECK_SHARE+x}" ]; then
+if [ -n "$relay" ] && [ "$relay" != off ] && [ -z "${SHIP_DECK_SHARE+x}" ]; then
   SHIP_DECK_SHARE=1
   SHIP_DECK_RELAY=${SHIP_DECK_RELAY:-$relay}
   export SHIP_DECK_SHARE SHIP_DECK_RELAY

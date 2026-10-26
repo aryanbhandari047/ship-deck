@@ -71,11 +71,11 @@ It never uses `sudo` and changes nothing else unless you ask:
 | `--home /path/to/firstmate` | keep firstmate in another folder (set up there when it is missing; Ship Deck remembers it) |
 | `--no-edit-path` | do not add `~/.local/bin` to your PATH in your shell settings (it does by default when missing; with this it prints the line for you to add) |
 | `--autostart` | start Ship Deck at login (a LaunchAgent on a Mac, a systemd user service on Linux) |
-| `--share` | start with sharing on (the Keychain relay; `--share-relay URL` for another), so skills teammates share reach your agent. Remembered by `ship-deck`, `--autostart` and later installs until `--no-share` |
+| `--no-share` | turn sharing off (it is on by default, with the Keychain relay, so skills teammates share reach your agent; nothing is sent until you sign in). Remembered by `ship-deck`, `--autostart` and later installs until `--share` (or `--share-relay URL` for another relay) |
 
 To update later: `git -C ~/ship-deck pull && sh ~/ship-deck/bin/install.sh`,
 then restart Ship Deck. Running the installer again is always safe and keeps
-your `--share` choice.
+your sharing choice.
 
 ## 3. Sign in and start your first mate
 
@@ -147,19 +147,18 @@ noted for the next relaunch. Only the listed values can be picked.
 
 ## 8. Optional: let someone watch your board (read-only)
 
-Sharing is off unless you turn it on, and it is view-only: nobody can send
-anything to your first mate through it.
+Sharing is on after install but sends nothing until you sign in and add
+someone, and it is view-only: nobody can send anything to your first mate
+through it.
 
 1. Ask Aryan to invite you. You get a one-time link (valid 24 hours) to set
    your password on the Keychain relay.
-2. Turn sharing on once (remembered by `ship-deck` and `--autostart`), then
-   restart Ship Deck:
+2. If you turned sharing off with `--no-share`, turn it back on and restart
+   Ship Deck:
 
    ```sh
    sh ~/ship-deck/bin/install.sh --share
    ```
-
-   For one run only: `ship-deck --share --share-relay https://ship-deck-relay.vercel.app`.
 
 3. Click the share button in the top bar (**Settings > Sharing**), sign in,
    then add a teammate by their `@keychain.com` email, pick what they can see
@@ -184,8 +183,8 @@ and restart Ship Deck.
 When a teammate shares their **Skills** or **Captain notes and memory** with
 you, your own Claude Code can use them automatically. There is no key to make:
 
-1. Start Ship Deck with sharing (step 8, item 2) and sign in under
-   **Settings > Sharing** with your relay account.
+1. Sign in under **Settings > Sharing** with your relay account (sharing is
+   on after install; see step 8 if you turned it off).
 2. That is all. Within a minute, and then whenever they change something
    (checked at most every 10 minutes), Ship Deck adds their knowledge to
    `~/.claude/skills` as read-only skills:

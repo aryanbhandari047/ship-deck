@@ -206,10 +206,12 @@ test('install.sh --autostart writes a LaunchAgent on macOS and loads it', (t) =>
   assert.match(s.calls(), /launchctl bootstrap gui\/\d+ .*local\.ship-deck\.plist/);
 });
 
-test('install.sh --share is remembered by the launcher, start.sh and later re-runs until --no-share', (t) => {
+test('install.sh shares by default; --no-share is remembered by the launcher, start.sh and re-runs until --share', (t) => {
   const s = sandbox(t);
   const launcher = path.join(s.home, '.local', 'bin', 'ship-deck');
   const app = path.join(s.home, '.ship-deck', 'app');
+  const start = path.join(app, 'bin', 'start.sh');
+  const ON = 'share=1 relay=https://ship-deck-relay.vercel.app';
   // The env the launcher and start.sh hand to the server, without starting it.
   const envOf = (file, env = {}) => {
     const text = fs.readFileSync(file, 'utf8').replace(/^exec .*$/m, 'echo "share=${SHIP_DECK_SHARE-} relay=${SHIP_DECK_RELAY-}"; exit 0').replace(/^nohup node .*$/m, 'echo "share=${SHIP_DECK_SHARE-} relay=${SHIP_DECK_RELAY-}"; exit 0');
@@ -217,23 +219,33 @@ test('install.sh --share is remembered by the launcher, start.sh and later re-ru
     fs.writeFileSync(copy, text);
     try { return execFileSync('/bin/sh', [copy], { env: { ...s.env, ...env }, encoding: 'utf8' }).trim().split('\n').pop(); } finally { fs.rmSync(copy); }
   };
-  assert.equal(s.run('--no-edit-path').code, 0);
-  assert.equal(envOf(launcher), 'share= relay=', 'off by default');
-
-  const on = s.run('--no-edit-path', '--share');
-  assert.equal(on.code, 0, on.out);
-  assert.match(on.out, /Sharing: +on \(https:\/\/ship-deck-relay\.vercel\.app\)/);
-  assert.equal(envOf(launcher), 'share=1 relay=https://ship-deck-relay.vercel.app');
-  assert.equal(envOf(path.join(app, 'bin', 'start.sh')), 'share=1 relay=https://ship-deck-relay.vercel.app', 'autostart (LaunchAgent) runs start.sh');
+  const first = s.run('--no-edit-path');
+  assert.equal(first.code, 0, first.out);
+  assert.match(first.out, /Sharing: +on \(https:\/\/ship-deck-relay\.vercel\.app\)/);
+  assert.equal(envOf(launcher), ON, 'on by default');
+  assert.equal(envOf(start), ON, 'autostart (LaunchAgent) runs start.sh');
   assert.equal(envOf(launcher, { SHIP_DECK_SHARE: '' }), 'share= relay=', 'an empty SHIP_DECK_SHARE skips it once');
 
+  const off = s.run('--no-edit-path', '--no-share');
+  assert.equal(off.code, 0, off.out);
+  assert.match(off.out, /Sharing: +off/);
+  assert.equal(envOf(launcher), 'share= relay=');
+  assert.equal(envOf(start), 'share= relay=');
   assert.equal(s.run('--no-edit-path').code, 0, 'an update re-run');
-  assert.equal(envOf(launcher), 'share=1 relay=https://ship-deck-relay.vercel.app', 'remembered');
+  assert.equal(envOf(launcher), 'share= relay=', '--no-share remembered');
+  assert.equal(envOf(start), 'share= relay=');
+
+  assert.equal(s.run('--no-edit-path', '--share').code, 0);
+  assert.equal(envOf(launcher), ON);
   assert.equal(s.run('--no-edit-path', '--share-relay', 'https://relay.example.com/').code, 0);
   assert.equal(envOf(launcher), 'share=1 relay=https://relay.example.com');
-  assert.equal(s.run('--no-edit-path', '--no-share').code, 0);
-  assert.equal(envOf(launcher), 'share= relay=');
-  assert.equal(envOf(path.join(app, 'bin', 'start.sh')), 'share= relay=');
+  assert.equal(s.run('--no-edit-path').code, 0);
+  assert.equal(envOf(launcher), 'share=1 relay=https://relay.example.com', 'another relay remembered');
+  // An install recorded before sharing became the default (empty share_relay=) now shares.
+  fs.chmodSync(path.join(app, '.ship-deck-install'), 0o600);
+  fs.writeFileSync(path.join(app, '.ship-deck-install'), 'source=x\nrevision=\nshare_relay=\n');
+  assert.equal(s.run('--no-edit-path').code, 0);
+  assert.equal(envOf(launcher), ON);
 
   const bad = s.run('--share-relay', "http://evil.example.com/'x");
   assert.notEqual(bad.code, 0);

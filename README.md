@@ -98,9 +98,10 @@ gh auth login
 The installer adds the tools your agents need (the Claude Code and GitHub
 CLIs among them) when it can, or prints the one command to run. It sets up the
 agent engine, [firstmate](#inspiration), at `~/firstmate`, copies the app to
-`~/.ship-deck/app` and adds a `ship-deck` command. Add `--autostart` to start
-it at login, `--share` to start with sharing on (so skills teammates share
-reach your agent; see below), or `--home DIR` to keep the engine elsewhere.
+`~/.ship-deck/app` and adds a `ship-deck` command that starts with sharing on
+(nothing is sent until you sign in; see below). Add `--autostart` to start it
+at login, `--no-share` to turn sharing off, or `--home DIR` to keep the engine
+elsewhere.
 
 Without the installer, run it straight from the clone: `npx .` or
 `node server.js --home ~/firstmate`.
@@ -125,7 +126,7 @@ git -C ~/ship-deck pull && sh ~/ship-deck/bin/install.sh
 ```
 
 The installer refreshes the running copy in `~/.ship-deck/app` and keeps your
-`--share` choice. Then stop Ship Deck (Ctrl-C in its terminal) and start it
+sharing choice (on, or off after `--no-share`). Then stop Ship Deck (Ctrl-C in its terminal) and start it
 again with `ship-deck`.
 
 ## Share with your team
@@ -135,21 +136,22 @@ again with `ship-deck`.
 Sharing goes through a small relay service you deploy once for your team
 (steps in [`relay/README.md`](relay/README.md)).
 
-1. **Turn on sharing** once, then sign in from the share button in the top
-   bar. `ship-deck` and `--autostart` remember it until you run the installer
-   with `--no-share`:
+1. **Sign in** from the share button in the top bar. Sharing is on after
+   install (`ship-deck` and `--autostart` connect to the Keychain relay), and
+   nothing is sent until you sign in and add someone. To turn it off, and keep
+   it off through updates:
 
    ```sh
-   sh ~/ship-deck/bin/install.sh --share
+   sh ~/ship-deck/bin/install.sh --no-share
    ```
 
-   Your own relay: `--share-relay <relay URL>` instead of `--share`. For one
-   run only: `ship-deck --share --share-relay <relay URL>`.
+   `--share` turns it back on, `--share-relay <relay URL>` uses your own
+   relay, and `ship-deck --no-share` skips it for one run.
 2. **Invite by email**: add a teammate and pick how long they get access
    (1, 7 or 30 days). New people get a one-time invite link to send them.
 3. **Choose what to share**: the board, live updates, terminals, and your
    skills or notes. Skills and notes reach their agent automatically once
-   their own Ship Deck runs with sharing on (step 1) and is signed in.
+   their own Ship Deck is signed in (step 1).
 
 The full walkthrough, from both sides: [docs/TEAMMATE-SETUP.md](docs/TEAMMATE-SETUP.md)
 (steps 8 and 9) and the Sharing section of [docs/REFERENCE.md](docs/REFERENCE.md#sharing-read-only-opt-in).
