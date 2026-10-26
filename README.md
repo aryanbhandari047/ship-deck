@@ -117,6 +117,15 @@ node server.js --home /tmp/ship-deck-sample --orders-dir /tmp/ship-deck-orders
   [docs/REFERENCE.md](docs/REFERENCE.md)
 - Letting other agents read a shared library: [docs/AGENT-LIBRARY.md](docs/AGENT-LIBRARY.md)
 
+## Updating
+
+```sh
+git -C ~/ship-deck pull && sh ~/ship-deck/bin/install.sh
+```
+
+The installer refreshes the running copy in `~/.ship-deck/app`. Then stop
+Ship Deck (Ctrl-C in its terminal) and start it again with `ship-deck`.
+
 ## Share with your team
 
 > **Beta:** sharing is new and may change. Tell us if something breaks.
