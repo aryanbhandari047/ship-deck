@@ -431,6 +431,14 @@ test('library projection: skills unless off, notes only when on, redacted, allow
   assert.ok(big.trimmed > 0);
 });
 
+test('library projection: skills go before notes, so a full library leaves out notes, not skills', () => {
+  const notes = Array.from({ length: 20 }, (_, i) => ({ key: 'memory:n' + i + '.md', title: 'n', text: 'note '.repeat(3000) }));
+  const skills = Array.from({ length: 5 }, (_, i) => ({ key: 'skill:captain:s' + i, title: 's', description: 'd', text: 'step '.repeat(3000) }));
+  const out = share.projectLibrary([...notes, ...skills], { home: HOME, notes: true, maxBytes: 150 * 1024 });
+  assert.deepEqual(out.items.slice(0, 5).map((i) => i.key), skills.map((s) => s.key));
+  assert.ok(out.trimmed > 0 && out.items.length > 5, 'notes fill what is left');
+});
+
 test('libraryNeeds follows the skills and notes scopes; an old agentLibrary flag is ignored', () => {
   const g = (scopes, expiresAt = 2e12) => ({ scopes, expiresAt });
   assert.deepEqual(share.libraryNeeds([g(['board', 'agentLibrary'])], 1e12), { on: false, skills: false, notes: false });
