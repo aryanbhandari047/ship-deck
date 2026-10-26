@@ -459,7 +459,11 @@ under 10 min old, or a transcript line in the last 20 s), and the chat shows
 
 ## Sharing (read-only, opt-in)
 
-Off unless Ship Deck starts with `--share --share-relay https://<relay>`. Then the share
+Off unless Ship Deck starts with `--share --share-relay https://<relay>` (or
+`SHIP_DECK_SHARE=1` and `SHIP_DECK_RELAY`). `bin/install.sh --share` (or `--share-relay URL`)
+records the relay as `share_relay=` in `~/.ship-deck/app/.ship-deck-install`: the launcher and
+`bin/start.sh` (autostart) then set those variables unless `SHIP_DECK_SHARE` is already set
+(empty skips one run), and re-runs keep it until `--no-share`. Then the share
 button in the top bar opens **Settings > Sharing** (`/share.html`):
 
 1. Sign in with your relay account (invite-only, limited to the relay's email domain, `ALLOWED_HD`). The password goes
@@ -598,7 +602,7 @@ firstmate home and shimmed `launchctl`/`systemctl`/`curl`/`brew`/`uname` (no
 network): the app copy and launcher, idempotent re-runs, setting up firstmate
 from a local `FIRSTMATE_REPO` (and leaving an existing home alone), refusing a
 foreign folder, installing missing tools, `--home`, the default PATH line
-(and `--no-edit-path`), and that nothing outside `~/.ship-deck`,
+(and `--no-edit-path`), `--share` remembered until `--no-share`, and that nothing outside `~/.ship-deck`,
 `~/.local/bin` and the shell rc file is written without `--autostart`.
 
 ## What it reads

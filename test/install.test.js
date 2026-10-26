@@ -206,6 +206,40 @@ test('install.sh --autostart writes a LaunchAgent on macOS and loads it', (t) =>
   assert.match(s.calls(), /launchctl bootstrap gui\/\d+ .*local\.ship-deck\.plist/);
 });
 
+test('install.sh --share is remembered by the launcher, start.sh and later re-runs until --no-share', (t) => {
+  const s = sandbox(t);
+  const launcher = path.join(s.home, '.local', 'bin', 'ship-deck');
+  const app = path.join(s.home, '.ship-deck', 'app');
+  // The env the launcher and start.sh hand to the server, without starting it.
+  const envOf = (file, env = {}) => {
+    const text = fs.readFileSync(file, 'utf8').replace(/^exec .*$/m, 'echo "share=${SHIP_DECK_SHARE-} relay=${SHIP_DECK_RELAY-}"; exit 0').replace(/^nohup node .*$/m, 'echo "share=${SHIP_DECK_SHARE-} relay=${SHIP_DECK_RELAY-}"; exit 0');
+    const copy = path.join(path.dirname(file), '.probe');
+    fs.writeFileSync(copy, text);
+    try { return execFileSync('/bin/sh', [copy], { env: { ...s.env, ...env }, encoding: 'utf8' }).trim().split('\n').pop(); } finally { fs.rmSync(copy); }
+  };
+  assert.equal(s.run('--no-edit-path').code, 0);
+  assert.equal(envOf(launcher), 'share= relay=', 'off by default');
+
+  const on = s.run('--no-edit-path', '--share');
+  assert.equal(on.code, 0, on.out);
+  assert.match(on.out, /Sharing: +on \(https:\/\/ship-deck-relay\.vercel\.app\)/);
+  assert.equal(envOf(launcher), 'share=1 relay=https://ship-deck-relay.vercel.app');
+  assert.equal(envOf(path.join(app, 'bin', 'start.sh')), 'share=1 relay=https://ship-deck-relay.vercel.app', 'autostart (LaunchAgent) runs start.sh');
+  assert.equal(envOf(launcher, { SHIP_DECK_SHARE: '' }), 'share= relay=', 'an empty SHIP_DECK_SHARE skips it once');
+
+  assert.equal(s.run('--no-edit-path').code, 0, 'an update re-run');
+  assert.equal(envOf(launcher), 'share=1 relay=https://ship-deck-relay.vercel.app', 'remembered');
+  assert.equal(s.run('--no-edit-path', '--share-relay', 'https://relay.example.com/').code, 0);
+  assert.equal(envOf(launcher), 'share=1 relay=https://relay.example.com');
+  assert.equal(s.run('--no-edit-path', '--no-share').code, 0);
+  assert.equal(envOf(launcher), 'share= relay=');
+  assert.equal(envOf(path.join(app, 'bin', 'start.sh')), 'share= relay=');
+
+  const bad = s.run('--share-relay', "http://evil.example.com/'x");
+  assert.notEqual(bad.code, 0);
+  assert.match(bad.out, /must be an https/);
+});
+
 test('install.sh --autostart writes and enables a systemd user unit on Linux', (t) => {
   const s = sandbox(t, { uname: 'Linux' });
   const r = s.run('--autostart');

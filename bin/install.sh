@@ -10,12 +10,15 @@
 #     (default: the Ship Deck repo below) when not run from a checkout;
 #   - writes the `ship-deck` launcher into ~/.local/bin (warns when that is not on PATH);
 #   - only with --autostart: a macOS LaunchAgent or a systemd user unit;
+#   - with --share (or --share-relay URL): starts with sharing on, so teammates' shared skills reach
+#     this computer's agent; the launcher and autostart remember it until --no-share;
 #   - adds ~/.local/bin to PATH in your shell rc file when missing (--no-edit-path to skip).
 # Safe to re-run: it replaces its own files and nothing else.
-#   sh bin/install.sh [--home DIR] [--from GIT_URL] [--autostart] [--no-edit-path]
+#   sh bin/install.sh [--home DIR] [--from GIT_URL] [--autostart] [--share | --share-relay URL | --no-share] [--no-edit-path]
 set -eu
 
 DEFAULT_REPO=https://github.com/aryanbhandari047/ship-deck.git
+DEFAULT_RELAY=https://ship-deck-relay.vercel.app
 FIRSTMATE_REPO=${FIRSTMATE_REPO:-https://github.com/kunchenguid/firstmate}
 CLAUDE_INSTALLER=https://claude.ai/install.sh
 
@@ -24,11 +27,13 @@ warn() { printf 'warning: %s\n' "$*" >&2; }
 die() { printf 'ship-deck install: %s\n' "$*" >&2; exit 1; }
 
 usage() {
-  say "usage: sh bin/install.sh [--home DIR] [--from GIT_URL] [--autostart] [--no-edit-path]"
+  say "usage: sh bin/install.sh [--home DIR] [--from GIT_URL] [--autostart] [--share | --share-relay URL | --no-share] [--no-edit-path]"
   say "  --home DIR      your firstmate home, set up there when missing (default: \$FM_HOME, else ~/firstmate)"
   say "  --from GIT_URL  install from a fresh clone of this repo instead of this checkout"
   say "                  (default when not run from a checkout: $DEFAULT_REPO)"
   say "  --autostart     also start Ship Deck at login (LaunchAgent on macOS, systemd user unit on Linux)"
+  say "  --share         start with sharing on ($DEFAULT_RELAY): teammates' shared skills reach your agent"
+  say "  --share-relay URL  the same with another relay; both are remembered until --no-share"
   say "  --no-edit-path  do not add ~/.local/bin to PATH in your shell rc file (added by default when missing)"
 }
 
@@ -36,6 +41,7 @@ home_flag=
 from=
 autostart=0
 edit_path=1
+share=keep
 while [ $# -gt 0 ]; do
   case $1 in
     --home) [ $# -ge 2 ] || die "--home needs a folder"; home_flag=$2; shift ;;
@@ -43,6 +49,10 @@ while [ $# -gt 0 ]; do
     --from) [ $# -ge 2 ] || die "--from needs a git URL"; from=$2; shift ;;
     --from=*) from=${1#--from=} ;;
     --autostart) autostart=1 ;;
+    --share) share=$DEFAULT_RELAY ;;
+    --share-relay) [ $# -ge 2 ] || die "--share-relay needs a URL"; share=$2; shift ;;
+    --share-relay=*) share=${1#--share-relay=} ;;
+    --no-share) share= ;;
     --edit-path) edit_path=1 ;; # old flag, now the default
     --no-edit-path) edit_path=0 ;;
     -h|--help) usage; exit 0 ;;
@@ -52,6 +62,10 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+share=${share%/}
+if [ "$share" != keep ] && [ -n "$share" ] && ! printf '%s' "$share" | grep -Eq '^(https://[A-Za-z0-9.-]+|http://(127\.0\.0\.1|localhost))(:[0-9]+)?$'; then
+  die "the relay must be an https:// address (got $share)"
+fi
 [ -n "${HOME:-}" ] || die "HOME is not set"
 case $(uname -s) in
   Darwin) os=macos ;;
@@ -148,6 +162,11 @@ else
   src=$here
   source_label=$here
 fi
+# Sharing: the relay from --share/--share-relay, none with --no-share, else what the last install chose.
+if [ "$share" = keep ]; then
+  share=$(sed -n 's/^share_relay=//p' "$app/.ship-deck-install" 2>/dev/null || true)
+fi
+share=${share%/}
 is_checkout "$src" || die "$src is not a Ship Deck checkout (no server.js / package.json named ship-deck)"
 if [ -e "$app" ] && [ ! -f "$app/.ship-deck-install" ]; then
   die "$app exists but was not made by this installer; move it away and run this again"
@@ -160,7 +179,7 @@ for f in server.js package.json README.md lib public bin docs; do
 done
 rev=
 if [ -d "$src/.git" ] || [ -f "$src/.git" ]; then rev=$(git -C "$src" rev-parse --short HEAD 2>/dev/null || true); fi
-printf 'source=%s\nrevision=%s\n' "$source_label" "$rev" > "$stage/.ship-deck-install"
+printf 'source=%s\nrevision=%s\nshare_relay=%s\n' "$source_label" "$rev" "$share" > "$stage/.ship-deck-install"
 rm -rf "$app"
 mv "$stage" "$app"
 say "Installed Ship Deck in $app${rev:+ (revision $rev)}"
@@ -175,6 +194,11 @@ fm_line=
 if [ "$home" != "$HOME/firstmate" ]; then
   fm_line="[ -n \"\${FM_HOME:-}\" ] || case \" \$* \" in *' --home'*) ;; *) [ -f ./bin/fm-spawn.sh ] || { FM_HOME='$home'; export FM_HOME; } ;; esac"
 fi
+share_line=
+# SHIP_DECK_SHARE in the environment (even empty) still wins, so one run can skip sharing.
+if [ -n "$share" ]; then
+  share_line="[ -n \"\${SHIP_DECK_SHARE+x}\" ] || { SHIP_DECK_SHARE=1; SHIP_DECK_RELAY=\${SHIP_DECK_RELAY:-'$share'}; export SHIP_DECK_SHARE SHIP_DECK_RELAY; }"
+fi
 cat > "$launcher.tmp" <<EOF
 #!/bin/sh
 # Ship Deck launcher, written by bin/install.sh (re-run it to update; do not edit).
@@ -183,6 +207,7 @@ cat > "$launcher.tmp" <<EOF
 node='$node_bin'
 [ -x "\$node" ] || node=node
 ${fm_line}
+${share_line}
 exec "\$node" '$app/server.js' "\$@"
 EOF
 chmod 755 "$launcher.tmp"
@@ -286,5 +311,10 @@ fi
 say "Start Ship Deck with:  ship-deck        (opens http://127.0.0.1:4747/; Ctrl+C stops it)"
 say "Your first mate:       cd '$home' && claude   (Ship Deck's chat reaches it while it runs)"
 say "In the background:     sh $app/bin/start.sh"
+if [ -n "$share" ]; then
+  say "Sharing:               on ($share); sign in under Settings > Sharing"
+else
+  say "Sharing:               off (re-run with --share to receive teammates' skills)"
+fi
 say "Guide: $app/docs/TEAMMATE-SETUP.md"
 say "Already running? Restart it to use this version."

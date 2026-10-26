@@ -71,9 +71,11 @@ It never uses `sudo` and changes nothing else unless you ask:
 | `--home /path/to/firstmate` | keep firstmate in another folder (set up there when it is missing; Ship Deck remembers it) |
 | `--no-edit-path` | do not add `~/.local/bin` to your PATH in your shell settings (it does by default when missing; with this it prints the line for you to add) |
 | `--autostart` | start Ship Deck at login (a LaunchAgent on a Mac, a systemd user service on Linux) |
+| `--share` | start with sharing on (the Keychain relay; `--share-relay URL` for another), so skills teammates share reach your agent. Remembered by `ship-deck`, `--autostart` and later installs until `--no-share` |
 
 To update later: `git -C ~/ship-deck pull && sh ~/ship-deck/bin/install.sh`,
-then restart Ship Deck. Running the installer again is always safe.
+then restart Ship Deck. Running the installer again is always safe and keeps
+your `--share` choice.
 
 ## 3. Sign in and start your first mate
 
@@ -150,11 +152,14 @@ anything to your first mate through it.
 
 1. Ask Aryan to invite you. You get a one-time link (valid 24 hours) to set
    your password on the Keychain relay.
-2. Start Ship Deck with sharing:
+2. Turn sharing on once (remembered by `ship-deck` and `--autostart`), then
+   restart Ship Deck:
 
    ```sh
-   ship-deck --share --share-relay https://ship-deck-relay.vercel.app
+   sh ~/ship-deck/bin/install.sh --share
    ```
+
+   For one run only: `ship-deck --share --share-relay https://ship-deck-relay.vercel.app`.
 
 3. Click the share button in the top bar (**Settings > Sharing**), sign in,
    then add a teammate by their `@keychain.com` email, pick what they can see
@@ -171,7 +176,8 @@ their own agent that knowledge (next section), with no extra switch.
 
 **Turning it off:** use the switch at the top of Settings > Sharing to pause
 (nothing is sent), **Revoke** a person, or **Sign out** to remove this
-laptop's access. To stop completely, restart Ship Deck without `--share`.
+laptop's access. To stop completely, run `sh ~/ship-deck/bin/install.sh --no-share`
+and restart Ship Deck.
 
 ## 9. Optional: let your agent use what teammates share with you
 

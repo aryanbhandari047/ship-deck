@@ -99,7 +99,8 @@ The installer adds the tools your agents need (the Claude Code and GitHub
 CLIs among them) when it can, or prints the one command to run. It sets up the
 agent engine, [firstmate](#inspiration), at `~/firstmate`, copies the app to
 `~/.ship-deck/app` and adds a `ship-deck` command. Add `--autostart` to start
-it at login, or `--home DIR` to keep the engine elsewhere.
+it at login, `--share` to start with sharing on (so skills teammates share
+reach your agent; see below), or `--home DIR` to keep the engine elsewhere.
 
 Without the installer, run it straight from the clone: `npx .` or
 `node server.js --home ~/firstmate`.
@@ -123,8 +124,9 @@ node server.js --home /tmp/ship-deck-sample --orders-dir /tmp/ship-deck-orders
 git -C ~/ship-deck pull && sh ~/ship-deck/bin/install.sh
 ```
 
-The installer refreshes the running copy in `~/.ship-deck/app`. Then stop
-Ship Deck (Ctrl-C in its terminal) and start it again with `ship-deck`.
+The installer refreshes the running copy in `~/.ship-deck/app` and keeps your
+`--share` choice. Then stop Ship Deck (Ctrl-C in its terminal) and start it
+again with `ship-deck`.
 
 ## Share with your team
 
@@ -133,13 +135,21 @@ Ship Deck (Ctrl-C in its terminal) and start it again with `ship-deck`.
 Sharing goes through a small relay service you deploy once for your team
 (steps in [`relay/README.md`](relay/README.md)).
 
-1. **Turn on sharing**: start with `ship-deck --share --share-relay <relay URL>`
-   and sign in from the share button in the top bar.
+1. **Turn on sharing** once, then sign in from the share button in the top
+   bar. `ship-deck` and `--autostart` remember it until you run the installer
+   with `--no-share`:
+
+   ```sh
+   sh ~/ship-deck/bin/install.sh --share
+   ```
+
+   Your own relay: `--share-relay <relay URL>` instead of `--share`. For one
+   run only: `ship-deck --share --share-relay <relay URL>`.
 2. **Invite by email**: add a teammate and pick how long they get access
    (1, 7 or 30 days). New people get a one-time invite link to send them.
 3. **Choose what to share**: the board, live updates, terminals, and your
    skills or notes. Skills and notes reach their agent automatically once
-   their own Ship Deck is signed in.
+   their own Ship Deck runs with sharing on (step 1) and is signed in.
 
 The full walkthrough, from both sides: [docs/TEAMMATE-SETUP.md](docs/TEAMMATE-SETUP.md)
 (steps 8 and 9) and the Sharing section of [docs/REFERENCE.md](docs/REFERENCE.md#sharing-read-only-opt-in).
