@@ -489,7 +489,8 @@ Stripe, Google, JWTs, PEM blocks, `Authorization`/`Bearer`, `password=`/`token=`
 values, any 32+ character high-entropy run), the home path shown as `~`, other absolute
 paths as "path hidden", URL queries and fragments dropped and links kept only for
 github.com and linear.app. Caps: 200 characters per summary, 40 terminal lines (ANSI
-stripped), 64 KB per snapshot. Workers are keyed by an HMAC of their id.
+stripped), 64 KB per snapshot (over it, notes are cut to marked previews before any are
+dropped; their full text still travels in the library). Workers are keyed by an HMAC of their id.
 
 | Shared | Default | |
 |---|---|---|

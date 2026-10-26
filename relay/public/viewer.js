@@ -331,7 +331,8 @@
       for (const n of d.notes || []) {
         const md = h('div', { class: 'md' });
         md.innerHTML = MD.render(n.text || '', { frontmatter: 'show' }); // escaped by the renderer
-        body.append(h('section', null, h('h3', null, rtext(n.title)), md));
+        const cut = n.shortened ? h('p', { class: 'hint', text: 'Shortened to fit. Your agent gets the full note through Ship Deck.' }) : null;
+        body.append(h('section', null, h('h3', null, rtext(n.title)), md, cut));
       }
     } else if (k === 'chat') {
       body.append(h('section', null, h('h3', { text: 'Chat' }), h('ul', { class: 'v-list' }, (d.chat || []).map((c) => h('li', null, h('span', { class: 'when', text: `${c.from === 'firstmate' ? 'First mate' : first(board.captain.name)}${c.ts ? ' · ' + c.ts : ''}` }), h('span', null, rtext(c.text)))))));

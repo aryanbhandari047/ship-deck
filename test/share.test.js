@@ -185,6 +185,18 @@ test('caps: 200 chars per summary, 40 terminal lines, 64 KB per snapshot', async
   for (const t of Object.values(small.terminal)) assert.ok(t.lines.length <= 40);
 });
 
+test('notes over 64 KB are shortened, not dropped: every key and title stays', async () => {
+  const fleet = await richFleet();
+  const notes = Array.from({ length: 36 }, (_, i) => ({ key: 'memory:n' + i + '.md', title: 'Note ' + i, text: 'rule '.repeat(1600) }));
+  const out = share.projectSnapshot(fleet, { ...ALL, key: 'k', home: HOME, extras: { ...EXTRAS, notes } });
+  assert.ok(Buffer.byteLength(JSON.stringify(out)) <= 64 * 1024);
+  assert.ok(!out.trimmed.includes('notes'));
+  assert.deepEqual(out.notes.map((n) => [n.key, n.title]), notes.map((n) => [n.key, n.title]));
+  for (const n of out.notes) assert.ok(n.shortened && n.text.length > 0 && n.text.length < 8000);
+  const one = share.projectSnapshot(fleet, { ...ALL, key: 'k', home: HOME, extras: { ...EXTRAS, notes: notes.slice(0, 1) } });
+  assert.equal(one.notes[0].shortened, undefined);
+});
+
 test('grant union: expired grants drop out; no grants means nothing to send', () => {
   const now = 1000;
   assert.deepEqual(share.unionOf([], now), { count: 0, scopes: [], projects: [] });

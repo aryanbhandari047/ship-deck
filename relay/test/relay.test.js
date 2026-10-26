@@ -9,6 +9,7 @@ const { checkAccess, validateGrant } = require('../lib/access');
 const { createRelay } = require('../lib/app');
 const { loadConfig } = require('../lib/config');
 const { StoreError, createMemoryStore } = require('../lib/store');
+const { sanitizeSnapshot } = require('../lib/snapshot');
 
 const NOW = 1e12;
 const DAY = 86400e3;
@@ -45,6 +46,12 @@ test('grant input: keychain only, never-shared scopes refused, 30-day cap, not y
   assert.deepEqual(g.scopes, ['board', 'updates']);
   assert.deepEqual(g.projects, ['*']);
   assert.equal(g.viewerEmail, 'g@keychain.com');
+});
+
+test('notes keep a shortened mark only when it is exactly true', () => {
+  const notes = [{ key: 'a', title: 'A', text: 'cut', shortened: true }, { key: 'b', title: 'B', text: 'full', shortened: 'yes' }];
+  const out = sanitizeSnapshot({ ...snapshot(), notes }, NOW);
+  assert.deepEqual(out.notes.map((n) => n.shortened), [true, undefined]);
 });
 
 test('end to end on the relay: push, granted viewer reads, ungranted refused, revoke at once, all audited', async (t) => {
