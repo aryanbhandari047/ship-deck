@@ -121,13 +121,31 @@ node server.js --home /tmp/ship-deck-sample --orders-dir /tmp/ship-deck-orders
 
 ## Updating
 
+**1. Get the new version.** In any terminal:
+
 ```sh
 git -C ~/ship-deck pull && sh ~/ship-deck/bin/install.sh
 ```
 
-The installer refreshes the running copy in `~/.ship-deck/app` and keeps your
-sharing choice (on, or off after `--no-share`). Then stop Ship Deck (Ctrl-C in its terminal) and start it
-again with `ship-deck`.
+The installer refreshes the copy in `~/.ship-deck/app` and keeps your sharing
+choice (on, or off after `--no-share`).
+
+**2. Restart Ship Deck.** In the terminal running it, press Ctrl-C, then:
+
+```sh
+ship-deck
+```
+
+If that terminal is closed, just run `ship-deck` in a new one.
+
+**3. Restart your first mate** so newly shared skills load. In its terminal,
+type `/exit`, then:
+
+```sh
+cd ~/firstmate && claude
+```
+
+Updating changes nothing else in the first mate's terminal.
 
 ## Share with your team
 
