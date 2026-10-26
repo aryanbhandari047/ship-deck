@@ -135,9 +135,11 @@ test('sharing off: no relay traffic, share routes refuse, POST guards stay', asy
   const deck = await startDeck(t);
   assert.deepEqual((await deck.call('GET', '/api/share')).data, { enabled: false });
   assert.equal(deck.server.shareAgent, null);
+  assert.equal((await deck.call('GET', '/api/library')).data.sharing, false, 'the library hints how to receive teammates\' skills');
   assert.equal((await deck.call('POST', '/api/share/grant', { email: 'g@keychain.com' })).status, 404);
   const relay = await startRelay(t);
   const on = await startDeck(t, { share: true, shareRelay: relay.base });
+  assert.equal((await on.call('GET', '/api/library')).data.sharing, true);
   assert.equal((await on.call('POST', '/api/share/signin', { email: 'a@keychain.com', password: 'x' }, {})).status, 403, 'X-Ship-Deck required');
   assert.equal((await on.call('POST', '/api/share/signin', { email: 'a@keychain.com', password: 'x' }, { 'X-Ship-Deck': '1', Origin: 'https://evil.example' })).status, 403);
 });

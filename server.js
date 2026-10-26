@@ -442,7 +442,8 @@ function createServer(opts) {
       const fm = /^\/api\/file\/([^/]+)\/([^/]+)$/.exec(url.pathname);
       if (fm) return json(res, 200, actions.readDataFile(opts.home, decodeURIComponent(fm[1]), decodeURIComponent(fm[2])));
       if (url.pathname === '/api/library') {
-        return json(res, 200, { entries: library.listLibrary(opts.home, memoryDir, libOpts) });
+        // sharing: false lets the library say how teammates' skills would arrive.
+        return json(res, 200, { entries: library.listLibrary(opts.home, memoryDir, libOpts), sharing: !!agent });
       }
       if (url.pathname === '/api/library/file') {
         const r = library.readLibraryEntry(opts.home, memoryDir, url.searchParams.get('key'), libOpts);

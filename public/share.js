@@ -104,8 +104,9 @@
     if (!s) return;
     if (!s.enabled) {
       box.append(h('div', { class: 'callout warn' }, icon('i-lock'), h('span', null,
-        'Sharing is off. Ship Deck shares nothing unless you start it with ',
-        h('code', { text: '--share --share-relay https://<relay>' }), '. Your deck stays on this computer either way.')));
+        'Sharing is off: Ship Deck sends nothing, and skills teammates share with you do not reach your agent. Turn it on with ',
+        h('code', { text: 'sh ~/ship-deck/bin/install.sh --share' }), ' and restart Ship Deck (or start it once with ',
+        h('code', { text: '--share --share-relay https://<relay>' }), '). Your deck stays on this computer either way.')));
       return;
     }
     if (s.problem) box.append(h('div', { class: 'callout warn', role: 'status' }, icon('i-lock'), h('span', null, s.problem, s.retryAt ? ` Trying again at ${fmtTime(s.retryAt)}.` : '')));

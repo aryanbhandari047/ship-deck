@@ -2270,6 +2270,7 @@
   // ---------- ship's library (read-only) ----------
   let libEntries = [];
   let libKey = null;
+  let libSharing = true;
 
   function renderLibraryList() {
     const q = ui.libraryFilter.value.trim().toLowerCase();
@@ -2287,7 +2288,8 @@
         'aria-current': e.key === libKey ? 'true' : null, title: e.where || e.label,
         onclick: () => openLibraryEntry(e.key),
       }, h('span', { class: 'lib-line' }, h('span', { class: 'lib-name', text: e.title || e.label }), h('span', { class: 'lib-age', text: e.exists ? agoLong(e.mtime) : 'Not created yet' })),
-      e.description ? h('span', { class: 'lib-desc', text: e.description }) : h('span', { class: 'lib-desc mono', text: e.where || e.label }))))))) : [h('p', { class: 'empty', text: 'Nothing matches.' })]));
+      e.description ? h('span', { class: 'lib-desc', text: e.description }) : h('span', { class: 'lib-desc mono', text: e.where || e.label }))))))) : [h('p', { class: 'empty', text: 'Nothing matches.' })]),
+    ...(libSharing ? [] : [h('p', { class: 'hint' }, 'Skills teammates share with you arrive only with sharing on: run ', h('code', { text: 'sh ~/ship-deck/bin/install.sh --share' }), ', then restart Ship Deck.')]));
   }
   async function openLibraryEntry(key) {
     libKey = key;
@@ -2324,7 +2326,9 @@
     ui.libraryFilter.focus();
     try {
       const res = await fetch('/api/library', { cache: 'no-store' });
-      libEntries = (await res.json()).entries || [];
+      const body = await res.json();
+      libEntries = body.entries || [];
+      libSharing = body.sharing !== false;
     } catch {
       libEntries = [];
     }
