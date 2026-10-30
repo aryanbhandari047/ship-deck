@@ -11,26 +11,29 @@ Ship Deck fixes that:
 - **No more tab-hopping.** Every worker is on one board instead of spread over
   a dozen terminal windows.
 - **Know who needs you.** Workers waiting on a decision, blocked or failed rise
-  to a **Needs you** column; the rest sit under **Working**, **Waiting** or
-  **Done**.
+  to the top under **Needs you**; the rest sit in compact **Working**,
+  **Waiting** and **Done** columns.
 - **Answer without a terminal.** Pick a worker's option or type a reply right
   on its card. Merge, clean up or start new work with one click.
 - **See what's happening.** A live peek at each worker's terminal and a feed of
   what the lead agent is doing right now.
 - **Share what your agent knows (beta).** Invite teammates or friends by email
   and choose your skills, your notes, or both. Their agent picks them up
-  automatically, so you all work with the same context.
+  automatically (Claude Code, Codex and Cursor), so you all work with the
+  same context. They can also ask your notes questions or suggest an answer
+  to one of your workers; you decide.
   [How to share](#share-with-your-team)
 
 ## What it does
 
 - **Board**: what needs you first, as full cards you answer in place; the
   rest (working, waiting, done) as quiet compact cards with the title, latest
-  update and pull request. Filter by project or search.
+  update and pull request. Filter by project or search. Library, Settings,
+  sharing, alerts and shortcuts live in one **More** menu.
 - **Ship view**: the same fleet drawn as a nautical chart, one berth per worker
   flying its status flag.
-- **Chat with the lead agent** (the "first mate"): send messages and read its
-  markdown replies.
+- **Chat with the lead agent** (the "first mate"): a floating chat on every
+  view; send messages and read its markdown replies.
   Paste, drop or attach screenshots and screen recordings; videos are turned
   into stills the agent can read.
 - **One-click actions**: answer a decision, ask for status, merge a PR, clean
@@ -48,14 +51,20 @@ Ship Deck fixes that:
 - **Team context sharing** (opt-in): grant a teammate by email and choose
   what to share: your skills, your notes and memory, or both. Their own Ship
   Deck pulls what you granted and installs it for their agent as read-only
-  skills, automatically. When you change a skill, the update reaches them;
+  skills, automatically (Claude Code, plus Codex/`~/.agents` and Cursor). When you change a skill, the update reaches them;
   they cannot change your copy; secrets are scrubbed before anything leaves
   your machine; and every view and sync is logged. Revoke, or let the grant
   expire, and it is removed from their machine.
+- **Know what's used and fresh**: see how often each teammate's agent used
+  each shared skill; every item shows when it was last updated or verified,
+  and old ones are flagged. Mark each note **Share** or **Private** (a
+  Private note never leaves your computer).
+- **Team pool**: offer a skill or note to the whole team; it reaches everyone
+  once an approver accepts it.
 - **Read-only board view** (opt-in): let a teammate watch your board in their
   browser. They can look, never send.
 - **Comfort**: choose what the deck and the first mate call you ("Captain",
-  "Boss", your first name or no title, in **More > Settings**); status is a
+  "Boss", your first name or no title, in **Settings > You**); status is a
   signal flag, a colour and a word (readable without colour); light and dark
   themes that pass WCAG AA; keyboard shortcuts (press `?`); browser
   notifications on request.
@@ -157,7 +166,8 @@ Updating changes nothing else in the first mate's terminal.
 > **Beta:** sharing is new and may change. Tell us if something breaks.
 
 Sharing goes through a small relay service you deploy once for your team
-(steps in [`relay/README.md`](relay/README.md)).
+(steps in [`relay/README.md`](relay/README.md)). It is deployed by hand with
+`vercel deploy --prod` from `relay/` and does not deploy on merge.
 
 1. **Sign in** from **More > Share your deck** in the top bar. Sharing is on after
    install (`ship-deck` and `--autostart` connect to the Keychain relay), and
@@ -172,9 +182,26 @@ Sharing goes through a small relay service you deploy once for your team
    relay, and `ship-deck --no-share` skips it for one run.
 2. **Invite by email**: add a teammate and pick how long they get access
    (1, 7 or 30 days). New people get a one-time invite link to send them.
-3. **Choose what to share**: the board, live updates, terminals, and your
-   skills or notes. Skills and notes reach their agent automatically once
-   their own Ship Deck is signed in (step 1).
+3. **Choose what to share.** Nothing is shared until you add someone; on a
+   new grant only board, updates and model start ticked, the rest are off.
+   All are read-only, except **suggest**, which only proposes:
+   - **board**: worker titles, status, projects, ages and PR links.
+   - **updates**: each worker's last few status lines.
+   - **model**: each worker's model and effort.
+   - **skills**: your skills, installed for their agent.
+   - **terminal**: 40 scrubbed terminal lines per worker.
+   - **notes**: your notes and memory, installed as one reference skill
+     (Private notes never go).
+   - **chat**: the first mate's chat and activity, labels only.
+   - **ask**: their agent asks a question and gets up to 3 cited passages
+     from your skills and notes; nothing is copied to their machine.
+   - **suggest**: they propose an answer to a worker waiting on a decision.
+     You see it on the card and send it yourself if you agree; their note is
+     shown only to you and never sent.
+
+   Skills and notes reach their agent automatically once their own Ship Deck
+   is signed in (step 1). Settings > Sharing shows who viewed what, usage per
+   shared skill, and the team pool.
 
 The full walkthrough, from both sides: [docs/TEAMMATE-SETUP.md](docs/TEAMMATE-SETUP.md)
 (steps 8 and 9) and the Sharing section of [docs/REFERENCE.md](docs/REFERENCE.md#sharing-read-only-opt-in).
