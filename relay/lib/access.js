@@ -25,6 +25,7 @@ function validateGrant(viewer, body, { domain, captainEmail, now = Date.now(), p
   if (asked.some((x) => NEVER.includes(x))) throw new GrantError('Attachments, paths, sessions and sending are never shared.');
   const scopes = SCOPES.filter((x) => asked.includes(x));
   if (!scopes.length) throw new GrantError('Choose at least one thing to share.');
+  if (scopes.includes('suggest') && !scopes.includes('board')) throw new GrantError('Suggesting answers needs the Board.');
   const projects = (Array.isArray(b.projects) ? b.projects : []).filter((p) => typeof p === 'string' && p.trim()).map((p) => p.trim().slice(0, 100)).slice(0, 50);
   if (!projects.length) throw new GrantError('Choose at least one project.');
   const max = now + MAX_DAYS * DAY;

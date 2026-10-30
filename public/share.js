@@ -13,6 +13,7 @@
     { key: 'terminal', name: 'Terminal output', desc: 'Last 40 lines, redacted, refreshed every 30 s', on: false, col: 1 },
     { key: 'notes', name: 'Captain notes and memory', desc: 'Your rules for the first mate, which their agent can use too. Read them before sharing.', on: false, col: 1 },
     { key: 'chat', name: 'First mate chat and activity', desc: 'Your conversation and its tool calls', on: false, col: 1 },
+    { key: 'suggest', name: 'Suggest answers', desc: 'They can suggest an option on a waiting decision, with a note. You see it on the decision; nothing reaches your agent unless you answer with it yourself. Needs the Board.', on: false, col: 1 },
   ];
   const NAME = Object.fromEntries(SCOPES.map((s) => [s.key, s.name]));
   const NEVER = [

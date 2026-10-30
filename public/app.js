@@ -501,11 +501,13 @@
       h('button', { class: 'opt' + (o.recommended ? ' rec' : ''), type: 'button', 'data-letter': o.letter, title: `Answer with option ${o.letter}`, onclick: () => onPick(o) },
         h('b', { text: o.letter }), h('span', null, o.text, o.recommended ? h('span', { class: 'rec-tag', text: 'Recommended' }) : null))));
   }
-  function answerTask(t, opt, text) {
+  // sug: a teammate's suggestion being used; the order then records who suggested it (the server
+  // checks it is still current), never their note.
+  function answerTask(t, opt, text, sug) {
     const name = t.title || t.id;
     const body = answerText(opt, text);
-    return queueOrder({ kind: 'decision', target: t.id, option: opt ? opt.letter : null, text: body }, {
-      title: opt ? `Answer “${name}” with option ${opt.letter}?` : `Send this answer to “${name}”?`, body,
+    return queueOrder({ kind: 'decision', target: t.id, option: opt ? opt.letter : null, text: body, ...(sug ? { suggestion: sug.id } : {}) }, {
+      title: opt ? `Answer “${name}” with option ${opt.letter}${sug ? ` (suggested by ${sug.by})` : ''}?` : `Send this answer to “${name}”?`, body,
     });
   }
   function answerCall(b, opt, text) {
@@ -872,7 +874,7 @@
     ui.drawerTitle.textContent = t.title || t.id;
     if (!unchanged('drawer-head', t.id, t.title, t.project, t.pr, B.toolText(t), t.window, t.alive)) renderTaskHead(t);
     if (!unchanged('drawer-resume', t.id, t.session)) td.termOpen.replaceChildren(h('p', { class: 'hint', text: 'Copy into a terminal to pick up this worker’s Claude Code session.' }), resumeBlock(t.session));
-    if (!unchanged('drawer-decision', t.id, t.state, t.stale, lastNote(t), t.options)) renderDecision(t);
+    if (!unchanged('drawer-decision', t.id, t.state, t.stale, lastNote(t), t.options, suggestionsFor(t))) renderDecision(t);
     if (!unchanged('drawer-updates', t.id, t.lastStatus)) renderUpdates(t);
     if (!unchanged('drawer-details', t, snap.tmux.available)) td.details.replaceChildren(...taskDetails(t));
     if (!unchanged('drawer-config', t.id, t.config, t.window, snap.configOptions)) renderConfig(t);
@@ -958,6 +960,24 @@
       text, h('div', { class: 'btn-row end' }, sendBtn));
   }
 
+  const suggestionsFor = (t) => (snap.suggestions || []).filter((s) => s.taskId === t.id);
+  // Teammates' suggested answers (live pairing): shown here only. Using one opens the usual
+  // confirm and sends just the letter; their note is shown to the captain and never sent.
+  function suggestionBlock(t) {
+    const list = suggestionsFor(t);
+    if (!list.length) return null;
+    const act = async (body, done) => { const r = await post('/api/share/suggestion', body); toast(r.ok ? done : `Not done: ${r.error}`, r.ok ? 'ok' : 'err'); poll(); };
+    return h('div', { class: 'suggestions' }, list.map((s) => {
+      const opt = (t.options || []).find((o) => o.letter === s.letter);
+      return h('div', { class: 'decision-note' },
+        h('b', { text: `${s.by} suggests ${s.letter}` }), s.outdated ? h('span', { class: 'muted', text: ' (no longer one of the options)' }) : null,
+        s.note ? h('p', { class: 'hint', text: `Their note, shown to you only and never sent: ${s.note}` }) : null,
+        h('div', { class: 'btn-row' },
+          h('button', { class: 'btn sm', type: 'button', disabled: s.outdated || !opt, text: `Answer with ${s.letter}`, onclick: () => answerTask(t, opt, '', s) }),
+          h('button', { class: 'btn sm', type: 'button', text: 'Dismiss', onclick: () => act({ id: s.id, action: 'dismiss' }, 'Dismissed. They see that it was not used.') }),
+          h('button', { class: 'btn sm', type: 'button', text: 'Stop suggestions from them', onclick: () => act({ id: s.id, action: 'stop' }, `${s.by} can no longer suggest answers.`) })));
+    }));
+  }
   function renderDecision(t) {
     const show = (t.state === 'needs-decision' || t.state === 'blocked') && !t.stale;
     td.decision.hidden = !show;
@@ -967,6 +987,7 @@
     td.decision.replaceChildren(
       h('h3', null, flagEl(st.flag), t.state === 'blocked' ? 'Blocked: help it along' : 'Needs your call'),
       h('div', { class: 'decision-note', text: B.cardSummary(t, 2000) || 'No note.' }),
+      suggestionBlock(t),
       answerPanel({
         options: t.options,
         draftKey: 'decision.' + t.id,
