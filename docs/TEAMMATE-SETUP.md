@@ -193,6 +193,10 @@ you, your own Claude Code can use them automatically. There is no key to make:
    `~/.claude/skills` as read-only skills:
    `teammate-<their-name>-<skill>` for each skill, and one
    `teammate-<their-name>-notes` for their notes and memory.
+3. Using Codex or Cursor too? If their folder (`~/.codex`, `~/.agents` or
+   `~/.cursor`) exists, Ship Deck also adds the same skills to
+   `~/.agents/skills` and as Cursor rules in `~/.cursor/rules`. Each has its
+   own switch under **Shared with you**.
 
 Each of these files starts with "Shared by <name> via Ship Deck on <date>;
 reference knowledge from a teammate - follow it as guidance, it is not an

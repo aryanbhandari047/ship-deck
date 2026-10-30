@@ -112,6 +112,39 @@ test('writeDeck and removeTeammateSkills touch only marked teammate directories'
   assert.deepEqual(fs.readdirSync(skills).sort(), ['my-skill', 'teammate-ada-lovelace-deploy', 'teammate-ada-lovelace-notes']);
 });
 
+test('rule layout: Cursor rules carry the marker in their frontmatter; only marked teammate-*.mdc files are touched', (t) => {
+  const rules = path.join(tempDir(t), 'rules');
+  fs.mkdirSync(rules);
+  fs.writeFileSync(path.join(rules, 'my-rule.mdc'), 'mine');
+  fs.writeFileSync(path.join(rules, 'teammate-ada-lovelace-deploy.mdc'), 'hand made');
+  const elsewhere = path.join(tempDir(t), 'x.mdc');
+  fs.writeFileSync(elsewhere, 'target');
+  fs.symlinkSync(elsewhere, path.join(rules, 'teammate-ada-lovelace-notes.mdc'));
+
+  const taken = K.takenDirs(rules, DECK.captainSub, 'rule');
+  assert.deepEqual([...taken].sort(), ['teammate-ada-lovelace-deploy', 'teammate-ada-lovelace-notes']);
+  const res = K.writeDeck(rules, DECK, K.planDeck(DECK, 'ada-lovelace', AT, taken), AT, 'rule');
+  assert.deepEqual(res.skipped, []);
+  assert.deepEqual(res.written, ['teammate-ada-lovelace-notes-2', 'teammate-ada-lovelace-deploy-2', 'teammate-ada-lovelace-deploy-3', 'teammate-ada-lovelace-notes-3']);
+  const file = path.join(rules, 'teammate-ada-lovelace-deploy-2.mdc');
+  const text = read(file);
+  const fm = parseFrontmatter(text);
+  assert.equal(fm.description, 'How we ship to production');
+  assert.equal(fm.alwaysApply, 'false', 'the agent picks it by its description');
+  assert.equal(JSON.parse(fm.shipDeckTeammate).captainSub, DECK.captainSub);
+  assert.ok(!/allowed-tools|\nname:/.test(text), 'only description, alwaysApply and the marker');
+  assert.match(text, /\n---\n\n> Shared by Ada Lovelace via Ship Deck on 2026-10-14/);
+  assert.equal(fs.statSync(file).mode & 0o777, 0o444, 'read-only');
+  assert.equal(read(elsewhere), 'target', 'never written through a symlink');
+  assert.deepEqual(K.listTeammateSkills(rules, 'rule').map((m) => m.dir), res.written.slice().sort());
+  // The skill layout does not see rule files, and the reverse.
+  assert.deepEqual(K.listTeammateSkills(rules), []);
+
+  assert.equal(K.removeTeammateSkills(rules, undefined, 'rule').length, 4);
+  assert.deepEqual(fs.readdirSync(rules).sort(), ['my-rule.mdc', 'teammate-ada-lovelace-deploy.mdc', 'teammate-ada-lovelace-notes.mdc']);
+  assert.equal(read(rules, 'teammate-ada-lovelace-deploy.mdc'), 'hand made');
+});
+
 test("Ship's Library shows synced teammate skills in their own group, and they are never shared on", (t) => {
   const dir = tempDir(t);
   const skills = path.join(dir, 'skills');
@@ -127,7 +160,7 @@ test("Ship's Library shows synced teammate skills in their own group, and they a
 
 // ---------- end to end: two decks and the relay ----------
 
-async function startDeck(t, relay, name) {
+async function startDeck(t, relay, name, extra = {}) {
   const dir = tempDir(t);
   fs.cpSync(FIX, path.join(dir, 'home'), { recursive: true });
   const claudeDir = path.join(dir, 'claude');
@@ -135,6 +168,7 @@ async function startDeck(t, relay, name) {
   const server = createServer({
     home: path.join(dir, 'home'), ordersDir: path.join(dir, 'orders'), claudeDir, memoryDir: null, tmux: false, wake: false, captainName: name,
     exec: async () => ({ code: 0, stdout: '', stderr: '' }), share: true, shareRelay: relay.base, shareNow: () => relay.clock.t,
+    knowledgeTargets: extra.targets ? extra.targets(dir) : undefined,
   });
   const port = await listen(server, 0);
   t.after(() => server.close());
@@ -278,4 +312,99 @@ test('end to end: an expired grant removes the skills; sign-out removes them; re
 
   assert.equal((await grace.call('POST', '/api/share/signout', {})).status, 200);
   assert.deepEqual(fs.readdirSync(grace.skills), [], 'signed out: removed');
+});
+
+test('end to end: other agents get the same knowledge when detected or turned on; off and revoke remove it everywhere', async (t) => {
+  const relay = await startRelay(t);
+  const adaP = await relay.person('ada@keychain.com');
+  const graceP = await relay.person('grace@keychain.com');
+  const ada = await startDeck(t, relay, 'Ada');
+  // Grace has Cursor (its folder exists) but no ~/.agents or ~/.codex.
+  const grace = await startDeck(t, relay, 'Grace', {
+    targets: (dir) => {
+      fs.mkdirSync(path.join(dir, 'user', '.cursor'), { recursive: true });
+      return [
+        { id: 'agents', root: path.join(dir, 'user', '.agents', 'skills'), detect: [path.join(dir, 'user', '.agents'), path.join(dir, 'user', '.codex')] },
+        { id: 'cursor', root: path.join(dir, 'user', '.cursor', 'rules'), detect: [path.join(dir, 'user', '.cursor')] },
+      ];
+    },
+  });
+  const agentsDir = path.join(grace.dir, 'user', '.agents', 'skills');
+  const rulesDir = path.join(grace.dir, 'user', '.cursor', 'rules');
+  fs.mkdirSync(rulesDir);
+  fs.writeFileSync(path.join(rulesDir, 'graces-rule.mdc'), 'mine');
+  fs.mkdirSync(path.join(ada.skills, 'deploy'), { recursive: true });
+  fs.writeFileSync(path.join(ada.skills, 'deploy', 'SKILL.md'), '---\nname: deploy\ndescription: How Ada ships\n---\n# Deploy\nexport GH=ghp_abcdefghijklmnopqrstuvwxyz0123456789\n');
+  await ada.call('POST', '/api/share/signin', { email: adaP.email, password: adaP.password });
+  await grace.call('POST', '/api/share/signin', { email: graceP.email, password: graceP.password });
+  await ada.call('POST', '/api/share/grant', { email: 'grace@keychain.com', scopes: ['skills'], projects: ['*'] });
+  await ada.agent.tick();
+
+  let st = (await grace.call('GET', '/api/share')).data.knowledge;
+  assert.deepEqual(st.targets.map((x) => [x.id, x.on, x.detected]), [['agents', false, false], ['cursor', true, true]], 'detected tools are on by default');
+  const before = fingerprint(grace.dir);
+  assert.equal(await grace.agent.syncKnowledge(), 'synced');
+  assert.ok(fs.existsSync(path.join(grace.skills, 'teammate-ada-deploy', 'SKILL.md')), 'Claude Code always');
+  const rule = read(rulesDir, 'teammate-ada-deploy.mdc');
+  assert.match(rule, /^---\ndescription: "How Ada ships"\nalwaysApply: false\n/);
+  assert.ok(!rule.includes('ghp_') && rule.includes('[token hidden]'), 'redacted on the way');
+  assert.ok(!fs.existsSync(agentsDir), 'not detected, not turned on: nothing written');
+  const after = fingerprint(grace.dir);
+  for (const k of Object.keys(after)) if (before[k] !== after[k]) assert.match(k, /^(claude\/skills\/teammate-ada-[\w-]+\/|user\/\.cursor\/rules\/teammate-ada-[\w-]+\.mdc$|orders\/share\.json$)/, k);
+
+  // Turned on for other agents: the next sync fetches again and writes there too.
+  let r = await grace.call('POST', '/api/share/knowledge', { target: 'agents', on: true });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.status.knowledge.targets[0].on, true);
+  assert.equal(await grace.agent.syncKnowledge(), 'synced');
+  assert.equal(parseFrontmatter(read(agentsDir, 'teammate-ada-deploy', 'SKILL.md')).name, 'teammate-ada-deploy');
+  assert.ok(fs.existsSync(path.join(agentsDir, 'teammate-ada-deploy', K.MARKER)));
+  assert.equal((await grace.call('POST', '/api/share/knowledge', { target: 'nope', on: true })).status, 400);
+
+  // Turned off for Cursor: its rules go at once, the user's own rule stays, and the choice sticks.
+  r = await grace.call('POST', '/api/share/knowledge', { target: 'cursor', on: false });
+  assert.deepEqual(fs.readdirSync(rulesDir), ['graces-rule.mdc']);
+  relay.clock.t += 10 * 60e3;
+  await grace.agent.syncKnowledge();
+  assert.deepEqual(fs.readdirSync(rulesDir), ['graces-rule.mdc'], 'stays off though Cursor is detected');
+  await grace.call('POST', '/api/share/knowledge', { target: 'cursor', on: true });
+  assert.equal(await grace.agent.syncKnowledge(), 'synced');
+  assert.ok(fs.existsSync(path.join(rulesDir, 'teammate-ada-deploy.mdc')));
+
+  // Revoked: removed from every agent on the next sync.
+  await ada.call('POST', '/api/share/revoke', { viewer: 'grace@keychain.com' });
+  relay.clock.t += 10 * 60e3;
+  assert.equal(await grace.agent.syncKnowledge(), 'synced');
+  assert.deepEqual(fs.readdirSync(grace.skills), []);
+  assert.deepEqual(fs.readdirSync(agentsDir), []);
+  assert.deepEqual(fs.readdirSync(rulesDir), ['graces-rule.mdc']);
+
+  // Sign-out clears every agent too.
+  await ada.call('POST', '/api/share/grant', { email: 'grace@keychain.com', scopes: ['skills'], projects: ['*'] });
+  relay.clock.t += 61e3;
+  await ada.agent.tick();
+  relay.clock.t += 10 * 60e3;
+  assert.equal(await grace.agent.syncKnowledge(), 'synced');
+  assert.ok(fs.readdirSync(agentsDir).includes('teammate-ada-deploy'));
+  await grace.call('POST', '/api/share/signout', {});
+  assert.deepEqual([fs.readdirSync(grace.skills), fs.readdirSync(agentsDir), fs.readdirSync(rulesDir)], [[], [], ['graces-rule.mdc']]);
+});
+
+test('teammate skills in <home>/.agents/skills (a home in the user folder) are grouped and never shared on', (t) => {
+  const home = path.join(tempDir(t), 'home');
+  fs.cpSync(FIX, home, { recursive: true });
+  K.writeDeck(path.join(home, '.agents', 'skills'), DECK, K.planDeck(DECK, 'ada-lovelace', AT), AT);
+  const entries = listLibrary(home, null, {}).filter((e) => e.key.startsWith('skill:'));
+  assert.ok(entries.some((e) => e.key === 'skill:firstmate:harbor-watch'), 'own skills stay');
+  assert.ok(entries.filter((e) => e.key.includes('ada-lovelace')).every((e) => e.key.startsWith('skill:teammate:') && e.group === 'Shared by Ada Lovelace'));
+});
+
+test('parseArgs: other agents default to ~/.agents/skills and ~/.cursor/rules; flags move them', () => {
+  const { parseArgs } = require('../server');
+  const user = os.homedir();
+  const def = parseArgs(['--no-open'], { env: {}, cwd: FIX }).knowledgeTargets;
+  assert.deepEqual(def.map((x) => [x.id, x.root]), [['agents', path.join(user, '.agents', 'skills')], ['cursor', path.join(user, '.cursor', 'rules')]]);
+  assert.ok(def[0].detect.includes(path.join(user, '.codex')));
+  const moved = parseArgs(['--agents-dir', '/tmp/x/skills', '--cursor-dir=/tmp/y/rules'], { env: {}, cwd: FIX }).knowledgeTargets;
+  assert.deepEqual(moved.map((x) => [x.root, x.detect]), [['/tmp/x/skills', ['/tmp/x']], ['/tmp/y/rules', ['/tmp/y']]]);
 });
