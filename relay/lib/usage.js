@@ -2,7 +2,8 @@
 // Usage counts of shared knowledge: how often a teammate's agent used a captain's shared skill (or
 // their notes), reported by the teammate's own deck. Counts and times only, never text. Pure
 // functions; lib/app.js checks grants, stores and audits.
-//   use:<captainSub>  Redis hash: "c\t<key>\t<email>" count, "l\t<key>\t<email>" last use (ms)
+//   use:<captainSub>  Redis hash: "c\t<key>\t<email>" count, "l\t<key>\t<email>" last use (ms),
+//                     "q\t<key>\t<email>" times quoted in an answer to their questions (lib/ask.js)
 const { KEY_RE } = require('./library');
 
 const NOTES_KEY = 'notes'; // the teammate's deck merges all notes into one skill
@@ -42,20 +43,22 @@ function writeCmds(captainSub, email, items) {
   return cmds;
 }
 
-// HGETALL (a flat list or an object) -> [{ key, viewerEmail, count, last }], most used first.
+// HGETALL (a flat list or an object) -> [{ key, viewerEmail, count, cited, last }], most used first.
 function readRows(raw, now) {
   const fields = {};
   if (Array.isArray(raw)) for (let i = 0; i + 1 < raw.length; i += 2) fields[raw[i]] = raw[i + 1];
   else Object.assign(fields, raw || {});
   const rows = [];
-  for (const [f, v] of Object.entries(fields)) {
+  const seen = new Set();
+  for (const f of Object.keys(fields)) {
     const [t, key, email] = f.split('\t');
-    if (t !== 'c' || !key || !email) continue;
+    if ((t !== 'c' && t !== 'q') || !key || !email || seen.has(key + '\t' + email)) continue;
+    seen.add(key + '\t' + email);
     const last = Number(fields[`l\t${key}\t${email}`]) || null;
     if (last && last < now - TTL * 1000) continue;
-    rows.push({ key, viewerEmail: email, count: Number(v) || 0, last });
+    rows.push({ key, viewerEmail: email, count: Number(fields[`c\t${key}\t${email}`]) || 0, cited: Number(fields[`q\t${key}\t${email}`]) || 0, last });
   }
-  return rows.sort((a, b) => b.count - a.count || (b.last || 0) - (a.last || 0));
+  return rows.sort((a, b) => b.count + b.cited - a.count - a.cited || (b.last || 0) - (a.last || 0));
 }
 
 module.exports = { NOTES_KEY, MAX_ITEMS, MAX_COUNT, MAX_BODY, TTL, sanitizeReport, writeCmds, readRows };

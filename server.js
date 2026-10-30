@@ -34,7 +34,7 @@ const MAX_BODY = 16 * 1024;
 const ORDERS_IN_SNAPSHOT = 60;
 const THREAD_LIMIT = 300;
 const POST_ROUTES = new Set(['/api/send', '/api/orders', '/api/config', '/api/settings']);
-const SHARE_POST = new Set(['/api/share/signin', '/api/share/signout', '/api/share/grant', '/api/share/revoke', '/api/share/invite', '/api/share/pause', '/api/share/knowledge', '/api/share/item', '/api/share/pool']);
+const SHARE_POST = new Set(['/api/share/signin', '/api/share/signout', '/api/share/grant', '/api/share/revoke', '/api/share/invite', '/api/share/pause', '/api/share/knowledge', '/api/share/item', '/api/share/pool', '/api/share/ask']);
 // Library files a "notes and memory" grant may carry (plus memory/*).
 const SHARE_NOTES = ['home:data/captain.md', 'home:data/captain-shared.md', 'home:data/learnings.md'];
 const USAGE = 'usage: ship-deck [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--no-open] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR] [--agents-dir DIR] [--cursor-dir DIR] [--captain-name NAME] [--no-wake] [--share --share-relay URL | --no-share] [--verify-days 30]';
@@ -304,6 +304,8 @@ function createServer(opts) {
     // Read only: how often this computer's agent used what teammates share (counts are reported).
     transcriptsDir: path.join(claudeDir, 'projects'),
     verifyDays: opts.verifyDays,
+    // Where this computer's agent reaches this deck (the teammate-ask skill says so).
+    localUrl: () => (server.address() ? `http://127.0.0.1:${server.address().port}` : null),
     readEntry: async (key) => {
       const e = library.listLibrary(opts.home, memoryDir, libOpts).find((x) => x.key === key && (isSkill(x) || isNote(x)));
       return e ? { key: e.key, title: e.title, description: e.description || '', text: readEntryText(e) } : null;
@@ -367,6 +369,7 @@ function createServer(opts) {
       if (url.pathname === '/api/share/signout') return json(res, 200, { ok: true, status: await agent.signOut() });
       if (url.pathname === '/api/share/grant') return json(res, 200, { ok: true, grants: await agent.putGrant(body) });
       if (url.pathname === '/api/share/revoke') return json(res, 200, { ok: true, grants: await agent.revoke(body.viewer) });
+      if (url.pathname === '/api/share/ask') return json(res, 200, { ok: true, ...(await agent.ask({ question: body.question, captain: body.captain })) });
       if (url.pathname === '/api/share/item') return json(res, 200, { ok: true, items: await agent.setItem({ key: body.key, verified: body.verified, tag: body.tag }) });
       if (url.pathname === '/api/share/invite') return json(res, 200, { ok: true, invite: await agent.invite(body.email) });
       if (url.pathname === '/api/share/pause') return json(res, 200, { ok: true, status: agent.setPaused(!!body.paused) });

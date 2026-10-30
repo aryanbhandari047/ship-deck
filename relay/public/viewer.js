@@ -14,7 +14,7 @@
   const MAX_BACKOFF = 15 * 60e3;
   const DAY = 86400e3;
   const MARK_RE = /(\[(?:token|key|secret|path|link) hidden\])/;
-  const SCOPE_NAME = { board: 'Board', updates: 'Updates', model: 'Model and effort', skills: 'Skills', terminal: 'Terminal output', notes: 'Notes and memory', chat: 'Chat and activity' };
+  const SCOPE_NAME = { board: 'Board', updates: 'Updates', model: 'Model and effort', skills: 'Skills', terminal: 'Terminal output', notes: 'Notes and memory', chat: 'Chat and activity', ask: 'Questions' };
 
   let viewer = null;
   let decks = [];
@@ -244,6 +244,7 @@
         [has('terminal'), 'Terminal output, redacted'],
         [has('notes'), 'Notes and memory'],
         [has('chat'), 'Chat and activity'],
+        [has('ask'), 'Answers to your agent\'s questions (short quotes; they see each question)'],
       ];
       for (const [yes, text] of rows) list.append(h('li', { class: yes ? 'yes' : 'no' }, icon(yes ? 'i-check' : 'i-dash'), text));
       list.append(h('li', { class: 'no' }, icon('i-lock'), 'Attachments, paths, sessions'));
