@@ -541,6 +541,20 @@ Share your deck** in the top bar opens **Settings > Sharing** (`/share.html`):
    Share" (under Captain notes and memory) carries only notes marked Share, on the relay page,
    in their agent's skills and through agent keys. Tags and verify dates live in
    `~/.ship-deck/share.json` (`items`).
+7. **Questions about skills and notes** (scope `ask`, off by default): their agent can ask a
+   question and get up to 3 passages of at most 600 characters each, with citations, from your
+   skills and notes, without anything being copied into their skills. Private notes are never
+   searched, and "Only notes marked Share" also limits what can be quoted. The relay ranks the
+   text (BM25 over a term summary built when your library is pushed, `relay/lib/ask.js`; no
+   model, no other service); their agent writes the answer. Their deck gives their agent one
+   `teammate-ask` skill naming who answers and how to call `POST /api/share/ask` on their own
+   deck (the usual `X-Ship-Deck`/Origin guards). The question is redacted on their computer,
+   capped at 500 characters, and shown in your log with what was quoted ("Asked …: quoted …");
+   the skill and their Settings tell them so. Limits: 30 questions an hour and 200 a day per
+   grant (a refusal is logged once). Quotes count toward "Quoted in answers" in **How your
+   shared skills are used**. Many questions can piece the text together, so share only what
+   you would let them read. Revoking stops it at once; the `teammate-ask` skill goes on their
+   next check.
 
 ![Settings > Sharing: people with access, what they can see, and the audit log](share-settings.png)
 ![A teammate's read-only view of the sample fleet on the relay](share-viewer.png)
@@ -563,6 +577,7 @@ dropped; their full text still travels in the library). Workers are keyed by an 
 | Terminal (40 redacted lines, every 30 s) | off | |
 | Captain notes and memory (also given to their agent as one reference skill) | off | |
 | First mate chat and activity (labels only) | off | |
+| Questions about skills and notes (`ask`: 3 short quoted passages per question, nothing synced) | off | the question shows in your log |
 | Attachments, paths, worktrees, windows, session ids, orders | never | not in the allow-list |
 | Sending anything | never | viewers can only make and revoke their own agent keys; `/v1/knowledge` and `/v1/agent` are GET only |
 

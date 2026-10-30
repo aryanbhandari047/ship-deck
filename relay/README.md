@@ -70,6 +70,11 @@ read per changed captain: 10 knowledge changes a day reaching 5 teammates each i
 commands a day (≈ 14,000/month, 3%). Library pushes bump the version only when the content
 changed, never on the hourly keep-alive.
 
+Questions (`ask`): about 18 commands each (auth, the asker's captains, two rate counters, the
+term summary and index, up to 3 items, an audit row, quoted counts). At 200 questions a day across a
+team that is about 3,600 commands a day (≈ 108,000/month, 22%); the per-grant limits are the
+ceiling. Reads move the term summary (about a fifth of a library) and at most 3 items.
+
 Usage counts: a report goes out only in an hour when the teammate's agent used something shared;
 20 teammates reporting 5 times a day is about 1,000 commands a day (≈ 30,000/month, 6%).
 
@@ -204,6 +209,7 @@ fails when they drift.
 | `POST /v1/library`, `DELETE /v1/library` | deck token | store or remove the knowledge library projection (re-sanitised, 512 KB) |
 | `GET /v1/knowledge[?since=<version>]`, `GET /v1/knowledge/<captainSub>` | deck token | a teammate's own deck: what every captain shares with this account (hashes), and one captain's granted skills and notes with their text |
 | `GET /v1/agent/library`, `GET /v1/agent/library/<captainSub>/<key>` | agent key | the library list (JSON) and one item (markdown) |
+| `POST /v1/ask` | deck token | a teammate's deck asks `{ question, captain? }` of captains whose grant to this account has `ask`: up to 3 passages (≤ 600 characters, `lines`, title, dates) ranked by BM25 over the term summary stored as `lib:<sub>` field `x` at library push; 30 an hour / 200 a day per grant (`askh:`/`askd:`); one audit row per captain with the question (redacted by the deck) and what was quoted |
 | `POST /v1/usage`, `GET /v1/usage` | deck token | a teammate's deck reports how often its agent used what captains share with it (counts and times only; items not in the captain's library or not granted to this account are dropped; one audit row per captain); the captain reads their counts (`use:<sub>`, 90 days) |
 
 Nothing else is routed. Viewer deck routes, `/v1/knowledge` and `/v1/agent` answer 405 to every other method. A grant is authored

@@ -66,6 +66,17 @@ if you turned it off) and sign in under Settings > Sharing (see [TEAMMATE-SETUP.
   **Use knowledge shared with me** off or signing out removes them from every agent.
   Ship Deck never edits an `AGENTS.md` or any file it did not write.
 
+## Questions instead of copies (`ask`)
+
+Grant **Questions about skills and notes** to let a teammate's agent ask without your
+skills and notes being copied to their computer. Their deck writes a single
+`teammate-ask` skill that tells their agent how to call their own Ship Deck. Each answer is at
+most 3 cited passages of at most 600 characters each, from items the grant allows (never a
+Private note; only notes marked Share for a marked-only grant). Their agent writes the
+answer from them. The question is redacted on their computer and shown in your log, and
+their skill says so. Limits are 30 questions an hour and 200 a day. Many questions can
+piece the text together, so treat anything you allow as readable.
+
 ## Freshness and private notes
 
 Every shared skill and note carries when you last updated it (the file's time) and last

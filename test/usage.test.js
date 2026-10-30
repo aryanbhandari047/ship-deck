@@ -73,7 +73,7 @@ test('relay: a report is counts only, de-duped, capped and clamped', () => {
   ]);
   assert.throws(() => RU.sanitizeReport({ items: [] }, now));
   const raw = ['c\tskill:captain:deploy\tg@keychain.com', '5', 'l\tskill:captain:deploy\tg@keychain.com', String(now), 'c\tnotes\tg@keychain.com', '1', 'l\tnotes\tg@keychain.com', String(now - 100 * 86400e3)];
-  assert.deepEqual(RU.readRows(raw, now), [{ key: 'skill:captain:deploy', viewerEmail: 'g@keychain.com', count: 5, last: now }], 'older than 90 days is dropped');
+  assert.deepEqual(RU.readRows(raw, now), [{ key: 'skill:captain:deploy', viewerEmail: 'g@keychain.com', count: 5, cited: 0, last: now }], 'older than 90 days is dropped');
 });
 
 async function startDeck(t, relay, name) {
