@@ -49,6 +49,8 @@ function sanitizeLibrary(body) {
 const skillsAllowed = (grant) => !!grant && grant.scopes.includes('skills');
 const notesAllowed = (grant) => !!grant && grant.scopes.includes('notes');
 const knowledgeAllowed = (grant) => skillsAllowed(grant) || notesAllowed(grant);
+// What a grant with `ask` may quote in answers: skills, and notes (only marked ones if notesTagged).
+const askAllowed = (item, grant) => !!grant && grant.scopes.includes('ask') && (kindOf(item.key) === 'skill' || !grant.notesTagged || item.tag === 'share');
 const itemAllowed = (item, grant) => (kindOf(item.key) === 'skill' ? skillsAllowed(grant) : notesAllowed(grant) && (!grant.notesTagged || item.tag === 'share'));
 
 // One hash over what this grant may read; it changes when an item, or the grant's reach, does.
@@ -86,5 +88,5 @@ const fieldOf = (key) => 'i:' + key;
 
 module.exports = {
   ITEM_KEYS, KEY_RE, MAX_ITEMS, MAX_TEXT, MAX_BYTES, LIB_TTL, MAX_KEYS, KEY_TTL, RATE_PER_HOUR, TOKEN_RE,
-  kindOf, sanitizeLibrary, skillsAllowed, notesAllowed, knowledgeAllowed, itemAllowed, knowledgeHash, newKey, parseKey, cleanLabel, keyExpiry, rateWindow, fieldOf,
+  kindOf, sanitizeLibrary, skillsAllowed, notesAllowed, knowledgeAllowed, itemAllowed, askAllowed, knowledgeHash, newKey, parseKey, cleanLabel, keyExpiry, rateWindow, fieldOf,
 };

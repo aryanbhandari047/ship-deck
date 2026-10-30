@@ -550,7 +550,21 @@ Share your deck** in the top bar opens **Settings > Sharing** (`/share.html`):
    decline or later remove an item, which takes it off every member's computer; authors can
    withdraw. Offers, approvals, removals and member syncs are rows in the approvers' (and the
    author's) logs. "Use the team pool" under Shared with you turns it off for one person.
-8. **Suggest answers** (scope `suggest`, off by default, only with Board): on the relay page a
+8. **Questions about skills and notes** (scope `ask`, off by default): their agent can ask a
+   question and get up to 3 passages of at most 600 characters each, with citations, from your
+   skills and notes, without anything being copied into their skills. Private notes are never
+   searched, and "Only notes marked Share" also limits what can be quoted. The relay ranks the
+   text (BM25 over a term summary built when your library is pushed, `relay/lib/ask.js`; no
+   model, no other service); their agent writes the answer. Their deck gives their agent one
+   `teammate-ask` skill naming who answers and how to call `POST /api/share/ask` on their own
+   deck (the usual `X-Ship-Deck`/Origin guards). The question is redacted on their computer,
+   capped at 500 characters, and shown in your log with what was quoted ("Asked …: quoted …");
+   the skill and their Settings tell them so. Limits: 30 questions an hour and 200 a day per
+   grant (a refusal is logged once). Quotes count toward "Quoted in answers" in **How your
+   shared skills are used**. Many questions can piece the text together, so share only what
+   you would let them read. Revoking stops it at once; the `teammate-ask` skill goes on their
+   next check.
+9. **Suggest answers** (scope `suggest`, off by default, only with Board): on the relay page a
    teammate can suggest one of the current options for a worker waiting on a decision, with a
    note of up to 300 characters. Your deck picks it up with its regular grant check (at most 10
    minutes; the version rides on that answer) and shows it on the worker's decision: "<who>
@@ -586,8 +600,9 @@ dropped; their full text still travels in the library). Workers are keyed by an 
 | Terminal (40 redacted lines, every 30 s) | off | |
 | Captain notes and memory (also given to their agent as one reference skill) | off | |
 | First mate chat and activity (labels only) | off | |
-| Attachments, paths, worktrees, windows, session ids, orders | never | not in the allow-list |
+| Questions about skills and notes (`ask`: 3 short quoted passages per question, nothing synced) | off | the question shows in your log |
 | Suggest answers (`suggest`: an option letter + a note you see; only you can send it) | off | needs Board |
+| Attachments, paths, worktrees, windows, session ids, orders | never | not in the allow-list |
 | Sending anything | never | viewers can only make and revoke their own agent keys and, with `suggest`, suggest an option you may use; `/v1/knowledge` and `/v1/agent` are GET only |
 
 Nothing is pushed until someone has an active grant. The share agent pushes only when the

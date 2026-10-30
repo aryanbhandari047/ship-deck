@@ -42,7 +42,7 @@ function validateGrant(viewer, body, { domain, captainEmail, now = Date.now(), p
     scopes,
     projects: projects.includes('*') ? ['*'] : projects,
     // Notes and memory: only the notes the captain marked Share (relay/lib/library.js itemAllowed).
-    notesTagged: scopes.includes('notes') && b.notesTagged === true,
+    notesTagged: (scopes.includes('notes') || scopes.includes('ask')) && b.notesTagged === true,
     expiresAt,
     createdAt: (previous && previous.createdAt) || now,
     updatedAt: now,

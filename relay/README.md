@@ -80,6 +80,11 @@ approval; after that a knowledge list adds one HGET, and a member's pool read is
 (the read, an approver lookup, an audit row) only when the pool changed. Approver actions are
 rare (a few commands each).
 
+Questions (`ask`): about 18 commands each (auth, the asker's captains, two rate counters, the
+term summary and index, up to 3 items, an audit row, quoted counts). At 200 questions a day across a
+team that is about 3,600 commands a day (≈ 108,000/month, 22%); the per-grant limits are the
+ceiling. Reads move the term summary (about a fifth of a library) and at most 3 items.
+
 Usage counts: a report goes out only in an hour when the teammate's agent used something shared;
 20 teammates reporting 5 times a day is about 1,000 commands a day (≈ 30,000/month, 6%).
 
@@ -218,6 +223,7 @@ fails when they drift.
 | `GET`, `POST /v1/decks/<captainSub>/suggestions` | viewer session | live pairing (scope `suggest`): the viewer's own suggestions with their states; `POST { ref, letter, note? }` for a visible worker waiting on a decision, a current option letter, note ≤ 300 characters; same-origin check; 5 waiting per viewer, 20 per deck, 10 an hour; 24 h |
 | `GET /v1/suggestions`, `POST /v1/suggestions/<id>` | deck token | the captain's deck lists pending suggestions (grant re-checked per viewer) and reports `{ state: used \| dismissed }`; the version (`sugv:<sub>`) rides in the deck-auth MGET and on grant and push answers as `suggest` |
 | `GET /v1/pool`, `POST /v1/pool/offers`, `POST /v1/pool/offers/<id>/approve`, `DELETE /v1/pool/offers/<id>`, `DELETE /v1/pool/items/<id>` | deck token | the team pool: approved items for every account, pending offers (with text) for approvers and their author; anyone offers, approvers approve or remove, an author may withdraw. Members' decks get approved items through `/v1/knowledge` as the deck `team-pool` |
+| `POST /v1/ask` | deck token | a teammate's deck asks `{ question, captain? }` of captains whose grant to this account has `ask`: up to 3 passages (≤ 600 characters, `lines`, title, dates) ranked by BM25 over the term summary stored as `lib:<sub>` field `x` at library push; 30 an hour / 200 a day per grant (`askh:`/`askd:`); one audit row per captain with the question (redacted by the deck) and what was quoted |
 | `POST /v1/usage`, `GET /v1/usage` | deck token | a teammate's deck reports how often its agent used what captains share with it (counts and times only; items not in the captain's library or not granted to this account are dropped; one audit row per captain); the captain reads their counts (`use:<sub>`, 90 days) |
 
 Nothing else is routed. Viewer deck routes, `/v1/knowledge` and `/v1/agent` answer 405 to every other method. A grant is authored

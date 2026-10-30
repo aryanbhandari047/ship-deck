@@ -13,6 +13,7 @@
     { key: 'terminal', name: 'Terminal output', desc: 'Last 40 lines, redacted, refreshed every 30 s', on: false, col: 1 },
     { key: 'notes', name: 'Captain notes and memory', desc: 'Your rules for the first mate, which their agent can use too. Read them before sharing.', on: false, col: 1 },
     { key: 'chat', name: 'First mate chat and activity', desc: 'Your conversation and its tool calls', on: false, col: 1 },
+    { key: 'ask', name: 'Questions about skills and notes', desc: 'Their agent can ask questions and gets up to 3 short quoted passages each, without copying your skills and notes to them. Each question (redacted) shows in your log. Many questions can piece the text together, so share only what you would let them read.', on: false, col: 0 },
     { key: 'suggest', name: 'Suggest answers', desc: 'They can suggest an option on a waiting decision, with a note. You see it on the decision; nothing reaches your agent unless you answer with it yourself. Needs the Board.', on: false, col: 1 },
   ];
   const NAME = Object.fromEntries(SCOPES.map((s) => [s.key, s.name]));
@@ -159,8 +160,17 @@
     }
     const body = $('knowledge');
     body.textContent = '';
-    $('knowledge-empty').hidden = k.decks.length > 0;
-    $('knowledge-table').hidden = !k.decks.length;
+    const asks = k.ask || [];
+    $('knowledge-empty').hidden = k.decks.length + asks.length > 0;
+    $('knowledge-table').hidden = !(k.decks.length + asks.length);
+    // Teammates who answer questions: the teammate-ask skill tells the agent how, and that the
+    // question (redacted) shows in their log.
+    for (const a of asks) {
+      body.append(h('tr', null,
+        h('td', null, h('div', { class: 'who' }, h('span', { class: 'av', 'aria-hidden': 'true', text: initials(a.name) }), h('div', null, h('b', { text: a.name }), h('span', { text: `Until ${ends(a.expiresAt)}` })))),
+        h('td', null, h('div', { class: 'scopes' }, h('span', { class: 'pill plain', title: 'Your agent asks with the teammate-ask skill; they see each question (redacted) in their log', text: 'Answers questions (they see each question)' }))),
+        h('td', { class: 'muted', text: '' })));
+    }
     for (const d of k.decks) {
       // Items the teammate has not updated or checked lately are flagged, as in the skill itself.
       const stale = `${d.name} has not checked this in over ${status.verifyDays || 30} days`;
@@ -211,7 +221,8 @@
   function permRow(s) {
     const on = chosen.has(s.key);
     // Notes: optionally only the ones marked Share under "Your skills and notes".
-    const only = s.key === 'notes' && on ? h('label', { class: 'proj' }, h('input', { type: 'checkbox', checked: notesTagged, onchange: (e) => { notesTagged = e.target.checked; } }), 'Only notes marked Share') : null;
+    // On the notes row, or on the questions row when notes are not shared.
+    const only = on && (s.key === 'notes' || (s.key === 'ask' && !chosen.has('notes'))) ? h('label', { class: 'proj' }, h('input', { type: 'checkbox', checked: notesTagged, onchange: (e) => { notesTagged = e.target.checked; } }), 'Only notes marked Share') : null;
     return h('div', { class: 'perm' }, h('b', { text: s.name }), h('p', null, s.desc, only),
       h('div', { class: 'ctl' }, on ? 'On' : 'Off', h('button', {
         class: 'toggle', type: 'button', role: 'switch', 'aria-checked': String(on), 'aria-label': s.name,
@@ -323,7 +334,7 @@
     $('usage-table').hidden = !usageRows.length;
     for (const r of usageRows.slice(0, 200)) {
       const name = r.key === 'notes' ? 'Your notes and memory' : r.title || r.key.split(':').pop();
-      body.append(h('tr', null, h('td', { text: name }), h('td', { text: r.viewerEmail || '' }), h('td', { text: String(r.count) }), h('td', { class: 'muted', text: ago(r.last) })));
+      body.append(h('tr', null, h('td', { text: name }), h('td', { text: r.viewerEmail || '' }), h('td', { text: String(r.count) }), h('td', { text: String(r.cited || 0) }), h('td', { class: 'muted', text: ago(r.last) })));
     }
   }
   async function loadUsage() {
