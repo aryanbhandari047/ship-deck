@@ -9,6 +9,7 @@
 //   lib:<sub> shared knowledge library (hash, 2 h TTL)   agk:<hash> agent key   agks:<sub>:<viewerSub> key ids
 //   arl:<hash16>:<hour> agent key rate limit (see lib/library.js)
 //   kver:<sub> that account's knowledge version: bumped when what is shared with it may have changed
+//   use:<sub> how often teammates' agents used that captain's shared knowledge (counts only, 90 days)
 const crypto = require('node:crypto');
 const { createAuth, AuthError } = require('../auth');
 const { MAX_FAILURES, LOCK_SEC } = require('../auth/password');
@@ -18,6 +19,7 @@ const { sanitizeSnapshot, viewFor, MAX_BYTES, SCOPES } = require('./snapshot');
 const { validateGrant, findGrant, checkAccess, grantId, GrantError } = require('./access');
 const { StoreError } = require('./store');
 const L = require('./library');
+const U = require('./usage');
 const { HttpError, BASE_HEADERS, sendJson, sendText, readJson, clientIp, sameOrigin, bearer } = require('./http');
 
 const SNAP_TTL = 3600;
@@ -315,6 +317,11 @@ function createRelay({ config, store, now = Date.now, log = (m) => console.error
     [/^\/v1\/knowledge\/([A-Za-z0-9_-]{8,40})$/, {
       GET: async (req, res, url, m) => knowledgeRead(req, res, m[1]),
     }],
+    // Usage of shared knowledge: a teammate's deck reports counts (POST); the captain reads them (GET).
+    ['/v1/usage', {
+      POST: async (req, res) => usageReport(req, res),
+      GET: async (req, res) => usageRead(req, res),
+    }],
     // ---------- viewer: deck data is GET only; the only viewer writes are their own agent keys ----------
     ['/v1/decks', {
       GET: async (req, res) => {
@@ -430,6 +437,48 @@ function createRelay({ config, store, now = Date.now, log = (m) => console.error
       captain: { sub: capSub, name: cap.name }, skills: L.skillsAllowed(g), notes: L.notesAllowed(g), expiresAt: g.expiresAt,
       at: index ? index.at : null, offline: !index, hash: index ? L.knowledgeHash(index.items, g) : null, trimmed: (index && index.trimmed) || 0, items,
     });
+  }
+
+  // ---------- usage counts (deck tokens) ----------
+  // A teammate's deck reports how often its agent used what captains share with it: { v: 1, items:
+  // [{ captainSub, key, count, last }] }. Counts only; each item must be in that captain's library
+  // and allowed by a live grant to this account, else it is dropped. One audit row per captain.
+  async function usageReport(req, res) {
+    const { cap: me } = await deckAuth(req);
+    const body = await readJson(req, U.MAX_BODY);
+    let items;
+    try { items = U.sanitizeReport(body, now()); } catch (e) { throw new HttpError(400, e.message); }
+    const viewer = deckViewer(me);
+    const subs = [...new Set(items.map((i) => i.captainSub))];
+    if (!subs.length) return sendJson(res, 200, { ok: true, accepted: 0 });
+    const [caps, idx] = await store.pipeline([['MGET', ...subs.map((x) => 'cap:' + x)], ...subs.map((x) => ['HGET', 'lib:' + x, 'index'])]).then((r) => [r[0].map(parse), r.slice(1).map(parse)]);
+    const cmds = [];
+    let accepted = 0;
+    subs.forEach((sub, i) => {
+      const a = caps[i] ? libraryAccess(caps[i], viewer) : null;
+      if (!a || !a.ok) return;
+      const index = (idx[i] && idx[i].items) || [];
+      const titles = new Map(index.map((x) => [x.key, x.title]));
+      const notes = index.some((x) => L.kindOf(x.key) === 'note');
+      const ok = items.filter((it) => it.captainSub === sub && (it.key === U.NOTES_KEY ? notes && L.notesAllowed(a.grant) : titles.has(it.key) && L.itemAllowed(it.key, a.grant)));
+      if (!ok.length) return;
+      accepted += ok.length;
+      cmds.push(...U.writeCmds(sub, viewer.email, ok));
+      const what = 'Their agent used ' + ok.map((it) => `${it.key === U.NOTES_KEY ? 'your notes' : `"${titles.get(it.key)}"`} ${it.count === 1 ? 'once' : it.count + ' times'}`).join(', ');
+      cmds.push(...auditCmds(sub, { who: viewer.email, what: what.slice(0, 300), result: 'used' }));
+    });
+    if (cmds.length) await store.pipeline(cmds);
+    sendJson(res, 200, { ok: true, accepted });
+  }
+  // The captain's own counts: per item and teammate, with the item's current title.
+  async function usageRead(req, res) {
+    req.resume();
+    const { cap } = await deckAuth(req);
+    const [raw, rawIndex] = await store.pipeline([['HGETALL', 'use:' + cap.sub], ['HGET', 'lib:' + cap.sub, 'index']]);
+    const index = parse(rawIndex);
+    const titles = new Map(((index && index.items) || []).map((x) => [x.key, x.title]));
+    const rows = U.readRows(raw, now()).map((r) => ({ ...r, title: r.key === U.NOTES_KEY ? null : titles.get(r.key) || null }));
+    sendJson(res, 200, { rows });
   }
 
   // ---------- agent keys (viewer session): optional, for agents without Ship Deck ----------

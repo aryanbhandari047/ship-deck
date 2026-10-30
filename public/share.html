@@ -113,6 +113,15 @@
           <p class="empty-row" id="log-empty">No views yet.</p>
         </section>
 
+        <section class="panel-box" id="usage-box" aria-labelledby="usage-h" hidden>
+          <div class="pb-head"><h2 id="usage-h">How your shared skills are used</h2><span class="hint">Counts only, kept 90 days</span><button class="btn sm" id="usage-refresh" type="button">Refresh</button></div>
+          <table class="tbl" id="usage-table">
+            <thead><tr><th>Skill</th><th>Who</th><th>Times used</th><th>Last used</th></tr></thead>
+            <tbody id="usage"></tbody>
+          </table>
+          <p class="empty-row" id="usage-empty">No uses reported yet. When a teammate's agent uses a skill or your notes, their Ship Deck reports how many times, never their prompts.</p>
+        </section>
+
         <section class="panel-box" id="knowledge-box" aria-labelledby="knowledge-h" hidden>
           <div class="pb-head"><h2 id="knowledge-h">Shared with you</h2><span class="hint" id="knowledge-sub"></span></div>
           <div class="perm">
@@ -121,6 +130,11 @@
             <div class="ctl"><span id="knowledge-word">On</span><button class="toggle" id="knowledge-toggle" type="button" role="switch" aria-checked="true" aria-label="Use knowledge shared with me"></button></div>
           </div>
           <div id="knowledge-targets"></div>
+          <div class="perm" id="usage-perm">
+            <b>Tell teammates how often I use their skills</b>
+            <p>Every hour at most, Ship Deck sends each teammate a count of how many times your Claude Code used their skills or notes, and when. Never your prompts or any other text.</p>
+            <div class="ctl"><span id="usage-word">On</span><button class="toggle" id="usage-toggle" type="button" role="switch" aria-checked="true" aria-label="Tell teammates how often I use their skills"></button></div>
+          </div>
           <table class="tbl" id="knowledge-table">
             <thead><tr><th>Teammate</th><th>Your agent can use</th><th>Last synced</th></tr></thead>
             <tbody id="knowledge"></tbody>

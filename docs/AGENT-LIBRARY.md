@@ -66,6 +66,17 @@ if you turned it off) and sign in under Settings > Sharing (see [TEAMMATE-SETUP.
   **Use knowledge shared with me** off or signing out removes them from every agent.
   Ship Deck never edits an `AGENTS.md` or any file it did not write.
 
+## Usage counts
+
+The captain sees how often each shared skill (and their notes) was used, per teammate,
+under Settings > Sharing > **How your shared skills are used**, with a "used" row in the
+log for each report. The teammate's deck counts, from Claude Code's transcripts (read
+only, no hook): the Skill tool loading a `teammate-*` skill, a Read of its `SKILL.md`, or
+the `/teammate-…` command. A prompt that only names one is not a use. It sends the
+captain, the shared item's key, a count and the last time, at most hourly; never a prompt,
+a path or other text. The relay drops items the captain does not share with that teammate.
+Turn it off with **Tell teammates how often I use their skills** under Shared with you.
+
 Ship Deck only writes, rewrites or removes `teammate-*` directories that hold its
 marker file (`.ship-deck-teammate.json`), and `teammate-*.mdc` rules whose frontmatter
 holds its `shipDeckTeammate` marker. Your own skills and rules, an entry you made with a

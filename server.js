@@ -293,6 +293,8 @@ function createServer(opts) {
     // other agents in opts.knowledgeTargets (parseArgs; none unless given).
     skillsDir: libOpts.captainSkills,
     targets: opts.knowledgeTargets || [],
+    // Read only: how often this computer's agent used what teammates share (counts are reported).
+    transcriptsDir: path.join(claudeDir, 'projects'),
     readTerminal: async (id) => (await actions.peekPane(opts.home, id, exec)).text,
     readExtras: async (needs) => {
       const fm = feed.view(NaN);
@@ -328,6 +330,7 @@ function createServer(opts) {
     if (!agent) return json(res, 404, { error: 'sharing is off (start Ship Deck with --share)' });
     try {
       if (url.pathname === '/api/share/grants') return json(res, 200, { grants: await agent.listGrants() });
+      if (url.pathname === '/api/share/usage') return json(res, 200, { rows: await agent.usageRows() });
       if (url.pathname === '/api/share/audit') return json(res, 200, { rows: await agent.audit(url.searchParams.get('since')) });
       if (url.pathname === '/api/share/preview') {
         const list = (k) => (url.searchParams.get(k) || '').split(',').filter(Boolean);
@@ -349,6 +352,7 @@ function createServer(opts) {
       if (url.pathname === '/api/share/revoke') return json(res, 200, { ok: true, grants: await agent.revoke(body.viewer) });
       if (url.pathname === '/api/share/invite') return json(res, 200, { ok: true, invite: await agent.invite(body.email) });
       if (url.pathname === '/api/share/pause') return json(res, 200, { ok: true, status: agent.setPaused(!!body.paused) });
+      if (url.pathname === '/api/share/knowledge' && typeof body.reportUsage === 'boolean') return json(res, 200, { ok: true, status: agent.setReportUsage(body.reportUsage) });
       if (url.pathname === '/api/share/knowledge') return json(res, 200, { ok: true, status: agent.setKnowledge(!!body.on, typeof body.target === 'string' ? body.target : undefined) });
     } catch (e) { return shareError(res, e); }
   }
