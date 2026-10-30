@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Settings · Ship Deck</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="share-page">
+  <!-- Same symbols as index.html (test/share.test.js keeps shared ids identical). -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <clipPath id="fclip"><rect width="30" height="20" rx="1.5"/></clipPath>
+      <symbol id="flag-k" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="15" height="20" style="fill:var(--signal-yellow)"/><rect x="15" width="15" height="20" style="fill:var(--signal-blue)"/></g></symbol>
+      <symbol id="flag-p" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="30" height="20" style="fill:var(--signal-blue)"/><rect x="10" y="6.5" width="10" height="7" style="fill:var(--flag-white)"/></g></symbol>
+      <symbol id="flag-c" viewBox="0 0 30 20"><g clip-path="url(#fclip)"><rect width="30" height="20" style="fill:var(--signal-blue)"/><rect y="4" width="30" height="12" style="fill:var(--flag-white)"/><rect y="8" width="30" height="4" style="fill:var(--signal-red)"/></g></symbol>
+      <symbol id="i-crew" viewBox="0 0 22 26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="6" r="3.5"/><path d="M4 24v-6a7 7 0 0 1 14 0v6"/><path d="M8 14l3 3 3-3"/></symbol>
+      <symbol id="i-share" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="7" r="3"/><path d="M2.5 16.5c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5M15 6v5M12.5 8.5h5"/></symbol>
+      <symbol id="i-back" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 5l-5 5 5 5"/></symbol>
+      <symbol id="i-check" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 10.5l3.5 3.5 7.5-8"/></symbol>
+      <symbol id="i-helm" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="4.5"/><circle cx="10" cy="10" r="1.2" fill="currentColor"/><path d="M10 1.5v4M10 14.5v4M1.5 10h4M14.5 10h4M4 4l2.8 2.8M13.2 13.2L16 16M16 4l-2.8 2.8M6.8 13.2L4 16"/></symbol>
+    </defs>
+  </svg>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"><svg class="flag"><use href="#flag-k"/></svg><svg class="flag"><use href="#flag-p"/></svg><svg class="flag"><use href="#flag-c"/></svg></span>
+      <div class="brand-text"><h1>Ship Deck</h1><p class="home">Settings</p></div>
+    </div>
+    <a class="btn ghost" href="/"><svg><use href="#i-back"/></svg>Back to the deck</a>
+  </header>
+
+  <main class="settings">
+    <nav class="s-nav" aria-label="Settings">
+      <h2>Settings</h2>
+      <a href="settings.html" aria-current="page"><svg><use href="#i-crew"/></svg>You</a>
+      <a href="share.html"><svg><use href="#i-share"/></svg>Sharing</a>
+    </nav>
+    <div class="s-main">
+      <div class="s-col">
+        <div class="s-title">
+          <div class="s-title-text">
+            <h1>What to call you</h1>
+            <p>Ship Deck greets you with it, and the first mate can use it when it talks to you. Keep "Captain", pick something else, or go without a title.</p>
+          </div>
+        </div>
+
+        <section class="panel-box" aria-labelledby="address-h">
+          <div class="pb-head"><h2 id="address-h">Form of address</h2></div>
+          <form class="addr-form" id="address-form">
+            <label class="addr-field">Call me
+              <input class="input" id="address" type="text" maxlength="40" autocomplete="off" spellcheck="false" aria-describedby="address-hint">
+            </label>
+            <div class="addr-suggest" id="address-suggest" role="group" aria-label="Suggestions"></div>
+            <p class="hint" id="address-hint">Up to 40 characters. Leave it empty for no title.</p>
+            <div class="addr-preview" aria-live="polite">
+              <span class="fm-avatar small" aria-hidden="true"><svg><use href="#i-helm"/></svg></span>
+              <span><span class="muted">On the deck:</span> <b id="address-preview">Good morning, Captain</b></span>
+            </div>
+            <label class="addr-tell"><input type="checkbox" id="address-tell" checked> Also tell the first mate (sends it one message, like the chat)</label>
+            <div class="btn-row">
+              <button class="btn primary" type="submit" id="address-save" disabled>Save</button>
+              <span class="hint" id="address-status" role="status"></span>
+            </div>
+          </form>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script src="settings.js"></script>
+</body>
+</html>

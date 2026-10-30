@@ -121,9 +121,20 @@ replace the path with your clone, save it as
   show only when monitoring is late or off), **New job** (the job form), the
   chat button (hides or shows the side panel on wide screens, remembered; jumps
   to it on narrow ones; a dot marks unread replies) and **More**: Ship's
-  Library, Share and settings, alerts and keyboard shortcuts, with the last
-  update time.
-- **Board** (default): a greeting and how many things need you ("All clear"
+  Library, Settings, Share your deck, alerts and keyboard shortcuts, with the
+  last update time.
+- **Settings > You** (`/settings.html`): what Ship Deck calls you, "Captain"
+  unless you change it (free text up to 40 characters, with Captain, Boss,
+  your first name and No title as suggestions; empty means no title). The
+  board's greeting and the Ship view's bridge use it. Saved in
+  `~/.ship-deck/settings.json` (0600) by `POST /api/settings` (`GET` reads it,
+  `/api/fleet` carries it as `settings.address`; it is never shared). With
+  **Also tell the first mate** ticked, a change is also one `address` message
+  (see the contract below), and `bin/orders.js list` and `thread` start with
+  an `address the captain as: ...` line while it differs from "Captain".
+
+  ![Settings > You: what Ship Deck and the first mate call you](settings.png)
+- **Board** (default): a greeting (with your form of address) and how many things need you ("All clear"
   when none), then **Needs you** (flag K) across the top: workers waiting on
   your call, blocked or failed, then queued questions, as full cards that
   answer in place with lettered option buttons or a one-line reply (the same
@@ -283,7 +294,7 @@ Order ids look like `o-20261012T160000123Z-ab12` and reply ids `r-...`; both
 sort by time. An order's lifecycle is its acks: pending (no ack) ->
 acknowledged -> done or declined; the UI shows every step with its note.
 `target` is a crew id (or `null`), `text` is what the captain wrote or a default.
-`sessions.json` (resume ids, below) lives in the same directory.
+`sessions.json` (resume ids, below) and `settings.json` (Settings > You) live in the same directory.
 
 Fast lane: every new order (any kind) also appends exactly one line to
 `<FM_HOME>/state/ship-deck-inbox.status`, so the first mate's status monitor
@@ -307,6 +318,7 @@ the backstop. `--no-wake` turns it off.
 | `backlog-start` | - | `item` (backlog id), `text` | Start this queued backlog item. |
 | `backlog-answer` | - | `item` (backlog id), `option`, `text` | The captain's answer to a Captain's Call item. |
 | `config` | crew id | `field` (`effort` or `model`), `value`, `applied` | Record of a config change. `applied:true` = already sent live (`/effort`/`/model` via fm-send; takes effect from the worker's next turn); `applied:false` = apply it when relaunching the worker. Only created by `POST /api/config`. |
+| `address` | - | `address` (the new form of address; `""` = no title), `text` (the request in words) | The captain changed what to call them in Settings > You. Use it when addressing them; record it where you keep the captain's preferences if you want it to last. Only created by `POST /api/settings` with `tell`. |
 | `order` | optional | `text` | Legacy free-text order. |
 
 The UI asks for confirmation before every order; for `merge`, `cleanup` and
@@ -478,7 +490,7 @@ relay (the Keychain relay, or `--share-relay URL`) as `share_relay=` in
 `--share`. The launcher and `bin/start.sh` (autostart) set those variables unless
 `SHIP_DECK_SHARE` is already set (empty skips one run, as does `--no-share`). Nothing is
 sent until you sign in. Then **More >
-Share and settings** in the top bar opens **Settings > Sharing** (`/share.html`):
+Share your deck** in the top bar opens **Settings > Sharing** (`/share.html`):
 
 1. Sign in with your relay account (invite-only, limited to the relay's email domain, `ALLOWED_HD`). The password goes
    straight to the relay; Ship Deck keeps only a revocable device token in
@@ -534,7 +546,7 @@ itself (Vercel + Upstash free tiers, deploy steps, cost estimate) is in
 
 - Binds `127.0.0.1` only; every request must carry `Host: 127.0.0.1:<port>` or
   `localhost:<port>` (blocks DNS rebinding).
-- `POST /api/send`, `POST /api/orders` and `POST /api/config` also require `X-Ship-Deck: 1`,
+- `POST /api/send`, `POST /api/orders`, `POST /api/config` and `POST /api/settings` also require `X-Ship-Deck: 1`,
   `Content-Type: application/json`, a same-origin `Origin` when one is sent, and
   no cross-site `Sec-Fetch-Site`. Bodies are capped at 16 KB.
 - `POST /api/attachments` has the same header, Origin and Sec-Fetch-Site checks,
@@ -594,6 +606,10 @@ transcript (`test/fixtures/transcript/firstmate.jsonl`): tool summaries,
 redaction, a partial last line, `is_error` results and durations, rotation to
 a newer session, the 200-event cap, tail-only reads, the read-only fingerprint
 and `GET /api/activity`.
+`test/settings.test.js` covers Settings > You: the "Captain" default, a change,
+persistence across a restart, the empty value, validation and the POST guard,
+the optional `address` message (one per change, plus its wake line and nothing
+else under the home) and the `bin/orders.js` reminder line.
 `test/parsers.test.js` covers the parsers against the fabricated fixtures
 (including prose in parentheses not being read as a queue tag).
 `test/board.test.js` covers the status flag mapping (every state to its tone,
@@ -657,6 +673,7 @@ lib/library.js     Ship's Library allow-list (home files, memory, skills)
 lib/share.js       Sharing (--share): redacted snapshot and knowledge pushes, knowledge sync
 lib/knowledge.js   Teammates' shared knowledge as marked teammate-* skills (the only ~/.claude writer)
 lib/sessions.js    Claude session discovery and ~/.ship-deck/sessions.json
+lib/settings.js    The captain's preferences (form of address) in ~/.ship-deck/settings.json
 lib/activity.js    First mate activity feed: read-only transcript tail
 lib/config.js      Per-harness model/effort allow-list and slash commands
 bin/orders.js      Orders, replies, thread and sessions CLI for the first mate
@@ -666,6 +683,6 @@ bin/start.sh       Start the server in the background unless it already answers
 bin/install.sh     Per-person install: prerequisites, firstmate home, ~/.ship-deck/app, launcher, opt-in autostart
 docs/TEAMMATE-SETUP.md  Step-by-step setup guide
 docs/REFERENCE.md  This reference
-public/            index.html, style.css, app.js, board.js (flags + Board grouping), markdown.js, labels.js, ansi.js (no build step)
+public/            index.html, settings.html/.js (Settings > You), share.html/.js (Settings > Sharing), style.css, app.js, board.js (flags + Board grouping), markdown.js, labels.js, ansi.js (no build step)
 test/              node:test suites and fabricated fixtures
 ```

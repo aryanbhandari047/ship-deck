@@ -12,6 +12,7 @@ const fs = require('node:fs');
 const orders = require('../lib/orders');
 const sessions = require('../lib/sessions');
 const attachments = require('../lib/attachments');
+const settings = require('../lib/settings');
 
 const USAGE = [
   'usage: node bin/orders.js list [--pending] [--json]',
@@ -30,6 +31,7 @@ function payloadLine(o) {
   if (o.project) parts.push(`project=${o.project}`);
   if (o.taskKind) parts.push(`taskKind=${o.taskKind}`);
   for (const k of ['harness', 'model', 'effort', 'field', 'value']) if (o[k]) parts.push(`${k}=${o[k]}`);
+  if (o.address !== undefined) parts.push(`address=${JSON.stringify(o.address)}`);
   if (o.applied !== undefined) parts.push(`applied=${o.applied}`);
   if (o.targets) parts.push(`targets=${o.targets.join(',')}`);
   return parts.join(' ');
@@ -49,13 +51,25 @@ function attachmentLines(o) {
   return lines;
 }
 
+// The captain's form of address from Ship Deck's settings, as a reminder on top of list and
+// thread (only when it differs from "Captain", the firstmate default).
+function addressLine(dir) {
+  const { address } = settings.readSettings(dir);
+  if (address === settings.DEFAULT_ADDRESS) return null;
+  return address
+    ? `address the captain as: "${address}" (their Ship Deck setting)`
+    : 'address the captain as: no title or name, just talk to them directly (their Ship Deck setting)';
+}
+
 function main(argv, dir = orders.defaultDir(), out = console.log, err = console.error, readFile = (p) => fs.readFileSync(p === '-' ? 0 : p, 'utf8')) {
   const [cmd, ...rest] = argv;
+  const remind = () => { const l = addressLine(dir); if (l) out(l); };
   if (cmd === 'list') {
     const bad = rest.filter((a) => a !== '--pending' && a !== '--json');
     if (bad.length) { err(USAGE); return 2; }
     const list = orders.listOrders(dir, { pendingOnly: rest.includes('--pending') }).reverse(); // oldest first
     if (rest.includes('--json')) { out(JSON.stringify(list, null, 2)); return 0; }
+    remind();
     if (!list.length) { out(rest.includes('--pending') ? 'no pending orders' : 'no orders'); return 0; }
     for (const o of list) {
       out(`${o.id}  ${o.status.padEnd(12)} ${o.kind}${o.target ? ' ' + o.target : ''}  (${o.ts})`);
@@ -114,6 +128,7 @@ function main(argv, dir = orders.defaultDir(), out = console.log, err = console.
     if (!Number.isInteger(limit) || limit < 0) { err(USAGE); return 2; }
     const items = orders.buildThread(dir, { limit });
     if (rest.includes('--json')) { out(JSON.stringify(items, null, 2)); return 0; }
+    remind();
     if (!items.length) { out('no messages'); return 0; }
     for (const x of items) {
       if (x.type === 'reply') out(`${x.ts}  first mate${x.inReplyTo ? ' (re ' + x.inReplyTo + ')' : ''}  ${x.id}`);

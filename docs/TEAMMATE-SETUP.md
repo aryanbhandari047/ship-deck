@@ -108,7 +108,10 @@ ship-deck --home ~/path/to/firstmate
 ![First run: no firstmate folder found yet](first-run.png)
 
 Your name on the bridge comes from `git config user.name`; change it with
-`ship-deck --captain-name "Your Name"`.
+`ship-deck --captain-name "Your Name"`. Ship Deck calls you "Captain"; to be
+called something else (Boss, your first name, or no title at all), open
+**More > Settings** and change **What to call you**. Leave **Also tell the
+first mate** ticked and it gets a message asking it to use the new one too.
 
 ## 5. Talk to your first mate (the Bridge chat)
 
@@ -160,7 +163,7 @@ through it.
    sh ~/ship-deck/bin/install.sh --share
    ```
 
-3. Open **More > Share and settings** in the top bar (**Settings > Sharing**), sign in,
+3. Open **More > Share your deck** in the top bar (**Settings > Sharing**), sign in,
    then add a teammate by their `@keychain.com` email, pick what they can see
    and for how long (1, 7 or 30 days).
 
