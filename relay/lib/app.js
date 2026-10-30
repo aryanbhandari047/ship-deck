@@ -10,6 +10,7 @@
 //   arl:<hash16>:<hour> agent key rate limit (see lib/library.js)
 //   kver:<sub> that account's knowledge version: bumped when what is shared with it may have changed
 //   use:<sub> how often teammates' agents used that captain's shared knowledge (counts only, 90 days)
+//   pool / poolq / pool:ver  the team pool: approved items, pending offers, its version (lib/pool.js)
 const crypto = require('node:crypto');
 const { createAuth, AuthError } = require('../auth');
 const { MAX_FAILURES, LOCK_SEC } = require('../auth/password');
@@ -20,6 +21,7 @@ const { validateGrant, findGrant, checkAccess, grantId, GrantError } = require('
 const { StoreError } = require('./store');
 const L = require('./library');
 const U = require('./usage');
+const P = require('./pool');
 const { HttpError, BASE_HEADERS, sendJson, sendText, readJson, clientIp, sameOrigin, bearer } = require('./http');
 
 const SNAP_TTL = 3600;
@@ -67,14 +69,15 @@ function createRelay({ config, store, now = Date.now, log = (m) => console.error
   const saveCap = (cap) => ['SET', 'cap:' + cap.sub, JSON.stringify(cap)];
 
   // Deck routes: a deck token whose device still exists in the captain's record. The account's
-  // knowledge version rides in the same MGET, so decks learn of shared changes for free.
+  // knowledge version and the team pool's ride in the same MGET, so decks learn of changes for free.
   async function deckAuth(req) {
     const claims = auth.verifyDeckToken(bearer(req));
     if (!claims) throw new HttpError(401, 'sign in from Ship Deck settings');
-    const [raw, kver] = await store.cmd(['MGET', 'cap:' + claims.sub, 'kver:' + claims.sub]);
+    const [raw, kver, pver] = await store.cmd(['MGET', 'cap:' + claims.sub, 'kver:' + claims.sub, 'pool:ver']);
     const cap = parse(raw);
     if (!cap || !cap.devices || !cap.devices[claims.dev]) throw new HttpError(401, 'this device was signed out');
-    return { cap, dev: claims.dev, kver: String(kver || '0') };
+    const poolVer = String(pver || '0');
+    return { cap, dev: claims.dev, poolVer, kver: String(kver || '0') + (poolVer === '0' ? '' : '.' + poolVer) };
   }
   // A new knowledge version for these teammates (by email; those without an account are skipped).
   async function bumpKnowledge(emails) {
@@ -317,6 +320,13 @@ function createRelay({ config, store, now = Date.now, log = (m) => console.error
     [/^\/v1\/knowledge\/([A-Za-z0-9_-]{8,40})$/, {
       GET: async (req, res, url, m) => knowledgeRead(req, res, m[1]),
     }],
+    // The team pool (deck tokens): anyone in the team offers, approvers approve, members' decks sync
+    // approved items through /v1/knowledge. Approve and remove are approvers only.
+    ['/v1/pool', { GET: async (req, res) => poolList(req, res) }],
+    ['/v1/pool/offers', { POST: async (req, res) => poolOffer(req, res) }],
+    [/^\/v1\/pool\/offers\/([A-Za-z0-9_-]{6,16})\/approve$/, { POST: async (req, res, url, m) => poolApprove(req, res, m[1]) }],
+    [/^\/v1\/pool\/offers\/([A-Za-z0-9_-]{6,16})$/, { DELETE: async (req, res, url, m) => poolDecline(req, res, m[1]) }],
+    [/^\/v1\/pool\/items\/([A-Za-z0-9_-]{6,16})$/, { DELETE: async (req, res, url, m) => poolRemove(req, res, m[1]) }],
     // Usage of shared knowledge: a teammate's deck reports counts (POST); the captain reads them (GET).
     ['/v1/usage', {
       POST: async (req, res) => usageReport(req, res),
@@ -380,7 +390,7 @@ function createRelay({ config, store, now = Date.now, log = (m) => console.error
   // (deck auth, SMEMBERS, MGET, one HGET pipeline).
   async function knowledgeList(req, res, url) {
     req.resume();
-    const { cap: me, kver } = await deckAuth(req);
+    const { cap: me, kver, poolVer } = await deckAuth(req);
     if (url.searchParams.get('since') === kver) return sendJson(res, 200, { same: true, version: kver });
     const viewer = deckViewer(me);
     const subs = (await store.cmd(['SMEMBERS', 'vix:' + viewer.email])) || [];
@@ -390,16 +400,22 @@ function createRelay({ config, store, now = Date.now, log = (m) => console.error
       const a = cap ? libraryAccess(cap, viewer) : null;
       if (a && a.ok) ok.push({ sub: subs[i], cap, grant: a.grant });
     });
-    const idx = ok.length ? await store.pipeline(ok.map((d) => ['HGET', 'lib:' + d.sub, 'index'])) : [];
+    // The team pool rides in the same pipeline, and costs nothing until the first approval.
+    const withPool = poolVer !== '0' && auth.emailAllowed(viewer.email);
+    const cmds = [...ok.map((d) => ['HGET', 'lib:' + d.sub, 'index']), ...(withPool ? [['HGET', 'pool', 'index']] : [])];
+    const idx = cmds.length ? await store.pipeline(cmds) : [];
+    const pool = withPool ? parse(idx[ok.length]) : null;
+    const poolDeck = pool && pool.items && pool.items.length
+      ? [{ captainSub: P.POOL_SUB, name: P.POOL_NAME, skills: true, notes: true, expiresAt: null, at: pool.at, offline: false, hash: P.poolHash(pool.items) }] : [];
     sendJson(res, 200, {
       version: kver,
-      decks: ok.map((d, i) => {
+      decks: [...poolDeck, ...ok.map((d, i) => {
         const index = parse(idx[i]);
         return {
           captainSub: d.sub, name: d.cap.name, skills: L.skillsAllowed(d.grant), notes: L.notesAllowed(d.grant), expiresAt: d.grant.expiresAt,
           at: index ? index.at : null, offline: !index, hash: index ? L.knowledgeHash(index.items, d.grant) : null,
         };
-      }),
+      })],
     });
   }
   // One deck's granted items with their text, and one audit row for its captain.
@@ -407,6 +423,7 @@ function createRelay({ config, store, now = Date.now, log = (m) => console.error
     req.resume();
     const { cap: me } = await deckAuth(req);
     const viewer = deckViewer(me);
+    if (capSub === P.POOL_SUB) return poolRead(res, viewer);
     const [rawCap, lib] = await store.pipeline([['GET', 'cap:' + capSub], ['HGETALL', 'lib:' + capSub]]);
     const cap = parse(rawCap);
     if (!cap) throw new HttpError(404, 'no such deck');
@@ -437,6 +454,123 @@ function createRelay({ config, store, now = Date.now, log = (m) => console.error
       captain: { sub: capSub, name: cap.name }, skills: L.skillsAllowed(g), notes: L.notesAllowed(g), expiresAt: g.expiresAt,
       at: index ? index.at : null, offline: !index, hash: index ? L.knowledgeHash(index.items, g) : null, trimmed: (index && index.trimmed) || 0, items,
     });
+  }
+
+  // ---------- team pool (deck tokens) ----------
+  const isApprover = (email) => P.approvers(config).has(email);
+  function member(me) {
+    const viewer = deckViewer(me);
+    if (!auth.emailAllowed(viewer.email)) throw new HttpError(403, 'not in this team');
+    if (!P.approvers(config).size) throw new HttpError(404, 'the team pool needs an approver (OWNER_EMAIL on the relay)');
+    return viewer;
+  }
+  const hgetall = (raw) => {
+    const out = {};
+    if (Array.isArray(raw)) for (let i = 0; i + 1 < raw.length; i += 2) out[raw[i]] = raw[i + 1];
+    else Object.assign(out, raw || {});
+    return out;
+  };
+  // Audit rows for the approvers (their own logs) and, when given, the author's.
+  async function poolAudit(row, authorSub) {
+    const emails = [...P.approvers(config)];
+    const users = (await store.cmd(['MGET', ...emails.map((e) => 'user:' + e)])).map(parse);
+    const subs = new Set(users.filter((u) => u && u.uid).map((u) => u.uid));
+    if (authorSub) subs.add(authorSub);
+    const cmds = [...subs].flatMap((sub) => auditCmds(sub, row));
+    if (cmds.length) await store.pipeline(cmds);
+  }
+  // Approved items for everyone; pending offers with their text for approvers, else only one's own.
+  async function poolList(req, res) {
+    req.resume();
+    const { cap: me } = await deckAuth(req);
+    const viewer = member(me);
+    const [rawIndex, rawQ] = await store.pipeline([['HGET', 'pool', 'index'], ['HGETALL', 'poolq']]);
+    const index = parse(rawIndex) || { items: [] };
+    const approver = isApprover(viewer.email);
+    const pending = Object.values(hgetall(rawQ)).map(parse).filter((o) => o && (approver || o.bySub === viewer.sub)).sort((a, b) => a.at - b.at)
+      .map((o) => ({ id: o.id, kind: o.kind, title: o.title, description: o.description, by: o.by, at: o.at, text: o.text, mine: o.bySub === viewer.sub }));
+    sendJson(res, 200, {
+      approver, approvers: [...P.approvers(config)], max: P.MAX_ITEMS,
+      items: index.items.map((i) => ({ id: i.id, kind: i.kind, title: i.title, description: i.description, by: i.by, approvedBy: i.approvedBy, approvedAt: i.approvedAt, size: i.size, mine: i.bySub === viewer.sub })),
+      pending,
+    });
+  }
+  async function poolOffer(req, res) {
+    const { cap: me } = await deckAuth(req);
+    const viewer = member(me);
+    const body = await readJson(req, P.MAX_BODY);
+    let offer;
+    try { offer = P.sanitizeOffer(body); } catch (e) { throw new HttpError(400, e.message); }
+    const q = Object.values(hgetall(await store.cmd(['HGETALL', 'poolq']))).map(parse).filter(Boolean);
+    if (q.length >= P.MAX_PENDING) throw new HttpError(409, 'The team pool has too many offers waiting. Ask an approver to review them.');
+    if (q.filter((o) => o.bySub === viewer.sub).length >= P.MAX_PER_PERSON) throw new HttpError(409, `You already have ${P.MAX_PER_PERSON} offers waiting.`);
+    const rec = { id: P.newId(), ...offer, by: viewer.email, bySub: viewer.sub, at: now() };
+    await store.cmd(['HSET', 'poolq', rec.id, JSON.stringify(rec)]);
+    await poolAudit({ who: viewer.email, what: `Offered "${rec.title}" to the team pool`, result: 'offered' }, viewer.sub);
+    sendJson(res, 200, { ok: true, id: rec.id });
+  }
+  async function takeOffer(id) {
+    const o = parse(await store.cmd(['HGET', 'poolq', id]));
+    if (!o) throw new HttpError(404, 'no such offer');
+    return o;
+  }
+  async function poolApprove(req, res, id) {
+    req.resume();
+    const { cap: me } = await deckAuth(req);
+    const viewer = member(me);
+    if (!isApprover(viewer.email)) throw new HttpError(403, 'only an approver can approve');
+    const o = await takeOffer(id);
+    const index = parse(await store.cmd(['HGET', 'pool', 'index'])) || { items: [] };
+    if (index.items.length >= P.MAX_ITEMS) throw new HttpError(409, `The team pool holds at most ${P.MAX_ITEMS} items. Remove one first.`);
+    const item = { id: o.id, kind: o.kind, title: o.title, description: o.description, by: o.by, bySub: o.bySub, approvedBy: viewer.email, approvedAt: now(), size: Buffer.byteLength(o.text) };
+    item.h = P.hashOf({ ...item, text: o.text });
+    index.items.push(item);
+    index.at = now();
+    await store.pipeline([
+      ['HSET', 'pool', 'index', JSON.stringify(index), 'i:' + o.id, JSON.stringify({ text: o.text })],
+      ['HDEL', 'poolq', o.id], ['INCR', 'pool:ver'],
+    ]);
+    await poolAudit({ who: viewer.email, what: `Approved "${o.title}" from ${o.by} for the team pool`, result: 'approved' }, o.bySub);
+    sendJson(res, 200, { ok: true });
+  }
+  // An approver declines an offer, or its author withdraws it.
+  async function poolDecline(req, res, id) {
+    req.resume();
+    const { cap: me } = await deckAuth(req);
+    const viewer = member(me);
+    const o = await takeOffer(id);
+    const own = o.bySub === viewer.sub;
+    if (!own && !isApprover(viewer.email)) throw new HttpError(403, 'only an approver or its author can remove an offer');
+    await store.cmd(['HDEL', 'poolq', id]);
+    await poolAudit({ who: viewer.email, what: `${own ? 'Withdrew' : 'Declined'} "${o.title}"${own ? '' : ' from ' + o.by} for the team pool`, result: own ? 'withdrawn' : 'declined' }, o.bySub);
+    sendJson(res, 200, { ok: true });
+  }
+  // Removing an approved item takes it off every member's computer on their next sync.
+  async function poolRemove(req, res, id) {
+    req.resume();
+    const { cap: me } = await deckAuth(req);
+    const viewer = member(me);
+    if (!isApprover(viewer.email)) throw new HttpError(403, 'only an approver can remove');
+    const index = parse(await store.cmd(['HGET', 'pool', 'index'])) || { items: [] };
+    const it = index.items.find((i) => i.id === id);
+    if (!it) throw new HttpError(404, 'no such item');
+    index.items = index.items.filter((i) => i !== it);
+    index.at = now();
+    await store.pipeline([['HSET', 'pool', 'index', JSON.stringify(index)], ['HDEL', 'pool', 'i:' + id], ['INCR', 'pool:ver']]);
+    await poolAudit({ who: viewer.email, what: `Removed "${it.title}" from the team pool`, result: 'removed' }, it.bySub);
+    sendJson(res, 200, { ok: true });
+  }
+  // A member's deck reads every approved item (knowledge sync); one audit row in the approvers' logs.
+  async function poolRead(res, viewer) {
+    if (!auth.emailAllowed(viewer.email)) throw new HttpError(403, 'no access');
+    const fields = hgetall(await store.cmd(['HGETALL', 'pool']));
+    const index = parse(fields.index) || { items: [] };
+    const items = index.items.map((i) => ({
+      key: P.keyOf(i), kind: i.kind, title: i.title, description: i.description, offeredBy: i.by, approvedBy: i.approvedBy, updatedAt: i.approvedAt,
+      text: (parse(fields['i:' + i.id]) || {}).text || '',
+    }));
+    await poolAudit({ who: viewer.email, what: `Team pool synced to their agent: ${items.length} item${items.length === 1 ? '' : 's'}`, result: 'agent sync' });
+    sendJson(res, 200, { captain: { sub: P.POOL_SUB, name: P.POOL_NAME }, skills: true, notes: true, expiresAt: null, at: index.at || null, offline: false, hash: P.poolHash(index.items), trimmed: 0, items });
   }
 
   // ---------- usage counts (deck tokens) ----------

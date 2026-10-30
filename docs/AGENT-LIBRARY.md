@@ -77,6 +77,16 @@ to confirm it before relying on it, and both Settings pages flag it.
 Notes can be marked **Share** or **Private** there. Private notes are never sent. Give a
 grant **Only notes marked Share** to send that person just the marked ones.
 
+## Team pool
+
+Besides person-to-person grants, anyone on your relay can offer a skill or note to the
+whole team (Settings > Sharing > Your skills and notes > **Offer to team**). The text is
+redacted on their deck before it leaves. Nothing reaches anyone until an approver (the
+relay's `OWNER_EMAIL`, plus `POOL_APPROVERS`) reads and approves it. After that it lands
+on every member's computer as `teammate-team-pool-<skill>`, and each copy says who offered
+and approved it. Approvers can remove it later, which removes it everywhere on the next
+check. **Use the team pool** under Shared with you opts one person out.
+
 ## Usage counts
 
 The captain sees how often each shared skill (and their notes) was used, per teammate,

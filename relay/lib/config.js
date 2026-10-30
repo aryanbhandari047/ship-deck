@@ -8,6 +8,8 @@ function loadConfig(env = process.env) {
     domain: String(env.ALLOWED_HD || 'keychain.com').trim().toLowerCase(),
     sessionSecret: env.SESSION_SECRET || '',
     ownerEmail: String(env.OWNER_EMAIL || '').trim().toLowerCase() || null,
+    // Besides the owner, who approves offers to the team pool (comma-separated emails).
+    poolApprovers: String(env.POOL_APPROVERS || ''),
     // One-time owner setup link (GET /api/auth/setup), unset once the owner has an account.
     setupCode: String(env.SETUP_CODE || ''),
     // With SETUP_CODE, lets the link run while accounts exist: an owner password reset.
