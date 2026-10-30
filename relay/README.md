@@ -195,7 +195,7 @@ fails when they drift.
 | `GET /api/auth/setup?code=` | browser | one-time owner setup link: 302 to an invite for `OWNER_EMAIL` |
 | `POST /v1/device/login`, `DELETE /v1/device` | deck | get or revoke this deck's token |
 | `POST /v1/snapshot` | deck token | store the latest snapshot (re-sanitised against the allow-list, 64 KB) |
-| `GET /v1/grants`, `PUT /v1/grants/<email>`, `DELETE /v1/grants/<email or sub>` | deck token | the captain's grants (`?brief=1`: no account or last-viewed lookups) |
+| `GET /v1/grants`, `PUT /v1/grants/<email>`, `DELETE /v1/grants/<email or sub>` | deck token | the captain's grants (`?brief=1`: no account or last-viewed lookups); `notesTagged: true` with `notes` carries only library notes tagged `share` (knowledge, agent keys and the notes view) |
 | `GET /v1/audit?since=` | deck token | the captain's audit log, newest first |
 | `POST /v1/invites` | deck token | a one-time invite link |
 | `GET /v1/decks` | viewer session | decks shared with me |

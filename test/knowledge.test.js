@@ -209,7 +209,7 @@ test('end to end: granted skills and notes sync into the teammate skills dir, re
   for (const bad of ['ghp_', 'hunter2', ada.dir]) assert.ok(!text.includes(bad), bad + ' leaked');
   assert.match(text, /\[token hidden\]/);
   const notes = read(grace.skills, 'teammate-ada-notes', 'SKILL.md');
-  assert.match(notes, /## Captain's preferences\n\nKeep PRs small\. Token \[token hidden\]/);
+  assert.match(notes, /## Captain's preferences\n\n_Last updated \d{4}-\d\d-\d\d, not marked verified\._\n\nKeep PRs small\. Token \[token hidden\]/);
   // Nothing written outside the teammate skill directories (share.json is the agent's own state).
   const after = fingerprint(grace.dir);
   for (const k of Object.keys(after)) if (before[k] !== after[k]) assert.match(k, /^(claude\/skills\/teammate-ada-[\w-]+\/|orders\/share\.json$)/, k);

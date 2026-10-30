@@ -7,7 +7,9 @@
 //   agk:<sha256(key)>  one agent key record   agks:<captainSub>:<viewerSub>  that viewer's key ids
 const { randomId, sha256 } = require('../auth/tokens');
 
-const ITEM_KEYS = ['key', 'title', 'description', 'text'];
+// updatedAt/verifiedAt: when the captain last changed or checked it; tag 'share': a note marked
+// for grants that carry only marked notes (private notes never leave the deck).
+const ITEM_KEYS = ['key', 'title', 'description', 'text', 'updatedAt', 'verifiedAt', 'tag'];
 const KEY_RE = /^(?:skill|memory|home):[A-Za-z0-9_.:/-]{1,110}$/;
 const MAX_ITEMS = 150;
 const MAX_TEXT = 16000;
@@ -19,6 +21,7 @@ const RATE_PER_HOUR = 60;
 const TOKEN_RE = /^sdak1\.([A-Za-z0-9_-]{8,40})\.([A-Za-z0-9_-]{43})$/;
 
 const s = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
+const time = (v) => (Number.isFinite(v) && v > 0 ? Math.round(v) : null);
 const kindOf = (key) => (key.startsWith('skill:') ? 'skill' : 'note');
 
 // A pushed body -> { index, items } (or throws on a shape the deck never sends).
@@ -29,24 +32,29 @@ function sanitizeLibrary(body) {
   for (const x of body.items.slice(0, MAX_ITEMS)) {
     if (!x || typeof x !== 'object' || typeof x.key !== 'string' || !KEY_RE.test(x.key) || seen.has(x.key)) continue;
     seen.add(x.key);
-    items.push({ key: x.key, kind: kindOf(x.key), title: s(x.title, 120) || x.key, description: s(x.description, 300), text: s(x.text, MAX_TEXT) });
+    const kind = kindOf(x.key);
+    items.push({
+      key: x.key, kind, title: s(x.title, 120) || x.key, description: s(x.description, 300), text: s(x.text, MAX_TEXT),
+      updatedAt: time(x.updatedAt), verifiedAt: time(x.verifiedAt), tag: kind === 'note' && x.tag === 'share' ? 'share' : null,
+    });
   }
   // h: a short content hash per item, so a teammate's deck can tell what changed from the index alone.
-  const index = items.map(({ text, ...rest }) => ({ ...rest, size: Buffer.byteLength(text), h: sha256(JSON.stringify([rest.title, rest.description, text])).slice(0, 16) }));
+  const index = items.map(({ text, ...rest }) => ({ ...rest, size: Buffer.byteLength(text), h: sha256(JSON.stringify([rest.title, rest.description, text, rest.updatedAt, rest.verifiedAt, rest.tag])).slice(0, 16) }));
   return { index, items, trimmed: Number.isInteger(body.trimmed) && body.trimmed > 0 ? Math.min(body.trimmed, 1000) : 0 };
 }
 
-// What a grant shares as knowledge: skills with the skills scope, notes and memory with notes.
+// What a grant shares as knowledge: skills with the skills scope, notes and memory with notes
+// (only notes marked Share when the grant says notesTagged). item: an index entry { key, tag }.
 // (An old agentLibrary flag on a stored grant is ignored.)
 const skillsAllowed = (grant) => !!grant && grant.scopes.includes('skills');
 const notesAllowed = (grant) => !!grant && grant.scopes.includes('notes');
 const knowledgeAllowed = (grant) => skillsAllowed(grant) || notesAllowed(grant);
-const itemAllowed = (key, grant) => (kindOf(key) === 'skill' ? skillsAllowed(grant) : notesAllowed(grant));
+const itemAllowed = (item, grant) => (kindOf(item.key) === 'skill' ? skillsAllowed(grant) : notesAllowed(grant) && (!grant.notesTagged || item.tag === 'share'));
 
 // One hash over what this grant may read; it changes when an item, or the grant's reach, does.
 function knowledgeHash(index, grant) {
-  const items = (index || []).filter((i) => i && itemAllowed(i.key, grant)).map((i) => [i.key, i.h || i.size]);
-  return sha256(JSON.stringify([skillsAllowed(grant), notesAllowed(grant), items])).slice(0, 32);
+  const items = (index || []).filter((i) => i && itemAllowed(i, grant)).map((i) => [i.key, i.h || i.size]);
+  return sha256(JSON.stringify([skillsAllowed(grant), notesAllowed(grant), !!grant.notesTagged, items])).slice(0, 32);
 }
 
 // "sdak1.<captainSub>.<random>": the deck it reads is in the key, so a read is one round trip.

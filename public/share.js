@@ -27,6 +27,8 @@
   let editing = null; // email of the grant being edited
   const chosen = new Set(SCOPES.filter((s) => s.on).map((s) => s.key));
   let projects = null; // Set of chosen project names (null until the first status)
+  let notesTagged = false; // Captain notes and memory: only the notes marked Share
+  let items = []; // the captain's skills and notes with freshness (/api/share/items)
 
   function h(tag, attrs, ...kids) {
     const el = document.createElement(tag);
@@ -99,7 +101,7 @@
     const s = status;
     const signedIn = !!(s && s.enabled && s.account);
     $('signin-box').hidden = !(s && s.enabled && !s.account);
-    for (const id of ['people-box', 'what-box', 'log-box', 'usage-box']) $(id).hidden = !signedIn;
+    for (const id of ['people-box', 'what-box', 'log-box', 'usage-box', 'items-box']) $(id).hidden = !signedIn;
     renderKnowledge(signedIn);
     $('share-toggle').hidden = !signedIn;
     if (!s) return;
@@ -154,8 +156,11 @@
     $('knowledge-empty').hidden = k.decks.length > 0;
     $('knowledge-table').hidden = !k.decks.length;
     for (const d of k.decks) {
-      const pills = d.skills.map((x) => h('span', { class: 'pill plain', title: x.dir, text: x.title || x.dir }));
-      if (d.notes) pills.push(h('span', { class: 'pill plain', text: 'Notes and memory' }));
+      // Items the teammate has not updated or checked lately are flagged, as in the skill itself.
+      const stale = `${d.name} has not checked this in over ${status.verifyDays || 30} days`;
+      const pill = (text, isStale, dir) => h('span', { class: isStale ? 'pill tone-needs' : 'pill plain', title: isStale ? stale : dir || null, text: isStale ? `${text} (not checked lately)` : text });
+      const pills = d.skills.map((x) => pill(x.title || x.dir, x.stale, x.dir));
+      if (d.notes) pills.push(pill('Notes and memory', d.notesStale));
       body.append(h('tr', null,
         h('td', null, h('div', { class: 'who' }, h('span', { class: 'av', 'aria-hidden': 'true', text: initials(d.name) }), h('div', null, h('b', { text: d.name }), h('span', { text: `${d.skills.length} ${d.skills.length === 1 ? 'skill' : 'skills'}${d.notes ? ' and notes' : ''}` })))),
         h('td', null, h('div', { class: 'scopes' }, pills)),
@@ -185,7 +190,7 @@
         h('td', null, h('div', { class: 'who' }, h('span', { class: 'av', 'aria-hidden': 'true', text: initials(g.viewerName || g.viewerEmail) }),
           h('div', null, h('b', { text: g.viewerName || g.viewerEmail.split('@')[0] }), h('span', { text: g.viewerEmail }),
             g.hasAccount === false ? h('span', { class: 'tag', text: 'No account yet' }) : null))),
-        h('td', null, h('div', { class: 'scopes' }, g.scopes.map((k) => h('span', { class: 'pill plain', text: NAME[k] || k })))),
+        h('td', null, h('div', { class: 'scopes' }, g.scopes.map((k) => h('span', { class: 'pill plain', text: (NAME[k] || k) + (k === 'notes' && g.notesTagged ? ' (marked Share)' : '') })))),
         h('td', { class: 'muted', text: g.projects.includes('*') ? 'All projects' : g.projects.join(', ') }),
         h('td', { class: expired ? 'denied' : null, text: ends(g.expiresAt) }),
         h('td', { class: g.lastViewed ? null : 'muted', text: ago(g.lastViewed) }),
@@ -199,7 +204,9 @@
   // ---------- what they can see ----------
   function permRow(s) {
     const on = chosen.has(s.key);
-    return h('div', { class: 'perm' }, h('b', { text: s.name }), h('p', { text: s.desc }),
+    // Notes: optionally only the ones marked Share under "Your skills and notes".
+    const only = s.key === 'notes' && on ? h('label', { class: 'proj' }, h('input', { type: 'checkbox', checked: notesTagged, onchange: (e) => { notesTagged = e.target.checked; } }), 'Only notes marked Share') : null;
+    return h('div', { class: 'perm' }, h('b', { text: s.name }), h('p', null, s.desc, only),
       h('div', { class: 'ctl' }, on ? 'On' : 'Off', h('button', {
         class: 'toggle', type: 'button', role: 'switch', 'aria-checked': String(on), 'aria-label': s.name,
         onclick: () => { if (chosen.has(s.key)) chosen.delete(s.key); else chosen.add(s.key); renderWhat(); },
@@ -238,6 +245,35 @@
       body.append(h('tr', null, h('td', { text: r.ts ? when(r.ts) : '' }), h('td', { text: r.who || '' }), h('td', { text: r.what || '' }), h('td', { class: refused ? 'denied' : null, text: result })));
     }
   }
+  // ---------- your skills and notes: freshness, verify, share/private ----------
+  function renderItems() {
+    const body = $('items');
+    body.textContent = '';
+    $('items-empty').hidden = items.length > 0;
+    $('items-table').hidden = !items.length;
+    $('items-sub').textContent = `Flagged when not updated or verified in ${status.verifyDays || 30} days`;
+    for (const it of items) {
+      const tag = it.kind === 'note' ? h('select', { class: 'input', 'aria-label': `Who gets ${it.title}`, onchange: (e) => setItem({ key: it.key, tag: e.target.value || null }) },
+        [['', 'Every notes grant'], ['share', 'Share'], ['private', 'Private']].map(([v, label]) => h('option', { value: v, selected: (it.tag || '') === v, text: label }))) : h('span', { class: 'muted', text: 'Skills grants' });
+      body.append(h('tr', null,
+        h('td', null, h('b', { text: it.title }), it.stale ? h('span', { class: 'pill tone-needs', text: 'Not checked lately' }) : null),
+        h('td', { class: 'muted', text: ago(it.updatedAt) }),
+        h('td', { class: it.verifiedAt ? null : 'muted', text: ago(it.verifiedAt) }),
+        h('td', null, tag),
+        h('td', null, h('div', { class: 'btn-row end' }, h('button', { class: 'btn sm', type: 'button', text: 'Mark verified', onclick: () => setItem({ key: it.key, verified: true }) })))));
+    }
+  }
+  async function loadItems() {
+    try { items = (await get('/api/share/items')).items; renderItems(); } catch (e) { toast(e.message, true); }
+  }
+  async function setItem(change) {
+    try {
+      items = (await post('/api/share/item', change)).items;
+      renderItems();
+      toast(change.verified ? 'Marked verified. Teammates see the new date on their next sync.' : change.tag === 'private' ? 'Private: this note is no longer sent to anyone.' : 'Saved.');
+    } catch (e) { toast(e.message, true); }
+  }
+
   // How often teammates' agents used what this captain shares (counts reported by their decks).
   function renderUsage() {
     const body = $('usage');
@@ -275,6 +311,7 @@
     try { grants = (await get('/api/share/grants')).grants; renderPeople(); renderWhat(); } catch (e) { toast(e.message, true); }
     loadLog();
     loadUsage();
+    loadItems();
   }
   async function loadLog() {
     try { auditRows = (await get('/api/share/audit')).rows; renderLog(); } catch (e) { toast(e.message, true); }
@@ -287,6 +324,7 @@
     chosen.clear();
     for (const k of g.scopes) chosen.add(k);
     projects = new Set(g.projects);
+    notesTagged = !!g.notesTagged;
     $('add-email').value = g.viewerEmail;
     $('add-email').readOnly = true;
     $('add-label').textContent = 'Update access';
@@ -296,6 +334,7 @@
   }
   function stopEdit() {
     editing = null;
+    notesTagged = false;
     $('add-email').readOnly = false;
     $('add-email').value = '';
     $('add-label').textContent = 'Give view access';
@@ -341,7 +380,7 @@
     const email = $('add-email').value.trim();
     try {
       const wasEditing = editing;
-      grants = (await post('/api/share/grant', { email, scopes: [...chosen], projects: chosenProjects(), days: Number($('add-days').value) })).grants;
+      grants = (await post('/api/share/grant', { email, scopes: [...chosen], projects: chosenProjects(), notesTagged, days: Number($('add-days').value) })).grants;
       stopEdit();
       renderPeople();
       const g = grants.find((x) => x.viewerEmail === email.toLowerCase());

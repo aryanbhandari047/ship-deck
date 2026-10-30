@@ -70,7 +70,7 @@ function sanitizeSnapshot(body, now = Date.now()) {
     out.terminal = byRef(body.terminal, refs, (t) => ({ at: n(t && t.at), lines: arr(t && t.lines, 40).map((l) => s(l, 240) || '') }));
   }
   if (body.skills) out.skills = arr(body.skills, 100).filter((x) => x && typeof x === 'object').map((x) => ({ key: s(x.key, 120), title: s(x.title, 120), description: s(x.description, 300) }));
-  if (body.notes) out.notes = arr(body.notes, 40).filter((x) => x && typeof x === 'object').map((x) => ({ key: s(x.key, 120), title: s(x.title, 120), text: s(x.text, 8000), shortened: x.shortened === true || undefined }));
+  if (body.notes) out.notes = arr(body.notes, 40).filter((x) => x && typeof x === 'object').map((x) => ({ key: s(x.key, 120), title: s(x.title, 120), text: s(x.text, 8000), shortened: x.shortened === true || undefined, tag: x.tag === 'share' ? 'share' : undefined }));
   if (body.chat) out.chat = arr(body.chat, 30).filter((x) => x && typeof x === 'object').map((x) => ({ ts: s(x.ts, 30), from: x.from === 'firstmate' ? 'firstmate' : 'captain', text: s(x.text, 500) }));
   if (body.activity) out.activity = arr(body.activity, 30).filter((x) => x && typeof x === 'object').map((x) => ({ ts: n(x.ts), label: s(x.label, 160) }));
   if (body.trimmed) out.trimmed = arr(body.trimmed, 10).filter((x) => typeof x === 'string').map((x) => x.slice(0, 20));
@@ -117,7 +117,7 @@ function viewFor(snap, grant, scope, ref) {
     case 'updates': return { data: { updates: pick(snap.updates) } };
     case 'terminal': return { data: { terminal: pick(snap.terminal) } };
     case 'skills': return { data: { skills: snap.skills || [] } };
-    case 'notes': return { data: { notes: snap.notes || [] } };
+    case 'notes': return { data: { notes: (snap.notes || []).filter((x) => !grant.notesTagged || x.tag === 'share') } };
     case 'chat': return { data: { chat: snap.chat || [], activity: snap.activity || [] } };
     default: return { refused: 'not found' };
   }
