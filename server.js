@@ -26,13 +26,14 @@ const attachments = require('./lib/attachments');
 const activity = require('./lib/activity');
 const homes = require('./lib/home');
 const share = require('./lib/share');
+const settings = require('./lib/settings');
 
 const DEFAULT_PORT = 4747;
 const PORT_TRIES = 20;
 const MAX_BODY = 16 * 1024;
 const ORDERS_IN_SNAPSHOT = 60;
 const THREAD_LIMIT = 300;
-const POST_ROUTES = new Set(['/api/send', '/api/orders', '/api/config']);
+const POST_ROUTES = new Set(['/api/send', '/api/orders', '/api/config', '/api/settings']);
 const SHARE_POST = new Set(['/api/share/signin', '/api/share/signout', '/api/share/grant', '/api/share/revoke', '/api/share/invite', '/api/share/pause', '/api/share/knowledge', '/api/share/item']);
 // Library files a "notes and memory" grant may carry (plus memory/*).
 const SHARE_NOTES = ['home:data/captain.md', 'home:data/captain-shared.md', 'home:data/learnings.md'];
@@ -277,6 +278,7 @@ function createServer(opts) {
     }
     snap.configOptions = config.options();
     snap.captain = { name: captain };
+    snap.settings = settings.readSettings(ordersDir);
     snap.homeLabel = tildePath(opts.home);
     snap.firstmate = { session: sessionView(known[sessions.FIRST_MATE_KEY], 'claude') };
     return snap;
@@ -420,6 +422,20 @@ function createServer(opts) {
       if (opts.wake !== false) wake.wake(opts.home, order);
       return json(res, 200, { ok: true, applied: live, command, order });
     }
+    if (url.pathname === '/api/settings') {
+      // { address, tell }: saved in ~/.ship-deck/settings.json; with tell, a changed form of
+      // address is also one `address` message to the first mate (its usual inbox, nothing else).
+      if (!body || !Object.prototype.hasOwnProperty.call(body, 'address')) return json(res, 400, { ok: false, error: 'address is required' });
+      const before = settings.readSettings(ordersDir);
+      let next;
+      try { next = settings.writeSettings(ordersDir, { address: body.address }); } catch (e) { return json(res, 400, { ok: false, error: e.message }); }
+      let order = null;
+      if (body.tell === true && next.address !== before.address) {
+        order = orders.createOrder(ordersDir, { kind: 'address', address: next.address, text: settings.addressMessage(next.address) }, { internal: true });
+        if (opts.wake !== false) wake.wake(opts.home, order);
+      }
+      return json(res, 200, { ok: true, settings: next, order });
+    }
     if (url.pathname === '/api/orders') {
       try {
         const order = orders.createOrder(ordersDir, body, await orderContext(opts.home));
@@ -442,6 +458,7 @@ function createServer(opts) {
       if (url.pathname === '/api/health') return json(res, 200, { app: 'ship-deck', ok: true, home: opts.home });
       if (url.pathname === '/api/fleet') return json(res, 200, await fleetSnapshot());
       if (url.pathname === '/api/share' || url.pathname.startsWith('/api/share/')) return await handleShareGet(req, res, url);
+      if (url.pathname === '/api/settings') return json(res, 200, { ...settings.readSettings(ordersDir), default: settings.DEFAULT_ADDRESS, max: settings.MAX_ADDRESS, suggestions: settings.suggestions(captain) });
       if (url.pathname === '/api/thread') {
         return json(res, 200, { sig: orders.threadSignature(ordersDir), items: orders.buildThread(ordersDir, { limit: THREAD_LIMIT }) });
       }

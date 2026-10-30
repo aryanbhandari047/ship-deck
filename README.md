@@ -54,9 +54,11 @@ Ship Deck fixes that:
   expire, and it is removed from their machine.
 - **Read-only board view** (opt-in): let a teammate watch your board in their
   browser. They can look, never send.
-- **Comfort**: status is a signal flag, a colour and a word (readable without
-  colour); light and dark themes that pass WCAG AA; keyboard shortcuts (press
-  `?`); browser notifications on request.
+- **Comfort**: choose what the deck and the first mate call you ("Captain",
+  "Boss", your first name or no title, in **More > Settings**); status is a
+  signal flag, a colour and a word (readable without colour); light and dark
+  themes that pass WCAG AA; keyboard shortcuts (press `?`); browser
+  notifications on request.
 
 ## Screenshots
 
@@ -157,7 +159,7 @@ Updating changes nothing else in the first mate's terminal.
 Sharing goes through a small relay service you deploy once for your team
 (steps in [`relay/README.md`](relay/README.md)).
 
-1. **Sign in** from **More > Share and settings** in the top bar. Sharing is on after
+1. **Sign in** from **More > Share your deck** in the top bar. Sharing is on after
    install (`ship-deck` and `--autostart` connect to the Keychain relay), and
    nothing is sent until you sign in and add someone. To turn it off, and keep
    it off through updates:
