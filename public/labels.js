@@ -9,7 +9,7 @@
   const KIND_LABEL = {
     chat: 'Message', cleanup: 'Clean up worker', merge: 'Merge pull request', answer: 'Answer', decision: 'Your decision',
     status: 'Status check', 'new-task': 'New task', 'cleanup-done': 'Clean up finished workers', 'backlog-start': 'Start from queue',
-    'backlog-answer': 'Your decision', config: 'Settings change', order: 'Message',
+    'backlog-answer': 'Your decision', config: 'Settings change', address: 'What to call you', order: 'Message',
   };
   // Short pill text per worker state; "stale" is shown as quiet.
   const STATE_LABEL = {

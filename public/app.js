@@ -342,7 +342,7 @@
 
   // ---------- bridge: captain, first mate, monitoring ----------
   function renderBridge() {
-    const name = (snap.captain && snap.captain.name) || 'Captain';
+    const name = (snap.captain && snap.captain.name) || address() || 'You';
     ui.captain.classList.toggle('away', snap.afk);
     ui.captainName.textContent = name;
     ui.captainState.textContent = snap.afk ? 'Ashore' : 'On the bridge';
@@ -639,9 +639,12 @@
     prevCols = now;
     for (const [id] of moves) if (now.get(id) === 'done') toast(`Finished: ${titleOf(id)}`, 'ok', 'i-check');
   }
+  // What the deck calls the captain (Settings > You): "Captain" unless changed, '' for no title.
+  function address() { return snap && snap.settings && typeof snap.settings.address === 'string' ? snap.settings.address : 'Captain'; }
   function greeting() {
     const hr = new Date().getHours();
-    return hr < 5 ? 'On the night watch' : hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
+    const hello = hr < 5 ? 'On the night watch' : hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
+    return address() ? `${hello}, ${address()}` : hello;
   }
   let prevNeeds = null;
 
@@ -649,7 +652,7 @@
     const g = B.groupBoard(snap, { project: boardProject, match: matchesTask, matchItem: matchesCrate });
     if (boardProject && !g.projects.some((p) => p.toLowerCase() === boardProject.toLowerCase())) { boardProject = null; store.set('boardProject', null); return renderBoard(); }
     const n = g.counts.needs;
-    ui.greeting.textContent = `${greeting()}, Captain`;
+    ui.greeting.textContent = greeting();
     ui.boardTitle.textContent = (n ? `${n} ${n === 1 ? 'thing needs' : 'things need'} you` : 'All clear') + (boardProject ? ` in ${boardProject}` : '');
     if (!unchanged('board-filters', g.projects, boardProject)) {
       const chipBtn = (name, label) => h('button', { class: 'filter', type: 'button', 'aria-pressed': String((boardProject || null) === name), text: label,

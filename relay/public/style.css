@@ -946,6 +946,15 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .twocol > div:first-child { border-right: 1px solid var(--line); }
 .preview-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .preview { margin: 0 18px 18px; max-height: 360px; overflow: auto; padding: 12px; border-radius: var(--r-ctl); background: var(--term-bg); color: var(--term-fg); font: var(--t-xs)/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Settings > You: the form of address */
+.addr-form { display: grid; gap: var(--s3); padding: var(--s4) 18px 18px; max-width: 560px; }
+.addr-field { display: grid; gap: 6px; font-size: var(--t-sm); font-weight: 600; color: var(--ink-2); }
+.addr-field .input { font-size: var(--t-lg); height: 40px; }
+.addr-suggest { display: flex; flex-wrap: wrap; gap: 4px; }
+.addr-suggest .filter { box-shadow: inset 0 0 0 1px var(--line); }
+.addr-preview { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: var(--r-card); background: var(--surface-2); }
+.addr-tell { display: flex; align-items: center; gap: 8px; font-size: var(--t-sm); color: var(--ink-2); }
+.addr-tell input { accent-color: var(--primary); width: 16px; height: 16px; margin: 0; }
 @media (max-width: 900px) {
   .settings { grid-template-columns: minmax(0, 1fr); }
   .s-nav { display: none; }

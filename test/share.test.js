@@ -234,7 +234,7 @@ test('the relay keeps the same allow-list, and its UI copies match the deck', ()
   }
   const symbols = (f) => new Map([...fs.readFileSync(path.join(ROOT, f), 'utf8').matchAll(/<symbol id="([^"]+)"[\s\S]*?<\/symbol>/g)].map((m) => [m[1], m[0]]));
   const deck = symbols('public/index.html');
-  for (const f of ['public/share.html', 'relay/public/index.html', 'relay/public/invite.html']) {
+  for (const f of ['public/share.html', 'public/settings.html', 'relay/public/index.html', 'relay/public/invite.html']) {
     for (const [id, svg] of symbols(f)) assert.equal(svg, deck.get(id), `${f} #${id} differs from public/index.html`);
   }
 });
