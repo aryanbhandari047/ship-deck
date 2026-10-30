@@ -210,10 +210,10 @@ test('grant union: expired grants drop out; no grants means nothing to send', ()
 });
 
 test('the deck side cannot reach orders or fm-send: share and redact require only built-ins and pure modules', () => {
-  for (const f of ['lib/share.js', 'lib/redact.js', 'lib/knowledge.js', 'lib/library.js']) {
+  for (const f of ['lib/share.js', 'lib/redact.js', 'lib/knowledge.js', 'lib/library.js', 'lib/usage.js']) {
     const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
     const reqs = [...src.matchAll(/require\(['"]([^'"]+)['"]\)/g)].map((m) => m[1]);
-    for (const r of reqs) assert.ok(r.startsWith('node:') || ['../public/board', './redact', './knowledge', './library'].includes(r), `${f} requires ${r}`);
+    for (const r of reqs) assert.ok(r.startsWith('node:') || ['../public/board', './redact', './knowledge', './library', './usage'].includes(r), `${f} requires ${r}`);
     const code = src.replace(/^\s*\/\/.*$/gm, ''); // comments may name what is out of reach
     assert.ok(!/fm-send|sendMessage|createOrder|execFile|child_process/.test(code), f + ' mentions a command path');
   }

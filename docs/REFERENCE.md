@@ -518,6 +518,14 @@ Share your deck** in the top bar opens **Settings > Sharing** (`/share.html`):
    folder; detected by `~/.agents` or `~/.codex`) and `~/.cursor/rules` (Cursor, as
    `teammate-*.mdc` rules with the marker in their frontmatter). Turning one off, revoking or
    signing out removes them there too.
+5. **How your shared skills are used** (Settings > Sharing) shows, per skill (and your notes)
+   and teammate, how many times their agent used it and when last, kept 90 days; each report
+   is also a "used" row in "Who viewed what". Their deck counts from Claude Code's own
+   transcripts, read only (`lib/usage.js`: the Skill tool loading a `teammate-*` skill, a Read
+   of its `SKILL.md`, or its slash command; no hook or agent config change), and sends counts
+   and times only, at most hourly. Codex and Cursor uses are not counted. The teammate can
+   turn it off ("Tell teammates how often I use their skills"); it also stops while their
+   sharing is paused. Scan offsets live in `~/.ship-deck/usage.json`.
 
 ![Settings > Sharing: people with access, what they can see, and the audit log](share-settings.png)
 ![A teammate's read-only view of the sample fleet on the relay](share-viewer.png)
@@ -681,6 +689,7 @@ lib/attachments.js Bridge attachments: magic bytes, storage, stills, Range servi
 lib/library.js     Ship's Library allow-list (home files, memory, skills)
 lib/share.js       Sharing (--share): redacted snapshot and knowledge pushes, knowledge sync
 lib/knowledge.js   Teammates' shared knowledge as marked teammate-* skills and rules (the only ~/.claude, ~/.agents, ~/.cursor writer)
+lib/usage.js       Counts uses of teammates' shared skills in Claude Code transcripts (read only)
 lib/sessions.js    Claude session discovery and ~/.ship-deck/sessions.json
 lib/settings.js    The captain's preferences (form of address) in ~/.ship-deck/settings.json
 lib/activity.js    First mate activity feed: read-only transcript tail

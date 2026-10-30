@@ -49,6 +49,8 @@ Redis commands per request (asserted in `relay/test/relay.test.js`):
 | Knowledge read (`GET /v1/knowledge/<captainSub>`, only for a captain whose hash changed) | 5 |
 | Agent read (`GET /v1/agent/library[/…]`) | 6: key + deck + item, rate counter, audit row; 7 when it also stamps last-used (at most every 10 min); 2 for an unknown key |
 | Deck library push (`POST /v1/library`, on change or hourly) | 4-5 |
+| Usage report (`POST /v1/usage`, a teammate's deck, at most hourly and only after a use) | 10 for one captain and two items (auth, grant + library, counts, audit row) |
+| Usage read (`GET /v1/usage`, the captain's Settings page) | 2 |
 
 Assumptions: each deck runs 10 h a day and its board changes on average every 3 minutes
 (pushes happen only on change, at most every 30 s, plus a keep-alive every 10 minutes); each
@@ -67,6 +69,9 @@ or while its sharing is paused (1 command per 10 minutes). A change costs one li
 read per changed captain: 10 knowledge changes a day reaching 5 teammates each is about 450
 commands a day (≈ 14,000/month, 3%). Library pushes bump the version only when the content
 changed, never on the hourly keep-alive.
+
+Usage counts: a report goes out only in an hour when the teammate's agent used something shared;
+20 teammates reporting 5 times a day is about 1,000 commands a day (≈ 30,000/month, 6%).
 
 Agent keys (optional, for agents without Ship Deck): 10 agent keys reading 20 items a day each is 200 reads, about 1,300
 commands a day (≈ 40,000/month, 8%), plus at most 10 library pushes a day per deck (≈ 15,000/month).
@@ -199,6 +204,7 @@ fails when they drift.
 | `POST /v1/library`, `DELETE /v1/library` | deck token | store or remove the knowledge library projection (re-sanitised, 512 KB) |
 | `GET /v1/knowledge[?since=<version>]`, `GET /v1/knowledge/<captainSub>` | deck token | a teammate's own deck: what every captain shares with this account (hashes), and one captain's granted skills and notes with their text |
 | `GET /v1/agent/library`, `GET /v1/agent/library/<captainSub>/<key>` | agent key | the library list (JSON) and one item (markdown) |
+| `POST /v1/usage`, `GET /v1/usage` | deck token | a teammate's deck reports how often its agent used what captains share with it (counts and times only; items not in the captain's library or not granted to this account are dropped; one audit row per captain); the captain reads their counts (`use:<sub>`, 90 days) |
 
 Nothing else is routed. Viewer deck routes, `/v1/knowledge` and `/v1/agent` answer 405 to every other method. A grant is authored
 only through the owning captain's deck token and is checked on every viewer request: grant

@@ -23,6 +23,7 @@
   let status = null;
   let grants = []; // the full list from /api/share/grants (with accounts and last views)
   let auditRows = [];
+  let usageRows = [];
   let editing = null; // email of the grant being edited
   const chosen = new Set(SCOPES.filter((s) => s.on).map((s) => s.key));
   let projects = null; // Set of chosen project names (null until the first status)
@@ -98,7 +99,7 @@
     const s = status;
     const signedIn = !!(s && s.enabled && s.account);
     $('signin-box').hidden = !(s && s.enabled && !s.account);
-    for (const id of ['people-box', 'what-box', 'log-box']) $(id).hidden = !signedIn;
+    for (const id of ['people-box', 'what-box', 'log-box', 'usage-box']) $(id).hidden = !signedIn;
     renderKnowledge(signedIn);
     $('share-toggle').hidden = !signedIn;
     if (!s) return;
@@ -131,6 +132,10 @@
     $('knowledge-toggle').setAttribute('aria-checked', String(k.on));
     $('knowledge-word').textContent = k.on ? 'On' : 'Off';
     $('knowledge-sub').textContent = k.problem ? k.problem : k.on && k.lastSyncAt ? `Checked ${ago(k.lastSyncAt)}` : '';
+    const u = k.usage || {};
+    $('usage-perm').hidden = !(k.on && u.available);
+    $('usage-toggle').setAttribute('aria-checked', String(!!u.on));
+    $('usage-word').textContent = u.on ? 'On' : 'Off';
     // The same read-only skills for other agents on this computer, each with its own switch.
     const targets = $('knowledge-targets');
     targets.textContent = '';
@@ -233,6 +238,20 @@
       body.append(h('tr', null, h('td', { text: r.ts ? when(r.ts) : '' }), h('td', { text: r.who || '' }), h('td', { text: r.what || '' }), h('td', { class: refused ? 'denied' : null, text: result })));
     }
   }
+  // How often teammates' agents used what this captain shares (counts reported by their decks).
+  function renderUsage() {
+    const body = $('usage');
+    body.textContent = '';
+    $('usage-empty').hidden = usageRows.length > 0;
+    $('usage-table').hidden = !usageRows.length;
+    for (const r of usageRows.slice(0, 200)) {
+      const name = r.key === 'notes' ? 'Your notes and memory' : r.title || r.key.split(':').pop();
+      body.append(h('tr', null, h('td', { text: name }), h('td', { text: r.viewerEmail || '' }), h('td', { text: String(r.count) }), h('td', { class: 'muted', text: ago(r.last) })));
+    }
+  }
+  async function loadUsage() {
+    try { usageRows = (await get('/api/share/usage')).rows; renderUsage(); } catch (e) { toast(e.message, true); }
+  }
   function csv() {
     // Cells that start like a formula are quoted with a leading ' so spreadsheets show them as text.
     const cell = (v) => { let s = String(v === null || v === undefined ? '' : v); if (/^[=+\-@]/.test(s)) s = "'" + s; return '"' + s.replace(/"/g, '""') + '"'; };
@@ -255,6 +274,7 @@
     if (!(status && status.enabled && status.account)) return;
     try { grants = (await get('/api/share/grants')).grants; renderPeople(); renderWhat(); } catch (e) { toast(e.message, true); }
     loadLog();
+    loadUsage();
   }
   async function loadLog() {
     try { auditRows = (await get('/api/share/audit')).rows; renderLog(); } catch (e) { toast(e.message, true); }
@@ -354,6 +374,15 @@
     } catch (e) { toast(e.message, true); }
   });
   $('log-refresh').addEventListener('click', loadLog);
+  $('usage-refresh').addEventListener('click', loadUsage);
+  $('usage-toggle').addEventListener('click', async () => {
+    const on = !(status.knowledge && status.knowledge.usage && status.knowledge.usage.on);
+    try {
+      status = (await post('/api/share/knowledge', { reportUsage: on })).status;
+      renderState();
+      toast(on ? 'Teammates will see how often your agent uses their skills (counts only).' : 'Turned off. No usage counts are sent.');
+    } catch (e) { toast(e.message, true); }
+  });
   $('log-csv').addEventListener('click', csv);
 
   loadAll();
