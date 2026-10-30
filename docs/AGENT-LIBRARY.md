@@ -55,9 +55,20 @@ if you turned it off) and sign in under Settings > Sharing (see [TEAMMATE-SETUP.
   Signing out removes them too, and a captain narrowing, revoking or letting the grant
   end removes theirs on the next sync.
 - The Ship's Library shows them in their own group, "Shared by <captain>".
+- Other agents can get the same knowledge. Under **Shared with you**, each has its own
+  switch, on by default when the tool is found on your computer:
+  - **Codex and other agents**: the same skills in `~/.agents/skills/teammate-*`
+    (found when `~/.agents` or `~/.codex` exists).
+  - **Cursor**: one rule per skill, `~/.cursor/rules/teammate-*.mdc`, with only a
+    `description` (Cursor's agent picks the rule by it, `alwaysApply: false`) and Ship
+    Deck's marker in the frontmatter, then the same header and text.
+  Turning one off removes its entries at once; revoking, a grant ending, turning
+  **Use knowledge shared with me** off or signing out removes them from every agent.
+  Ship Deck never edits an `AGENTS.md` or any file it did not write.
 
 Ship Deck only writes, rewrites or removes `teammate-*` directories that hold its
-marker file (`.ship-deck-teammate.json`). Your own skills, a directory you made with a
+marker file (`.ship-deck-teammate.json`), and `teammate-*.mdc` rules whose frontmatter
+holds its `shipDeckTeammate` marker. Your own skills and rules, an entry you made with a
 clashing name, and symlinks are never touched; a clashing name gets a `-2` suffix.
 
 Relay routes (deck token, GET only): `GET /v1/knowledge?since=<version>` answers

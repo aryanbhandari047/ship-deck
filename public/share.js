@@ -131,6 +131,19 @@
     $('knowledge-toggle').setAttribute('aria-checked', String(k.on));
     $('knowledge-word').textContent = k.on ? 'On' : 'Off';
     $('knowledge-sub').textContent = k.problem ? k.problem : k.on && k.lastSyncAt ? `Checked ${ago(k.lastSyncAt)}` : '';
+    // The same read-only skills for other agents on this computer, each with its own switch.
+    const targets = $('knowledge-targets');
+    targets.textContent = '';
+    if (k.on) {
+      for (const x of k.targets || []) {
+        const label = `Also for ${x.label}`;
+        targets.append(h('div', { class: 'perm' }, h('b', { text: label }),
+          h('p', null, x.id === 'cursor' ? 'Adds them as Cursor rules in ' : 'Adds the same skills to ', h('code', { text: x.where }),
+            x.detected ? ' (found on this computer). ' : ' (not found on this computer). ', 'Turning this off removes them there.'),
+          h('div', { class: 'ctl' }, h('span', { text: x.on ? 'On' : 'Off' }),
+            h('button', { class: 'toggle', type: 'button', role: 'switch', 'aria-checked': String(x.on), 'aria-label': label, onclick: () => setTarget(x) }))));
+      }
+    }
     const body = $('knowledge');
     body.textContent = '';
     $('knowledge-empty').hidden = k.decks.length > 0;
@@ -143,6 +156,14 @@
         h('td', null, h('div', { class: 'scopes' }, pills)),
         h('td', { class: 'muted', text: ago(d.syncedAt) })));
     }
+  }
+
+  async function setTarget(x) {
+    try {
+      status = (await post('/api/share/knowledge', { target: x.id, on: !x.on })).status;
+      renderState();
+      toast(x.on ? `Turned off. Teammate skills were removed from ${x.where}.` : `Knowledge shared with you will be added to ${x.where} within a minute.`);
+    } catch (e) { toast(e.message, true); }
   }
 
   // ---------- people ----------

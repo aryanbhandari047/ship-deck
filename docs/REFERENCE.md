@@ -60,6 +60,9 @@ ship-deck --orders-dir DIR
 ship-deck --memory-dir DIR
 # Claude Code data dir, default ~/.claude (transcripts, skills)
 ship-deck --claude-dir DIR
+# where other agents get knowledge teammates share (with --share), defaults
+# ~/.agents/skills (Codex and other agents) and ~/.cursor/rules (Cursor)
+ship-deck --agents-dir DIR --cursor-dir DIR
 # don't append wake lines to <home>/state/ship-deck-inbox.status
 ship-deck --no-wake
 # read-only sharing (or SHIP_DECK_SHARE=1, SHIP_DECK_RELAY); installs turn it on
@@ -264,7 +267,8 @@ sends worker ids, library keys and allow-listed values; the terminal target
 always comes from `state/<id>.meta`. The only files it writes are in
 `~/.ship-deck/` (dir 0700, files 0600), attachments included, plus the wake
 line above. It reads `~/.claude/` (transcripts, skills, memory) but never
-writes there.
+writes there, except, with `--share`, the marked `teammate-*` knowledge entries below
+(also in `~/.agents/skills` and `~/.cursor/rules` when those are on).
 
 ## Messages and the Bridge: the first mate's contract
 
@@ -496,7 +500,12 @@ Share and settings** in the top bar opens **Settings > Sharing** (`/share.html`)
    me" in their Settings > Sharing (on by default) turns it off; turning it off, signing out,
    or your grant being narrowed, revoked or ending removes them. Only directories with Ship
    Deck's marker file are ever written or removed (`lib/knowledge.js`,
-   [`docs/AGENT-LIBRARY.md`](AGENT-LIBRARY.md)).
+   [`docs/AGENT-LIBRARY.md`](AGENT-LIBRARY.md)). The same knowledge can also go to other
+   agents, each with its own switch under "Shared with you" (on by default when the tool's
+   folder exists): `~/.agents/skills` (Codex and other agents that read the shared skills
+   folder; detected by `~/.agents` or `~/.codex`) and `~/.cursor/rules` (Cursor, as
+   `teammate-*.mdc` rules with the marker in their frontmatter). Turning one off, revoking or
+   signing out removes them there too.
 
 ![Settings > Sharing: people with access, what they can see, and the audit log](share-settings.png)
 ![A teammate's read-only view of the sample fleet on the relay](share-viewer.png)
@@ -655,7 +664,7 @@ lib/orders.js      Orders queue in ~/.ship-deck
 lib/attachments.js Bridge attachments: magic bytes, storage, stills, Range serving
 lib/library.js     Ship's Library allow-list (home files, memory, skills)
 lib/share.js       Sharing (--share): redacted snapshot and knowledge pushes, knowledge sync
-lib/knowledge.js   Teammates' shared knowledge as marked teammate-* skills (the only ~/.claude writer)
+lib/knowledge.js   Teammates' shared knowledge as marked teammate-* skills and rules (the only ~/.claude, ~/.agents, ~/.cursor writer)
 lib/sessions.js    Claude session discovery and ~/.ship-deck/sessions.json
 lib/activity.js    First mate activity feed: read-only transcript tail
 lib/config.js      Per-harness model/effort allow-list and slash commands

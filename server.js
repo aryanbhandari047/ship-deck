@@ -36,7 +36,7 @@ const POST_ROUTES = new Set(['/api/send', '/api/orders', '/api/config']);
 const SHARE_POST = new Set(['/api/share/signin', '/api/share/signout', '/api/share/grant', '/api/share/revoke', '/api/share/invite', '/api/share/pause', '/api/share/knowledge']);
 // Library files a "notes and memory" grant may carry (plus memory/*).
 const SHARE_NOTES = ['home:data/captain.md', 'home:data/captain-shared.md', 'home:data/learnings.md'];
-const USAGE = 'usage: ship-deck [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--no-open] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR] [--captain-name NAME] [--no-wake] [--share --share-relay URL | --no-share]';
+const USAGE = 'usage: ship-deck [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--no-open] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR] [--agents-dir DIR] [--cursor-dir DIR] [--captain-name NAME] [--no-wake] [--share --share-relay URL | --no-share]';
 
 // env and cwd are injectable for tests; the home falls back per lib/home.js detectHome.
 function parseArgs(argv, { env = process.env, cwd = process.cwd() } = {}) {
@@ -53,6 +53,8 @@ function parseArgs(argv, { env = process.env, cwd = process.cwd() } = {}) {
     open: !env.SHIP_DECK_NO_OPEN,
     share: !!env.SHIP_DECK_SHARE,
     shareRelay: env.SHIP_DECK_RELAY || null,
+    agentsDir: null, // ~/.agents/skills and ~/.cursor/rules unless given (see below)
+    cursorDir: null,
   };
   let homeFlag = null;
   for (let i = 0; i < argv.length; i++) {
@@ -66,6 +68,8 @@ function parseArgs(argv, { env = process.env, cwd = process.cwd() } = {}) {
     else if (flag === '--orders-dir') opts.ordersDir = val();
     else if (flag === '--memory-dir') opts.memoryDir = val();
     else if (flag === '--claude-dir') opts.claudeDir = val();
+    else if (flag === '--agents-dir') opts.agentsDir = val();
+    else if (flag === '--cursor-dir') opts.cursorDir = val();
     else if (flag === '--captain-name') opts.captainName = val();
     else if (flag === '--no-wake') opts.wake = false;
     else if (flag === '--no-open') opts.open = false;
@@ -100,6 +104,15 @@ function parseArgs(argv, { env = process.env, cwd = process.cwd() } = {}) {
   opts.homeChecked = found.checked;
   opts.ordersDir = path.resolve(opts.ordersDir);
   opts.claudeDir = path.resolve(opts.claudeDir);
+  // Other agents that may get knowledge teammates share (lib/share.js KNOWLEDGE_TARGETS), detected
+  // by their config folder. createServer itself writes to none unless given these.
+  const user = os.homedir();
+  opts.knowledgeTargets = [
+    opts.agentsDir ? { id: 'agents', root: path.resolve(opts.agentsDir), detect: [path.dirname(path.resolve(opts.agentsDir))] }
+      : { id: 'agents', root: path.join(user, '.agents', 'skills'), detect: [path.join(user, '.agents'), path.join(user, '.codex')] },
+    opts.cursorDir ? { id: 'cursor', root: path.resolve(opts.cursorDir), detect: [path.dirname(path.resolve(opts.cursorDir))] }
+      : { id: 'cursor', root: path.join(user, '.cursor', 'rules'), detect: [path.join(user, '.cursor')] },
+  ];
   if (opts.memoryDir) opts.memoryDir = path.resolve(opts.memoryDir);
   else if (opts.memoryDir === undefined && opts.home) opts.memoryDir = homes.memoryDirFor(opts.claudeDir, opts.home);
   return opts;
@@ -276,8 +289,10 @@ function createServer(opts) {
     now: opts.shareNow,
     log: (m) => console.warn(m),
     readFleet: fleetSnapshot,
-    // Knowledge teammates share with this account lands here as teammate-* skills.
+    // Knowledge teammates share with this account lands here as teammate-* skills, and for the
+    // other agents in opts.knowledgeTargets (parseArgs; none unless given).
     skillsDir: libOpts.captainSkills,
+    targets: opts.knowledgeTargets || [],
     readTerminal: async (id) => (await actions.peekPane(opts.home, id, exec)).text,
     readExtras: async (needs) => {
       const fm = feed.view(NaN);
@@ -334,7 +349,7 @@ function createServer(opts) {
       if (url.pathname === '/api/share/revoke') return json(res, 200, { ok: true, grants: await agent.revoke(body.viewer) });
       if (url.pathname === '/api/share/invite') return json(res, 200, { ok: true, invite: await agent.invite(body.email) });
       if (url.pathname === '/api/share/pause') return json(res, 200, { ok: true, status: agent.setPaused(!!body.paused) });
-      if (url.pathname === '/api/share/knowledge') return json(res, 200, { ok: true, status: agent.setKnowledge(!!body.on) });
+      if (url.pathname === '/api/share/knowledge') return json(res, 200, { ok: true, status: agent.setKnowledge(!!body.on, typeof body.target === 'string' ? body.target : undefined) });
     } catch (e) { return shareError(res, e); }
   }
 
