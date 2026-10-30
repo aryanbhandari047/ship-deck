@@ -541,7 +541,16 @@ Share your deck** in the top bar opens **Settings > Sharing** (`/share.html`):
    Share" (under Captain notes and memory) carries only notes marked Share, on the relay page,
    in their agent's skills and through agent keys. Tags and verify dates live in
    `~/.ship-deck/share.json` (`items`).
-7. **Questions about skills and notes** (scope `ask`, off by default): their agent can ask a
+7. **Team pool** (Settings > Sharing): besides person-to-person grants, anyone signed in to the
+   relay (the team) can **Offer to team** one of their skills or notes (not a Private note; the
+   text is redacted on their deck first). It waits until an approver (the relay's `OWNER_EMAIL`,
+   plus `POOL_APPROVERS`) reads and approves it; then every member's deck adds it on its next
+   check like a teammate's skill (`teammate-team-pool-*`, "Offered by …, approved by …" under
+   the header). Pending offers are visible only to approvers and their author; approvers can
+   decline or later remove an item, which takes it off every member's computer; authors can
+   withdraw. Offers, approvals, removals and member syncs are rows in the approvers' (and the
+   author's) logs. "Use the team pool" under Shared with you turns it off for one person.
+8. **Questions about skills and notes** (scope `ask`, off by default): their agent can ask a
    question and get up to 3 passages of at most 600 characters each, with citations, from your
    skills and notes, without anything being copied into their skills. Private notes are never
    searched, and "Only notes marked Share" also limits what can be quoted. The relay ranks the
