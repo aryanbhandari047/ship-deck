@@ -32,6 +32,8 @@ const PAIRS = [
   ['on-primary', 'primary'], ['primary', 'surface'], ['primary', 'canvas'],
   ...['needs', 'blocked', 'failed', 'working', 'waiting', 'done', 'quiet'].map((t) => [`${t}-fg`, `${t}-bg`]),
   ['done-fg', 'surface'], ['blocked-fg', 'surface'],
+  // compact board cards print their status word in the tone's colour straight on the card
+  ['working-fg', 'surface'], ['waiting-fg', 'surface'], ['quiet-fg', 'surface'],
   ['term-fg', 'term-bg'], ['term-dim', 'term-bg'],
 ];
 

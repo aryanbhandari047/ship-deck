@@ -24,8 +24,9 @@ Ship Deck fixes that:
 
 ## What it does
 
-- **Board**: every worker grouped by what it needs from you, with the task
-  title, latest update, pull request and tool. Filter by project or search.
+- **Board**: what needs you first, as full cards you answer in place; the
+  rest (working, waiting, done) as quiet compact cards with the title, latest
+  update and pull request. Filter by project or search.
 - **Ship view**: the same fleet drawn as a nautical chart, one berth per worker
   flying its status flag.
 - **Chat with the lead agent** (the "first mate"): send messages and read its
@@ -64,6 +65,8 @@ Ship Deck fixes that:
 ![A worker that needs you: the decision on top and the live terminal](docs/decision.png)
 
 ![The Ship view: the same fleet as a nautical chart](docs/ship.png)
+
+<img src="docs/phone.png" alt="On a phone: what needs you comes first" width="320">
 
 *(Screenshots use the fabricated sample fleet in `test/fixtures/home`.)*
 
@@ -154,7 +157,7 @@ Updating changes nothing else in the first mate's terminal.
 Sharing goes through a small relay service you deploy once for your team
 (steps in [`relay/README.md`](relay/README.md)).
 
-1. **Sign in** from the share button in the top bar. Sharing is on after
+1. **Sign in** from **More > Share and settings** in the top bar. Sharing is on after
    install (`ship-deck` and `--autostart` connect to the Keychain relay), and
    nothing is sent until you sign in and add someone. To turn it off, and keep
    it off through updates:
