@@ -94,7 +94,7 @@ function createRelay({ config, store, now = Date.now, log = (m) => console.error
   // Scopes no longer offered (an old agentLibrary flag) are left out of every answer.
   const liveScopes = (g) => g.scopes.filter((x) => SCOPES.includes(x));
   function briefGrants(cap) {
-    return Object.values(cap.grants || {}).map((g) => ({ viewerEmail: g.viewerEmail, scopes: liveScopes(g), projects: g.projects, expiresAt: g.expiresAt, createdAt: g.createdAt }));
+    return Object.values(cap.grants || {}).map((g) => ({ viewerEmail: g.viewerEmail, scopes: liveScopes(g), projects: g.projects, notesTagged: !!g.notesTagged, expiresAt: g.expiresAt, createdAt: g.createdAt }));
   }
   // The Settings page list: adds whether the teammate has an account and when they last looked.
   async function fullGrants(cap) {
@@ -252,7 +252,7 @@ function createRelay({ config, store, now = Date.now, log = (m) => console.error
         const email = auth.normalizeEmail(decodeURIComponent(m[1]));
         const g = validateGrant(email, b, { domain: config.domain, captainEmail: cap.email, now: now(), previous: cap.grants[email] });
         cap.grants[g.viewerEmail] = g;
-        const what = `Gave ${g.viewerEmail} ${g.scopes.map((s) => SCOPE_LABEL[s]).join(', ')} until ${new Date(g.expiresAt).toISOString().slice(0, 10)}`;
+        const what = `Gave ${g.viewerEmail} ${g.scopes.map((s) => SCOPE_LABEL[s] + (s === 'notes' && g.notesTagged ? ' (marked Share only)' : '')).join(', ')} until ${new Date(g.expiresAt).toISOString().slice(0, 10)}`;
         await store.pipeline([saveCap(cap), ['SADD', 'vix:' + g.viewerEmail, cap.sub], ...auditCmds(cap.sub, { who: cap.email, what, result: 'granted' })]);
         await bumpKnowledge([g.viewerEmail]);
         sendJson(res, 200, { ok: true, grants: await fullGrants(cap) });
@@ -290,7 +290,7 @@ function createRelay({ config, store, now = Date.now, log = (m) => console.error
         const keep = new Set(lib.items.map((i) => L.fieldOf(i.key)));
         const stale = ((old && old.items) || []).map((i) => L.fieldOf(i.key)).filter((f) => !keep.has(f));
         const fields = ['index', JSON.stringify({ at: now(), items: lib.index, trimmed: lib.trimmed })];
-        for (const it of lib.items) fields.push(L.fieldOf(it.key), JSON.stringify({ title: it.title, text: it.text }));
+        for (const it of lib.items) fields.push(L.fieldOf(it.key), JSON.stringify({ title: it.title, text: it.text, tag: it.tag }));
         const cmds = [['HSET', key, ...fields]];
         if (stale.length) cmds.push(['HDEL', key, ...stale]);
         cmds.push(['EXPIRE', key, L.LIB_TTL]);
@@ -421,9 +421,9 @@ function createRelay({ config, store, now = Date.now, log = (m) => console.error
     if (Array.isArray(lib)) for (let i = 0; i + 1 < lib.length; i += 2) fields[lib[i]] = lib[i + 1];
     else Object.assign(fields, lib || {});
     const index = parse(fields.index);
-    const items = ((index && index.items) || []).filter((i) => L.itemAllowed(i.key, g)).map((i) => {
+    const items = ((index && index.items) || []).filter((i) => L.itemAllowed(i, g)).map((i) => {
       const body = parse(fields[L.fieldOf(i.key)]) || {};
-      return { key: i.key, kind: i.kind, title: i.title, description: i.description, text: typeof body.text === 'string' ? body.text : '' };
+      return { key: i.key, kind: i.kind, title: i.title, description: i.description, updatedAt: i.updatedAt || null, verifiedAt: i.verifiedAt || null, text: typeof body.text === 'string' ? body.text : '' };
     });
     const skills = items.filter((i) => i.kind === 'skill').length;
     const what = `Knowledge synced to their agent: ${skills} skill${skills === 1 ? '' : 's'}${items.length > skills ? ' and notes' : ''}`;
@@ -459,8 +459,8 @@ function createRelay({ config, store, now = Date.now, log = (m) => console.error
       if (!a || !a.ok) return;
       const index = (idx[i] && idx[i].items) || [];
       const titles = new Map(index.map((x) => [x.key, x.title]));
-      const notes = index.some((x) => L.kindOf(x.key) === 'note');
-      const ok = items.filter((it) => it.captainSub === sub && (it.key === U.NOTES_KEY ? notes && L.notesAllowed(a.grant) : titles.has(it.key) && L.itemAllowed(it.key, a.grant)));
+      const notes = index.some((x) => L.kindOf(x.key) === 'note' && L.itemAllowed(x, a.grant));
+      const ok = items.filter((it) => it.captainSub === sub && (it.key === U.NOTES_KEY ? notes && L.notesAllowed(a.grant) : titles.has(it.key) && L.itemAllowed(index.find((x) => x.key === it.key), a.grant)));
       if (!ok.length) return;
       accepted += ok.length;
       cmds.push(...U.writeCmds(sub, viewer.email, ok));
@@ -574,8 +574,9 @@ function createRelay({ config, store, now = Date.now, log = (m) => console.error
     if (!access.ok) [status, reason] = access.reason === 'not shared' ? [403, 'skills and notes not shared'] : [401, access.reason === 'expired' ? 'grant expired' : 'grant ended'];
     else if (grantId(access.grant) !== rec.grant || L.keyExpiry(rec, access.grant) <= now()) [status, reason] = [401, 'key expired'];
     else if (pathSub && pathSub !== k.captainSub) [status, reason] = [403, 'key is for another deck'];
-    else if (itemKey && !L.itemAllowed(itemKey, access.grant)) [status, reason] = [404, L.kindOf(itemKey) === 'skill' ? 'skills not shared' : 'notes not shared'];
+    else if (itemKey && !(L.kindOf(itemKey) === 'skill' ? L.skillsAllowed(access.grant) : L.notesAllowed(access.grant))) [status, reason] = [404, L.kindOf(itemKey) === 'skill' ? 'skills not shared' : 'notes not shared'];
     else if (itemKey && !field) [status, reason] = [404, 'not found'];
+    else if (itemKey && !L.itemAllowed({ key: itemKey, tag: field.tag }, access.grant)) [status, reason] = [404, 'note not marked Share'];
 
     const { bucket, retryAfter } = L.rateWindow(now());
     const rl = `arl:${k.hash.slice(0, 16)}:${bucket}`;
@@ -597,8 +598,8 @@ function createRelay({ config, store, now = Date.now, log = (m) => console.error
     if (status !== 200) throw new HttpError(status, reason);
     const rate = { 'X-RateLimit-Limit': String(L.RATE_PER_HOUR), 'X-RateLimit-Remaining': String(Math.max(0, L.RATE_PER_HOUR - Number(count))), 'X-Ship-Deck-Notice': AGENT_NOTICE };
     if (itemKey) return sendText(res, 200, field.text || '', 'text/markdown', rate);
-    const items = ((field && field.items) || []).filter((i) => L.itemAllowed(i.key, access.grant)).map((i) => ({
-      key: i.key, kind: i.kind, title: i.title, description: i.description, size: i.size,
+    const items = ((field && field.items) || []).filter((i) => L.itemAllowed(i, access.grant)).map((i) => ({
+      key: i.key, kind: i.kind, title: i.title, description: i.description, size: i.size, updatedAt: i.updatedAt || null, verifiedAt: i.verifiedAt || null,
       url: `${config.baseUrl}/v1/agent/library/${k.captainSub}/${i.key}`,
     }));
     sendJson(res, 200, {

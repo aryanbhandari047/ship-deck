@@ -69,6 +69,9 @@ ship-deck --no-wake
 ship-deck --share --share-relay https://<relay>
 # skip sharing for this run
 ship-deck --no-share
+# flag shared skills and notes not updated or verified for this many days,
+# default 30 (or SHIP_DECK_VERIFY_DAYS)
+ship-deck --verify-days 14
 # start in the background unless it already runs; prints the URL
 sh bin/start.sh [flags...]
 ```
@@ -504,6 +507,18 @@ button in the top bar opens **Settings > Sharing** (`/share.html`):
    and times only, at most hourly. Codex and Cursor uses are not counted. The teammate can
    turn it off ("Tell teammates how often I use their skills"); it also stops while their
    sharing is paused. Scan offsets live in `~/.ship-deck/usage.json`.
+6. **Your skills and notes** (Settings > Sharing) lists what a Skills or Notes grant could
+   carry, with when each was last updated (the file's time) and verified ("Mark verified").
+   Items neither updated nor verified for `--verify-days` (30) are flagged "Not checked
+   lately". Both dates travel with the item; the teammate's copy says them under its header,
+   and when it is stale for *their* deck's `--verify-days`, also "<captain> has not checked
+   it in over N days: confirm it still holds before relying on it". Their Settings flags it
+   too, and an item turning stale is rewritten on the next check without any change on your
+   side. Each note can be **Share**, **Private** or left to every notes grant: a Private note
+   never leaves this computer (library and snapshot), and a grant with "Only notes marked
+   Share" (under Captain notes and memory) carries only notes marked Share, on the relay page,
+   in their agent's skills and through agent keys. Tags and verify dates live in
+   `~/.ship-deck/share.json` (`items`).
 
 ![Settings > Sharing: people with access, what they can see, and the audit log](share-settings.png)
 ![A teammate's read-only view of the sample fleet on the relay](share-viewer.png)

@@ -33,10 +33,10 @@ const MAX_BODY = 16 * 1024;
 const ORDERS_IN_SNAPSHOT = 60;
 const THREAD_LIMIT = 300;
 const POST_ROUTES = new Set(['/api/send', '/api/orders', '/api/config']);
-const SHARE_POST = new Set(['/api/share/signin', '/api/share/signout', '/api/share/grant', '/api/share/revoke', '/api/share/invite', '/api/share/pause', '/api/share/knowledge']);
+const SHARE_POST = new Set(['/api/share/signin', '/api/share/signout', '/api/share/grant', '/api/share/revoke', '/api/share/invite', '/api/share/pause', '/api/share/knowledge', '/api/share/item']);
 // Library files a "notes and memory" grant may carry (plus memory/*).
 const SHARE_NOTES = ['home:data/captain.md', 'home:data/captain-shared.md', 'home:data/learnings.md'];
-const USAGE = 'usage: ship-deck [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--no-open] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR] [--agents-dir DIR] [--cursor-dir DIR] [--captain-name NAME] [--no-wake] [--share --share-relay URL | --no-share]';
+const USAGE = 'usage: ship-deck [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--no-open] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR] [--agents-dir DIR] [--cursor-dir DIR] [--captain-name NAME] [--no-wake] [--share --share-relay URL | --no-share] [--verify-days 30]';
 
 // env and cwd are injectable for tests; the home falls back per lib/home.js detectHome.
 function parseArgs(argv, { env = process.env, cwd = process.cwd() } = {}) {
@@ -53,6 +53,7 @@ function parseArgs(argv, { env = process.env, cwd = process.cwd() } = {}) {
     open: !env.SHIP_DECK_NO_OPEN,
     share: !!env.SHIP_DECK_SHARE,
     shareRelay: env.SHIP_DECK_RELAY || null,
+    verifyDays: Number(env.SHIP_DECK_VERIFY_DAYS) || undefined, // shared items unchecked this long are flagged (30)
     agentsDir: null, // ~/.agents/skills and ~/.cursor/rules unless given (see below)
     cursorDir: null,
   };
@@ -75,6 +76,7 @@ function parseArgs(argv, { env = process.env, cwd = process.cwd() } = {}) {
     else if (flag === '--no-open') opts.open = false;
     else if (flag === '--share') opts.share = true;
     else if (flag === '--share-relay') opts.shareRelay = val();
+    else if (flag === '--verify-days') opts.verifyDays = Number(val());
     else if (flag === '--no-share') opts.share = false;
     else if (flag === '--help' || flag === '-h') {
       console.log(USAGE);
@@ -90,6 +92,10 @@ function parseArgs(argv, { env = process.env, cwd = process.cwd() } = {}) {
   }
   if (!Number.isFinite(opts.staleDays) || opts.staleDays <= 0) {
     console.error('invalid --stale-days (expected a positive number of days)');
+    process.exit(2);
+  }
+  if (opts.verifyDays !== undefined && !(Number.isFinite(opts.verifyDays) && opts.verifyDays > 0)) {
+    console.error('invalid --verify-days (expected a positive number of days)');
     process.exit(2);
   }
   if (opts.share) {
@@ -295,6 +301,9 @@ function createServer(opts) {
     targets: opts.knowledgeTargets || [],
     // Read only: how often this computer's agent used what teammates share (counts are reported).
     transcriptsDir: path.join(claudeDir, 'projects'),
+    verifyDays: opts.verifyDays,
+    listShareable: async () => library.listLibrary(opts.home, memoryDir, libOpts).filter((e) => isSkill(e) || isNote(e))
+      .map((e) => ({ key: e.key, kind: isSkill(e) ? 'skill' : 'note', title: e.title, updatedAt: e.mtime })),
     readTerminal: async (id) => (await actions.peekPane(opts.home, id, exec)).text,
     readExtras: async (needs) => {
       const fm = feed.view(NaN);
@@ -311,7 +320,7 @@ function createServer(opts) {
     // The knowledge library (grant scopes skills and notes): full text, only what a grant needs.
     readLibrary: async ({ skills, notes }) => library.listLibrary(opts.home, memoryDir, libOpts)
       .filter((e) => (skills && isSkill(e)) || (notes && isNote(e)))
-      .map((e) => ({ key: e.key, title: e.title, description: e.description || '', text: readEntryText(e) })),
+      .map((e) => ({ key: e.key, title: e.title, description: e.description || '', text: readEntryText(e), updatedAt: e.mtime })),
   }) : null;
 
   // Relay errors come back as plain messages; 401/4xx keep their status, the rest are 502.
@@ -331,6 +340,7 @@ function createServer(opts) {
     try {
       if (url.pathname === '/api/share/grants') return json(res, 200, { grants: await agent.listGrants() });
       if (url.pathname === '/api/share/usage') return json(res, 200, { rows: await agent.usageRows() });
+      if (url.pathname === '/api/share/items') return json(res, 200, { items: await agent.items() });
       if (url.pathname === '/api/share/audit') return json(res, 200, { rows: await agent.audit(url.searchParams.get('since')) });
       if (url.pathname === '/api/share/preview') {
         const list = (k) => (url.searchParams.get(k) || '').split(',').filter(Boolean);
@@ -350,6 +360,7 @@ function createServer(opts) {
       if (url.pathname === '/api/share/signout') return json(res, 200, { ok: true, status: await agent.signOut() });
       if (url.pathname === '/api/share/grant') return json(res, 200, { ok: true, grants: await agent.putGrant(body) });
       if (url.pathname === '/api/share/revoke') return json(res, 200, { ok: true, grants: await agent.revoke(body.viewer) });
+      if (url.pathname === '/api/share/item') return json(res, 200, { ok: true, items: await agent.setItem({ key: body.key, verified: body.verified, tag: body.tag }) });
       if (url.pathname === '/api/share/invite') return json(res, 200, { ok: true, invite: await agent.invite(body.email) });
       if (url.pathname === '/api/share/pause') return json(res, 200, { ok: true, status: agent.setPaused(!!body.paused) });
       if (url.pathname === '/api/share/knowledge' && typeof body.reportUsage === 'boolean') return json(res, 200, { ok: true, status: agent.setReportUsage(body.reportUsage) });

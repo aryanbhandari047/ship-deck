@@ -66,6 +66,17 @@ if you turned it off) and sign in under Settings > Sharing (see [TEAMMATE-SETUP.
   **Use knowledge shared with me** off or signing out removes them from every agent.
   Ship Deck never edits an `AGENTS.md` or any file it did not write.
 
+## Freshness and private notes
+
+Every shared skill and note carries when you last updated it (the file's time) and last
+verified it (Settings > Sharing > Your skills and notes > **Mark verified**). The
+teammate's copy states both right under its header. When neither happened for 30 days
+(`--verify-days`, each deck its own), the copy also says you have not checked it lately and
+to confirm it before relying on it, and both Settings pages flag it.
+
+Notes can be marked **Share** or **Private** there. Private notes are never sent. Give a
+grant **Only notes marked Share** to send that person just the marked ones.
+
 ## Usage counts
 
 The captain sees how often each shared skill (and their notes) was used, per teammate,

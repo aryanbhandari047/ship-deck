@@ -113,6 +113,15 @@
           <p class="empty-row" id="log-empty">No views yet.</p>
         </section>
 
+        <section class="panel-box" id="items-box" aria-labelledby="items-h" hidden>
+          <div class="pb-head"><h2 id="items-h">Your skills and notes</h2><span class="hint" id="items-sub"></span></div>
+          <table class="tbl" id="items-table">
+            <thead><tr><th>Skill or note</th><th>Updated</th><th>Verified</th><th>Who gets it</th><th><span class="sr-only">Actions</span></th></tr></thead>
+            <tbody id="items"></tbody>
+          </table>
+          <p class="empty-row" id="items-empty">No skills or notes yet.</p>
+        </section>
+
         <section class="panel-box" id="usage-box" aria-labelledby="usage-h" hidden>
           <div class="pb-head"><h2 id="usage-h">How your shared skills are used</h2><span class="hint">Counts only, kept 90 days</span><button class="btn sm" id="usage-refresh" type="button">Refresh</button></div>
           <table class="tbl" id="usage-table">

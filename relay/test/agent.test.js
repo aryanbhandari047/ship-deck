@@ -239,7 +239,7 @@ test('the relay re-applies the library allow-list and the deck can replace or re
   const { r, ada, createKey, agent } = await setup(t, ['board', 'skills', 'notes']);
   const token = (await createKey()).data.token;
   const s = L.sanitizeLibrary({ ...LIB, home: '/Users/ada', items: [...LIB.items, { key: 'skill:x', title: 't'.repeat(500), text: 'x'.repeat(L.MAX_TEXT + 10), cwd: '/tmp' }] });
-  for (const it of s.items) assert.deepEqual(Object.keys(it).sort(), ['description', 'key', 'kind', 'text', 'title']);
+  for (const it of s.items) assert.deepEqual(Object.keys(it).sort(), ['description', 'key', 'kind', 'tag', 'text', 'title', 'updatedAt', 'verifiedAt']);
   assert.equal(s.items.at(-1).title.length, 120);
   assert.equal(s.items.at(-1).text.length, L.MAX_TEXT);
   assert.ok(!JSON.stringify(s).includes('/Users/ada'));

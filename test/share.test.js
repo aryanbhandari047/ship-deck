@@ -386,7 +386,7 @@ test('agent: grant input is checked locally and relay answers are treated as dat
   assert.deepEqual(put.body.scopes, share.DEFAULT_SCOPES, 'defaults: Board, Updates, Model');
   assert.ok(put.body.expiresAt <= clock.t + 30 * 86400e3, 'at most 30 days');
   assert.deepEqual(list[0].scopes, ['board']);
-  assert.deepEqual(Object.keys(list[0]).sort(), ['createdAt', 'expiresAt', 'hasAccount', 'lastViewed', 'projects', 'scopes', 'viewerEmail', 'viewerName']);
+  assert.deepEqual(Object.keys(list[0]).sort(), ['createdAt', 'expiresAt', 'hasAccount', 'lastViewed', 'notesTagged', 'projects', 'scopes', 'viewerEmail', 'viewerName']);
 });
 
 test('share flags: off by default; --share needs an https relay', () => {
