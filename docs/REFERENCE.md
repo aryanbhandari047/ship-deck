@@ -123,17 +123,26 @@ replace the path with your clone, save it as
 
 ## The views
 
-- **Board** (default): four columns. **Needs you** (flag K): workers waiting
-  on your call, blocked or failed, then queued questions; each card answers
-  in place, with lettered option buttons or a one-line reply (the same
-  messages and confirm step as the drawer). **Working** (P). **Waiting** (X):
-  paused workers and workers with no update yet, then **Quiet for a while**
-  (no activity for `--stale-days`, default 7; done workers are never quiet)
-  and **Up next in the queue** with Start. **Done** (C): finished workers with
-  Read report and Clean up, and "Clean up all" in the column head. Project
-  chips filter the board; **New job** opens the job form. Second mates sit
-  under the columns. Cards show the title first, then the id and project,
-  the latest note, the pull request and the tool.
+- **Header**: the view switch, the filter, the monitoring dot (its words
+  show only when monitoring is late or off), **New job** (the job form), the
+  chat button (hides or shows the side panel on wide screens, remembered; jumps
+  to it on narrow ones; a dot marks unread replies) and **More**: Ship's
+  Library, Share and settings, alerts and keyboard shortcuts, with the last
+  update time.
+- **Board** (default): a greeting and how many things need you ("All clear"
+  when none), then **Needs you** (flag K) across the top: workers waiting on
+  your call, blocked or failed, then queued questions, as full cards that
+  answer in place with lettered option buttons or a one-line reply (the same
+  messages and confirm step as the drawer). Below it, quieter and compact:
+  **Working** (P); **Waiting** (X): paused workers and workers with no update
+  yet, then **Quiet for a while** (no activity for `--stale-days`, default 7;
+  done workers are never quiet) and **Up next in the queue** with Start;
+  **Done** (C): finished workers with Read report and Clean up, and "Clean up
+  all" in the column head. Project chips filter the board. Second mates sit
+  under the columns. Cards show the status, project and age, the title, the
+  latest note and the pull request; the id, tool, model and effort are in the
+  drawer. A card that changes column settles in once: hoisted into Needs you,
+  or landing in Done with a "Finished" toast.
 - **Ship**: the same fleet as a nautical chart. The bridge shows you (Ashore
   when `state/.afk` exists), the first mate with what it is doing, and the
   monitoring lamp. One zone per project with a flag tally (the legend says
@@ -145,8 +154,8 @@ replace the path with your clone, save it as
   its own session and every past worker session), then **Chat** (newest at the
   bottom, day separators, receipts under your messages: Sent, not seen yet /
   Seen / Answered; action messages as cards with Sent, Seen, Done steps; an
-  unread badge; suggested messages; "Enable alerts" for browser notifications,
-  only requested from that button) and **Activity**
+  unread badge; suggested messages while the chat is empty; browser
+  notifications only requested from **More > Enable alerts**) and **Activity**
   ([First mate activity](#first-mate-activity)). Drag the handle on its left
   edge (or focus it and use the arrow keys, Shift for bigger steps, Home/End
   for min/max, Enter or double-click to reset to 420 px); 320 px to 70% of the
@@ -162,7 +171,7 @@ replace the path with your clone, save it as
   messages about it) and **Model and effort**.
 - **Queue item drawer**: its question and answer box (queued questions), or
   Start this, its details in words and its notes.
-- **Ship's Library** (book button): the first mate's permanent context files,
+- **Ship's Library** (**More** menu): the first mate's permanent context files,
   memory and skills, by title, rendered as safe markdown.
 - **Keyboard** (press `?` for the sheet, with the flag legend): `/` or Cmd/Ctrl+K
   filters; `G` then `B`/`S`/`C`/`A`/`L` goes to the Board, Ship, Chat,
@@ -206,10 +215,11 @@ finished workers (`cleanup-done`), New task (`new-task`), Start from queue
 (`backlog-start`), Settings change (`config`). The mapping lives in
 `public/labels.js`.
 
-The header's health strip reads: **First mate listening** (its transcript
-moved in the last 2 minutes, or a tool call is in progress), **Monitoring on**
-(watcher heartbeat under 2 minutes; "late" otherwise) and the last update
-time; **Deck offline** appears only when the page cannot reach the server.
+The header's monitoring dot is green while the watcher heartbeat is under 2
+minutes and says **Monitoring late** or **Not monitoring** otherwise; the
+first mate's own state (working, idle and since when) is in the side panel's
+head line, and the last update time in the **More** menu. **Deck offline**
+appears only when the page cannot reach the server.
 Queue tags show in words (Project, Waiting since, Starts after); parser
 bookkeeping (`kind`, `hold-kind`) stays hidden, and no screen prints an
 absolute path (folders show with your home as `~`).
@@ -474,8 +484,8 @@ relay (the Keychain relay, or `--share-relay URL`) as `share_relay=` in
 `~/.ship-deck/app/.ship-deck-install`, or `off` with `--no-share`; re-runs keep it until
 `--share`. The launcher and `bin/start.sh` (autostart) set those variables unless
 `SHIP_DECK_SHARE` is already set (empty skips one run, as does `--no-share`). Nothing is
-sent until you sign in. Then the share
-button in the top bar opens **Settings > Sharing** (`/share.html`):
+sent until you sign in. Then **More >
+Share and settings** in the top bar opens **Settings > Sharing** (`/share.html`):
 
 1. Sign in with your relay account (invite-only, limited to the relay's email domain, `ALLOWED_HD`). The password goes
    straight to the relay; Ship Deck keeps only a revocable device token in
@@ -651,7 +661,7 @@ All paths are relative to the fleet home. Missing files are fine.
 | `state/<id>.status` | Last line is the displayed state (`resolved` shows as working); the last 5 lines feed the detail drawer. An optional `YYYY-MM-DD HH:MM` prefix and `[key=...]` are parsed; stray non-status lines are skipped. Only the last 64 KB is read. |
 | `state/<id>.turn-ended` and file mtimes | "Last activity" and "turn ended" times |
 | `state/.afk` | Present means the captain is ashore (shown on the Ship view's bridge) |
-| `state/.last-watcher-beat` mtime | Monitoring lamp and health strip: green under 2 min, amber ("late") otherwise |
+| `state/.last-watcher-beat` mtime | Monitoring lamp and the header's monitoring dot: green under 2 min, amber ("late") otherwise |
 | `data/backlog.md` | Loose parse of Captain's Call / In flight / Queued / Done; unknown sections are tolerated. Queued items become "Up next in the queue" rows (and crates in the Ship view's hold). Captain's Call = every open item in the Captain's Call section or tagged `(kind: captain)` / `(hold-kind: captain)` in any open section (the real file keeps them in Queued); options in its `(hold: ...)` become answer buttons. |
 | `data/projects.md` | Project names (Board filter chips, Ship view zones), delivery modes and descriptions |
 | `data/secondmates.md` | Second mates (registry entries without a live meta show as not running) |
