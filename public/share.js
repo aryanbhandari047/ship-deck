@@ -29,6 +29,7 @@
   let projects = null; // Set of chosen project names (null until the first status)
   let notesTagged = false; // Captain notes and memory: only the notes marked Share
   let items = []; // the captain's skills and notes with freshness (/api/share/items)
+  let poolData = null; // the team pool (/api/share/pool)
 
   function h(tag, attrs, ...kids) {
     const el = document.createElement(tag);
@@ -102,6 +103,7 @@
     const signedIn = !!(s && s.enabled && s.account);
     $('signin-box').hidden = !(s && s.enabled && !s.account);
     for (const id of ['people-box', 'what-box', 'log-box', 'usage-box', 'items-box']) $(id).hidden = !signedIn;
+    if (!signedIn) $('pool-box').hidden = true;
     renderKnowledge(signedIn);
     $('share-toggle').hidden = !signedIn;
     if (!s) return;
@@ -136,6 +138,9 @@
     $('knowledge-sub').textContent = k.problem ? k.problem : k.on && k.lastSyncAt ? `Checked ${ago(k.lastSyncAt)}` : '';
     const u = k.usage || {};
     $('usage-perm').hidden = !(k.on && u.available);
+    $('pool-perm').hidden = !k.on;
+    $('pool-toggle').setAttribute('aria-checked', String(k.pool !== false));
+    $('pool-word').textContent = k.pool !== false ? 'On' : 'Off';
     $('usage-toggle').setAttribute('aria-checked', String(!!u.on));
     $('usage-word').textContent = u.on ? 'On' : 'Off';
     // The same read-only skills for other agents on this computer, each with its own switch.
@@ -260,7 +265,9 @@
         h('td', { class: 'muted', text: ago(it.updatedAt) }),
         h('td', { class: it.verifiedAt ? null : 'muted', text: ago(it.verifiedAt) }),
         h('td', null, tag),
-        h('td', null, h('div', { class: 'btn-row end' }, h('button', { class: 'btn sm', type: 'button', text: 'Mark verified', onclick: () => setItem({ key: it.key, verified: true }) })))));
+        h('td', null, h('div', { class: 'btn-row end' },
+          it.tag === 'private' ? null : h('button', { class: 'btn sm', type: 'button', text: 'Offer to team', title: 'An approver reviews it before it reaches the team', onclick: () => poolDo({ action: 'offer', key: it.key }, 'Offered. It reaches the team once an approver approves it.') }),
+          h('button', { class: 'btn sm', type: 'button', text: 'Mark verified', onclick: () => setItem({ key: it.key, verified: true }) })))));
     }
   }
   async function loadItems() {
@@ -272,6 +279,39 @@
       renderItems();
       toast(change.verified ? 'Marked verified. Teammates see the new date on their next sync.' : change.tag === 'private' ? 'Private: this note is no longer sent to anyone.' : 'Saved.');
     } catch (e) { toast(e.message, true); }
+  }
+
+  // ---------- team pool: offers wait for an approver, approved items reach every member ----------
+  function renderPool() {
+    const p = poolData;
+    if (!p) return;
+    const body = $('pool');
+    body.textContent = '';
+    $('pool-preview').hidden = true;
+    const rows = [...p.pending.map((x) => ({ ...x, pending: true })), ...p.items];
+    $('pool-empty').hidden = rows.length > 0;
+    $('pool-table').hidden = !rows.length;
+    $('pool-sub').textContent = p.approver ? 'You approve offers' : `Approved by ${p.approvers.join(', ') || 'the relay owner'}`;
+    const btn = (text, onclick, cls) => h('button', { class: 'btn sm' + (cls ? ' ' + cls : ''), type: 'button', text, onclick });
+    for (const x of rows) {
+      const kind = x.kind === 'skill' ? 'Skill' : 'Note';
+      const actions = x.pending
+        ? [p.approver ? btn('Read', () => { const pre = $('pool-preview'); pre.textContent = x.text || ''; pre.hidden = false; pre.scrollIntoView({ block: 'nearest' }); }) : null,
+          p.approver ? btn('Approve', () => poolDo({ action: 'approve', id: x.id }, `Approved. "${x.title}" reaches the team on their next sync.`)) : null,
+          p.approver || x.mine ? btn(x.mine && !p.approver ? 'Withdraw' : 'Decline', () => poolDo({ action: 'decline', id: x.id }, 'Removed.'), 'danger') : null]
+        : [p.approver ? btn('Remove', () => poolDo({ action: 'remove', id: x.id }, `Removed. It leaves everyone's agent on their next sync.`), 'danger') : null];
+      body.append(h('tr', null,
+        h('td', null, h('b', { text: x.title }), h('span', { class: 'muted', text: ` ${kind}` })),
+        h('td', { text: x.by || '' }),
+        h('td', { class: x.pending ? null : 'muted', text: x.pending ? 'Waiting for approval' : `Approved by ${x.approvedBy || ''} ${ago(x.approvedAt)}` }),
+        h('td', null, h('div', { class: 'btn-row end' }, actions))));
+    }
+  }
+  async function loadPool() {
+    try { poolData = await get('/api/share/pool'); $('pool-box').hidden = false; renderPool(); } catch (e) { $('pool-box').hidden = true; }
+  }
+  async function poolDo(body, done) {
+    try { poolData = (await post('/api/share/pool', body)).pool; $('pool-box').hidden = false; renderPool(); toast(done); } catch (e) { toast(e.message, true); }
   }
 
   // How often teammates' agents used what this captain shares (counts reported by their decks).
@@ -312,6 +352,7 @@
     loadLog();
     loadUsage();
     loadItems();
+    loadPool();
   }
   async function loadLog() {
     try { auditRows = (await get('/api/share/audit')).rows; renderLog(); } catch (e) { toast(e.message, true); }
@@ -414,6 +455,15 @@
   });
   $('log-refresh').addEventListener('click', loadLog);
   $('usage-refresh').addEventListener('click', loadUsage);
+  $('pool-refresh').addEventListener('click', loadPool);
+  $('pool-toggle').addEventListener('click', async () => {
+    const on = !(status.knowledge && status.knowledge.pool !== false);
+    try {
+      status = (await post('/api/share/pool', { action: 'use', on })).status;
+      renderState();
+      toast(on ? 'Team pool items will be added to your skills within a minute.' : 'Turned off. Team pool skills were removed from this computer.');
+    } catch (e) { toast(e.message, true); }
+  });
   $('usage-toggle').addEventListener('click', async () => {
     const on = !(status.knowledge && status.knowledge.usage && status.knowledge.usage.on);
     try {

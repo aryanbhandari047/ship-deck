@@ -34,7 +34,7 @@ const MAX_BODY = 16 * 1024;
 const ORDERS_IN_SNAPSHOT = 60;
 const THREAD_LIMIT = 300;
 const POST_ROUTES = new Set(['/api/send', '/api/orders', '/api/config', '/api/settings']);
-const SHARE_POST = new Set(['/api/share/signin', '/api/share/signout', '/api/share/grant', '/api/share/revoke', '/api/share/invite', '/api/share/pause', '/api/share/knowledge', '/api/share/item']);
+const SHARE_POST = new Set(['/api/share/signin', '/api/share/signout', '/api/share/grant', '/api/share/revoke', '/api/share/invite', '/api/share/pause', '/api/share/knowledge', '/api/share/item', '/api/share/pool']);
 // Library files a "notes and memory" grant may carry (plus memory/*).
 const SHARE_NOTES = ['home:data/captain.md', 'home:data/captain-shared.md', 'home:data/learnings.md'];
 const USAGE = 'usage: ship-deck [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--no-open] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR] [--agents-dir DIR] [--cursor-dir DIR] [--captain-name NAME] [--no-wake] [--share --share-relay URL | --no-share] [--verify-days 30]';
@@ -304,6 +304,10 @@ function createServer(opts) {
     // Read only: how often this computer's agent used what teammates share (counts are reported).
     transcriptsDir: path.join(claudeDir, 'projects'),
     verifyDays: opts.verifyDays,
+    readEntry: async (key) => {
+      const e = library.listLibrary(opts.home, memoryDir, libOpts).find((x) => x.key === key && (isSkill(x) || isNote(x)));
+      return e ? { key: e.key, title: e.title, description: e.description || '', text: readEntryText(e) } : null;
+    },
     listShareable: async () => library.listLibrary(opts.home, memoryDir, libOpts).filter((e) => isSkill(e) || isNote(e))
       .map((e) => ({ key: e.key, kind: isSkill(e) ? 'skill' : 'note', title: e.title, updatedAt: e.mtime })),
     readTerminal: async (id) => (await actions.peekPane(opts.home, id, exec)).text,
@@ -343,6 +347,7 @@ function createServer(opts) {
       if (url.pathname === '/api/share/grants') return json(res, 200, { grants: await agent.listGrants() });
       if (url.pathname === '/api/share/usage') return json(res, 200, { rows: await agent.usageRows() });
       if (url.pathname === '/api/share/items') return json(res, 200, { items: await agent.items() });
+      if (url.pathname === '/api/share/pool') return json(res, 200, await agent.pool());
       if (url.pathname === '/api/share/audit') return json(res, 200, { rows: await agent.audit(url.searchParams.get('since')) });
       if (url.pathname === '/api/share/preview') {
         const list = (k) => (url.searchParams.get(k) || '').split(',').filter(Boolean);
@@ -365,6 +370,10 @@ function createServer(opts) {
       if (url.pathname === '/api/share/item') return json(res, 200, { ok: true, items: await agent.setItem({ key: body.key, verified: body.verified, tag: body.tag }) });
       if (url.pathname === '/api/share/invite') return json(res, 200, { ok: true, invite: await agent.invite(body.email) });
       if (url.pathname === '/api/share/pause') return json(res, 200, { ok: true, status: agent.setPaused(!!body.paused) });
+      if (url.pathname === '/api/share/pool') {
+        if (body.action === 'use') return json(res, 200, { ok: true, status: agent.setUsePool(!!body.on) });
+        return json(res, 200, { ok: true, pool: body.action === 'offer' ? await agent.poolOffer(body.key) : await agent.poolAct(body.action, body.id) });
+      }
       if (url.pathname === '/api/share/knowledge' && typeof body.reportUsage === 'boolean') return json(res, 200, { ok: true, status: agent.setReportUsage(body.reportUsage) });
       if (url.pathname === '/api/share/knowledge') return json(res, 200, { ok: true, status: agent.setKnowledge(!!body.on, typeof body.target === 'string' ? body.target : undefined) });
     } catch (e) { return shareError(res, e); }

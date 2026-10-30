@@ -70,6 +70,11 @@ read per changed captain: 10 knowledge changes a day reaching 5 teammates each i
 commands a day (≈ 14,000/month, 3%). Library pushes bump the version only when the content
 changed, never on the hourly keep-alive.
 
+Team pool: the deck auth MGET also reads `pool:ver`, so it costs nothing until the first
+approval; after that a knowledge list adds one HGET, and a member's pool read is 3-4 commands
+(the read, an approver lookup, an audit row) only when the pool changed. Approver actions are
+rare (a few commands each).
+
 Usage counts: a report goes out only in an hour when the teammate's agent used something shared;
 20 teammates reporting 5 times a day is about 1,000 commands a day (≈ 30,000/month, 6%).
 
@@ -128,7 +133,8 @@ number of viewers watching at once; nothing bills either way.
 | `SESSION_SECRET` | 32+ random characters. Signs deck tokens; changing it signs every deck out. |
 | `ALLOWED_HD` | `keychain.com`. The only email domain that can hold an account, exact match. |
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | From Upstash. `KV_REST_API_URL`/`KV_REST_API_TOKEN` (Marketplace names) also work. |
-| `OWNER_EMAIL` | Optional. This account also sees every sign-in attempt (failures, lockouts) in its audit log. |
+| `OWNER_EMAIL` | Optional. This account also sees every sign-in attempt (failures, lockouts) in its audit log, and approves offers to the team pool (without it the pool is off). |
+| `POOL_APPROVERS` | Optional. More emails (comma-separated) who may approve and remove team pool items. |
 | `SETUP_CODE` | Only for the first account (step 5) or an owner reset: 32+ random characters (48 suggested). Remove it once you have signed in. |
 | `SETUP_ALLOW_RESET` | `1` lets the setup link run while accounts exist, as an owner password reset. Remove it with `SETUP_CODE`. |
 | `AUTH_PROVIDER` | Optional, `password` (the only one today). |
@@ -204,6 +210,7 @@ fails when they drift.
 | `POST /v1/library`, `DELETE /v1/library` | deck token | store or remove the knowledge library projection (re-sanitised, 512 KB) |
 | `GET /v1/knowledge[?since=<version>]`, `GET /v1/knowledge/<captainSub>` | deck token | a teammate's own deck: what every captain shares with this account (hashes), and one captain's granted skills and notes with their text |
 | `GET /v1/agent/library`, `GET /v1/agent/library/<captainSub>/<key>` | agent key | the library list (JSON) and one item (markdown) |
+| `GET /v1/pool`, `POST /v1/pool/offers`, `POST /v1/pool/offers/<id>/approve`, `DELETE /v1/pool/offers/<id>`, `DELETE /v1/pool/items/<id>` | deck token | the team pool: approved items for every account, pending offers (with text) for approvers and their author; anyone offers, approvers approve or remove, an author may withdraw. Members' decks get approved items through `/v1/knowledge` as the deck `team-pool` |
 | `POST /v1/usage`, `GET /v1/usage` | deck token | a teammate's deck reports how often its agent used what captains share with it (counts and times only; items not in the captain's library or not granted to this account are dropped; one audit row per captain); the captain reads their counts (`use:<sub>`, 90 days) |
 
 Nothing else is routed. Viewer deck routes, `/v1/knowledge` and `/v1/agent` answer 405 to every other method. A grant is authored

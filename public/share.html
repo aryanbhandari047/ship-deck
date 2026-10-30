@@ -124,6 +124,16 @@
           <p class="empty-row" id="items-empty">No skills or notes yet.</p>
         </section>
 
+        <section class="panel-box" id="pool-box" aria-labelledby="pool-h" hidden>
+          <div class="pb-head"><h2 id="pool-h">Team pool</h2><span class="hint" id="pool-sub"></span><button class="btn sm" id="pool-refresh" type="button">Refresh</button></div>
+          <table class="tbl" id="pool-table">
+            <thead><tr><th>Skill or note</th><th>Offered by</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead>
+            <tbody id="pool"></tbody>
+          </table>
+          <p class="empty-row" id="pool-empty">Nothing in the team pool yet. Use "Offer to team" on one of your skills or notes above; once approved, it reaches everyone's agent.</p>
+          <pre class="preview" id="pool-preview" hidden></pre>
+        </section>
+
         <section class="panel-box" id="usage-box" aria-labelledby="usage-h" hidden>
           <div class="pb-head"><h2 id="usage-h">How your shared skills are used</h2><span class="hint">Counts only, kept 90 days</span><button class="btn sm" id="usage-refresh" type="button">Refresh</button></div>
           <table class="tbl" id="usage-table">
@@ -141,6 +151,11 @@
             <div class="ctl"><span id="knowledge-word">On</span><button class="toggle" id="knowledge-toggle" type="button" role="switch" aria-checked="true" aria-label="Use knowledge shared with me"></button></div>
           </div>
           <div id="knowledge-targets"></div>
+          <div class="perm" id="pool-perm">
+            <b>Use the team pool</b>
+            <p>Skills and notes teammates offered to the team pool and an approver approved, added the same way. Turning this off removes them.</p>
+            <div class="ctl"><span id="pool-word">On</span><button class="toggle" id="pool-toggle" type="button" role="switch" aria-checked="true" aria-label="Use the team pool"></button></div>
+          </div>
           <div class="perm" id="usage-perm">
             <b>Tell teammates how often I use their skills</b>
             <p>Every hour at most, Ship Deck sends each teammate a count of how many times your Claude Code used their skills or notes, and when. Never your prompts or any other text.</p>
