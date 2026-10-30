@@ -160,7 +160,7 @@ through it.
    sh ~/ship-deck/bin/install.sh --share
    ```
 
-3. Click the share button in the top bar (**Settings > Sharing**), sign in,
+3. Open **More > Share and settings** in the top bar (**Settings > Sharing**), sign in,
    then add a teammate by their `@keychain.com` email, pick what they can see
    and for how long (1, 7 or 30 days).
 

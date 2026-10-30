@@ -9,14 +9,13 @@
   const L = window.ShipDeckLabels;
   const STATE_LABEL = L.STATE_LABEL;
   const MAX_CRATES = 48;
-  const LISTENING_MS = 2 * 60 * 1000; // first mate activity this recent = listening
   const MD = window.ShipDeckMarkdown;
   const B = window.ShipDeckBoard;
 
   const $ = (id) => document.getElementById(id);
   const ui = {
     home: $('home-path'), search: $('search'), sync: $('sync'), syncText: $('sync-text'),
-    healthFm: $('health-fm'), healthMon: $('health-mon'), healthTime: $('health-time'),
+    healthMon: $('health-mon'), healthTime: $('health-time'), menu: $('menu'), greeting: $('board-greeting'),
     firstRun: $('first-run'), firstRunChecked: $('first-run-checked'), captainName: $('captain-name'),
     reconnect: $('reconnect'), reconnectText: $('reconnect-text'), reconnectNow: $('reconnect-now'),
     captain: $('captain'), captainState: $('captain-state'), firstmate: $('firstmate'), fmShipNow: $('fm-ship-now'), lamp: $('lamp'), lampLabel: $('lamp-label'), legend: $('legend'),
@@ -426,8 +425,8 @@
     toast(`Message not sent: ${r.error}`, 'err');
     return false;
   }
-  function toast(text, kind) {
-    const el = h('div', { class: 'toast ' + (kind || ''), role: kind === 'err' ? 'alert' : 'status', text });
+  function toast(text, kind, ico) {
+    const el = h('div', { class: 'toast ' + (kind || ''), role: kind === 'err' ? 'alert' : 'status' }, ico ? icon(ico) : null, text);
     ui.toasts.append(el);
     setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 400); }, kind === 'err' ? 7000 : 3500);
   }
@@ -521,16 +520,24 @@
   }
   function openReport(t) { openDrawer({ type: 'task', id: t.id }); openDataFile(t.id, 'report.md'); }
 
-  // A card: status pill and age, title (opens the drawer), id and project, summary, then actions.
-  function cardShell(key, tone, hoist, pill, title, onOpen, meta, summary, ...rest) {
+  // A card: status pill, project and age, title (opens the drawer), summary, then actions.
+  // Cards that need the captain are full size; the rest are compact (id, tool and the rest
+  // are one click away in the drawer).
+  function cardShell(key, tone, hoist, pill, title, onOpen, project, summary, ...rest) {
     const age = h('span', { class: 'age' });
-    const el = h('article', { class: `bcard tone-${tone}` + (hoist ? ' hoist' : ''), 'data-key': key },
-      h('div', { class: 'card-top' }, pill, age),
+    const el = h('article', { class: `bcard tone-${tone}` + (hoist ? ' hoist' : ' compact'), 'data-key': key },
+      h('div', { class: 'card-top' }, pill, project ? h('span', { class: 'card-proj', text: project }) : null, age),
       h('h3', { class: 'card-title' }, h('button', { class: 'card-link', type: 'button', onclick: onOpen }, title)),
-      h('div', { class: 'card-meta' }, ...meta),
       summary ? h('p', { class: 'card-summary', text: summary }) : null,
       ...rest);
     return { el, age };
+  }
+  // One-shot motion when a card changes column: it settles in, is hoisted into Needs you, or
+  // lands in Done. The class goes once the animations are over, so a re-placed node stays still.
+  function animateMove(el, to) {
+    const cls = ['arrive', to === 'needs' ? 'raise' : to === 'done' ? 'landed' : null].filter(Boolean);
+    el.classList.add(...cls);
+    setTimeout(() => el.classList.remove(...cls), 2600);
   }
   function cached(key, sig, build) {
     const c = cards.get(key);
@@ -542,7 +549,7 @@
   function taskCard(t, col) {
     const st = taskStatus(t);
     const summary = B.cardSummary(t);
-    const sig = JSON.stringify([col, st, t.title, t.project, summary, t.options, t.pr, t.hasReport, t.state, B.toolText(t)]);
+    const sig = JSON.stringify([col, st, t.title, t.project, summary, t.options, t.pr, t.hasReport, t.state]);
     const c = cached('t:' + t.id, sig, () => {
       const name = t.title || t.id;
       let ask = null;
@@ -556,12 +563,11 @@
         t.state === 'done' && t.hasReport ? h('button', { class: 'chip', type: 'button', onclick: () => openReport(t) }, icon('i-file'), 'Read report') : null,
         t.state === 'failed' ? h('button', { class: 'btn sm', type: 'button', text: 'Ask for status', onclick: () => queueOrder({ kind: 'status', target: t.id }) }) : null,
         t.state === 'done' ? h('button', { class: 'btn sm ghost', type: 'button', text: 'Clean up', onclick: () => cleanupTask(t) }) : null,
-        h('span', { class: 'tool', text: B.toolText(t) }),
       ].filter(Boolean);
       return cardShell('t:' + t.id, st.tone, col === 'needs', pillEl(st), name, () => openDrawer({ type: 'task', id: t.id }),
-        [name !== t.id ? h('code', { text: t.id }) : null, h('span', { text: t.project })], summary,
-        ask, h('div', { class: 'card-foot' }, ...foot));
+        t.project, summary, ask, foot.length ? h('div', { class: 'card-foot' }, ...foot) : null);
     });
+    if (moves.has(t.id)) animateMove(c.el, col);
     c.el.classList.toggle('selected', !!selected && selected.type === 'task' && selected.id === t.id);
     c.age.textContent = t.lastActivity ? agoLong(t.lastActivity) : '';
     return c.el;
@@ -576,7 +582,7 @@
         : b.options && b.options.length ? optionButtons(b.options, (o) => answerCall(b, o, ''))
           : replyRow('call.' + b.id, 'Your answer…', 'Answer', (text) => answerCall(b, null, text));
       return cardShell(key, 'needs', true, pillEl(B.callStatus()), b.title || b.id, () => open(false),
-        [b.id ? h('code', { text: b.id }) : null, h('span', { text: (b.tags && b.tags.repo) || 'Queue' })], hold, ask);
+        (b.tags && b.tags.repo) || 'Queue', hold, ask);
     });
     c.age.textContent = b.tags && b.tags.since ? `since ${shortDate(b.tags.since)}` : '';
     return c.el;
@@ -595,7 +601,7 @@
     });
     return c.el;
   }
-  function emptyCard(title, text) { return h('div', { class: 'empty-card' }, h('h3', { text: title }), text ? h('p', { text }) : null); }
+  function allClear(text) { return h('div', { class: 'all-clear' }, flagEl('c', 'lg'), h('p', null, h('b', { text: 'Nothing needs you. ' }), text)); }
   function subHead(text, n) { return h('div', { class: 'sub-head' }, text, h('span', { class: 'count', text: n })); }
   // "2026-01-03" -> "3 Jan" (year kept when it differs).
   function shortDate(s) {
@@ -622,10 +628,29 @@
     return c;
   }
 
+  // Workers that changed column since the last poll (id -> previous column), whatever the view
+  // or filter; a worker that just finished gets a toast.
+  let prevCols = null;
+  let moves = new Map();
+  function noteMoves() {
+    const now = new Map(snap.tasks.filter((t) => t.kind !== 'secondmate').map((t) => [t.id, B.columnOf(t)]));
+    moves = new Map();
+    if (prevCols) for (const [id, col] of now) if (prevCols.has(id) && prevCols.get(id) !== col) moves.set(id, prevCols.get(id));
+    prevCols = now;
+    for (const [id] of moves) if (now.get(id) === 'done') toast(`Finished: ${titleOf(id)}`, 'ok', 'i-check');
+  }
+  function greeting() {
+    const hr = new Date().getHours();
+    return hr < 5 ? 'On the night watch' : hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
+  }
+  let prevNeeds = null;
+
   function renderBoard() {
     const g = B.groupBoard(snap, { project: boardProject, match: matchesTask, matchItem: matchesCrate });
     if (boardProject && !g.projects.some((p) => p.toLowerCase() === boardProject.toLowerCase())) { boardProject = null; store.set('boardProject', null); return renderBoard(); }
-    ui.boardTitle.textContent = boardProject || 'All work';
+    const n = g.counts.needs;
+    ui.greeting.textContent = `${greeting()}, Captain`;
+    ui.boardTitle.textContent = (n ? `${n} ${n === 1 ? 'thing needs' : 'things need'} you` : 'All clear') + (boardProject ? ` in ${boardProject}` : '');
     if (!unchanged('board-filters', g.projects, boardProject)) {
       const chipBtn = (name, label) => h('button', { class: 'filter', type: 'button', 'aria-pressed': String((boardProject || null) === name), text: label,
         onclick: () => { boardProject = name; store.set('boardProject', name); renderAll(); } });
@@ -635,29 +660,31 @@
     const nothing = !snap.tasks.length && !(snap.backlog.queued || []).length;
     const bodies = {
       needs: g.needs.length ? g.needs.map((x) => (x.type === 'task' ? taskCard(x.t, 'needs') : callCard(x.b)))
-        : [emptyCard('Nothing needs you', nothing ? 'No workers yet. Ask the first mate for work in the chat, or start a New job.'
-          : filtered ? 'Nothing here matches the filter.' : 'Workers are moving. A flag goes up here, with an alert if you turn them on, when one needs your call.')],
+        : [allClear(nothing ? 'No workers yet. Ask the first mate for work in the chat, or start a New job.'
+          : filtered ? 'Nothing that matches the filter, at least.' : 'Workers are moving. A flag goes up here, with an alert if you turn them on, when one needs your call.')],
       working: g.working.length ? g.working.map((t) => taskCard(t, 'working')) : [h('p', { class: 'col-note', text: 'No one is working right now.' })],
       waiting: [
         ...g.waiting.map((t) => taskCard(t, 'waiting')),
         ...(g.quiet.length ? [subHead('Quiet for a while', g.quiet.length), ...g.quiet.map((t) => taskCard(t, 'quiet'))] : []),
         ...(g.queue.length ? [subHead('Up next in the queue', g.queue.length), ...g.queue.map(queueRow)] : []),
       ],
-      done: [...g.done.map((t) => taskCard(t, 'done')), h('p', { class: 'col-note', text: g.done.length ? 'Finished work stays here until you clean it up.' : 'Nothing finished yet.' })],
+      done: g.done.length ? g.done.map((t) => taskCard(t, 'done')) : [h('p', { class: 'col-note', text: 'Nothing finished yet.' })],
     };
     if (!bodies.waiting.length) bodies.waiting.push(h('p', { class: 'col-note', text: 'Nothing is waiting.' }));
     const counts = { needs: g.counts.needs, working: g.counts.working, waiting: g.counts.waiting, done: g.counts.done };
     const roots = B.COLUMNS.map((def) => {
       const c = column(def.key);
       if (!unchanged('col-head-' + def.key, counts[def.key], def.key === 'done' && g.done.map((t) => t.id))) {
+        const bump = def.key === 'needs' && prevNeeds !== null && counts.needs > prevNeeds;
         c.head.replaceChildren(...[flagEl(def.flag), h('h2', { text: def.title }),
-          h('span', { class: 'count' + (def.key === 'needs' && counts.needs ? ' needs' : ''), text: counts[def.key], title: `${counts[def.key]} in ${def.title}` }),
+          h('span', { class: 'count' + (def.key === 'needs' && counts.needs ? ' needs' : '') + (bump ? ' bump' : ''), text: counts[def.key], title: `${counts[def.key]} in ${def.title}` }),
           h('span', { class: 'spacer' }),
           def.key === 'done' && g.done.length ? h('button', { class: 'btn sm ghost', type: 'button', text: g.done.length === 1 ? 'Clean up' : 'Clean up all', onclick: () => cleanupDone(g.done) }) : null].filter(Boolean));
       }
       setKids(c.body, bodies[def.key]);
       return c.root;
     });
+    prevNeeds = counts.needs;
     setKids(ui.cols, roots);
     // Forget cards that left the board.
     const live = new Set([...ui.cols.querySelectorAll('[data-key]')].map((el) => el.dataset.key));
@@ -1297,7 +1324,7 @@
     fmSess = { filter, list: h('ul', { class: 'list sessions' }) };
     filter.addEventListener('input', () => renderSessions(true));
     ui.drawerBody.replaceChildren(dl,
-      h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', type: 'button', onclick: () => { closeDrawer(); showTab('bridge'); ui.chatText.focus(); } }, icon('i-chat'), 'Open the chat')),
+      h('div', { class: 'btn-row' }, h('button', { class: 'btn primary', type: 'button', onclick: () => { closeDrawer(); openChat(); } }, icon('i-chat'), 'Open the chat')),
       h('section', { class: 'drawer-sec' }, h('h3', { text: 'Open in terminal' }),
         h('p', { class: 'hint', text: 'The newest Claude Code session started in the fleet home.' }), resumeBlock(sess)),
       h('section', { class: 'drawer-sec' }, h('h3', { text: 'Past sessions' }),
@@ -1383,12 +1410,35 @@
   ui.viewBoard.addEventListener('click', () => setView('board'));
   ui.viewShip.addEventListener('click', () => setView('ship'));
   ui.fmWho.addEventListener('click', () => openFirstMate());
-  // On narrow screens the panel sits under the board: jump down to the chat.
-  ui.chatJump.addEventListener('click', () => {
+  // Wide screens: the chat button shows or hides the side panel (remembered), so the board can
+  // have the whole width. Narrow screens: the panel sits under the board, so it jumps down to it.
+  const wide = matchMedia('(min-width: 900px)');
+  function setChatHidden(hide, save) {
+    document.body.classList.toggle('chat-hidden', hide);
+    if (save) store.set('chatHidden', hide ? '1' : null);
+    syncChatBtn();
+  }
+  function syncChatBtn() {
+    const hidden = document.body.classList.contains('chat-hidden');
+    if (wide.matches) ui.chatJump.setAttribute('aria-pressed', String(!hidden));
+    else ui.chatJump.removeAttribute('aria-pressed');
+    ui.chatJump.title = !wide.matches ? 'Chat with the first mate' : hidden ? 'Show the chat with the first mate' : 'Hide the chat';
+  }
+  wide.addEventListener('change', syncChatBtn);
+  function openChat() {
+    if (wide.matches && document.body.classList.contains('chat-hidden')) setChatHidden(false, true);
     showTab('bridge');
-    ui.panel.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    if (!wide.matches) ui.panel.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
     ui.chatText.focus({ preventScroll: true });
+  }
+  ui.chatJump.addEventListener('click', () => {
+    if (wide.matches && !document.body.classList.contains('chat-hidden')) setChatHidden(true, true);
+    else openChat();
   });
+  setChatHidden(store.get('chatHidden') === '1', false);
+
+  // The More menu (a native popover): close it once an item is picked.
+  ui.menu.addEventListener('click', (e) => { if (e.target.closest('.menu-item') && ui.menu.hidePopover) ui.menu.hidePopover(); });
 
   // ---------- resizable side panel ----------
   // The panel width lives in --panel-w on .layout; CSS clamps it to 320px..70vw.
@@ -1617,10 +1667,12 @@
     }
     if (!thread.length) {
       kids.push(h('li', { class: 'thread-empty' },
+        h('span', { class: 'fm-avatar' }, icon('i-helm')),
         h('p', { text: 'No messages yet.' }),
         h('p', { class: 'hint', text: 'Ask the first mate anything: “what needs me?”, “start the monitoring fix”, “summarise PR 42”. Every message goes to the first mate, and replies show up here.' })));
     }
     ui.thread.replaceChildren(...kids);
+    ui.suggest.hidden = thread.length > 0; // starters for an empty chat only
     threadRendered = true;
     if (wasBottom) scrollThread(true);
     else if (lastReplyId() && lastReplyId() !== seenId) ui.threadJump.hidden = false;
@@ -1633,7 +1685,7 @@
   let seenId = store.get('seenReply');
   function markSeen() {
     const last = lastReplyId();
-    if (!last || activeTab !== 'bridge' || document.hidden || !nearBottom()) return updateUnread();
+    if (!last || activeTab !== 'bridge' || document.hidden || !ui.thread.getClientRects().length || !nearBottom()) return updateUnread();
     if (seenId !== last) { seenId = last; store.set('seenReply', last); }
     updateUnread();
   }
@@ -1641,6 +1693,7 @@
     const n = thread.filter((x) => x.type === 'reply' && (!seenId || x.id > seenId)).length;
     ui.unread.textContent = n;
     ui.unread.hidden = n === 0;
+    ui.chatJump.classList.toggle('has-unread', n > 0);
     document.title = (n ? `(${n}) ` : '') + 'Ship Deck';
   }
 
@@ -1927,9 +1980,10 @@
   // ---------- notifications ----------
   const canNotify = 'Notification' in window;
   function renderNotifyBtn() {
-    if (!canNotify) { ui.notifyBtn.textContent = 'Alerts unavailable'; ui.notifyBtn.disabled = true; return; }
+    const label = ui.notifyBtn.querySelector('.notify-label');
+    if (!canNotify) { label.textContent = 'Alerts unavailable'; ui.notifyBtn.disabled = true; return; }
     const p = Notification.permission;
-    ui.notifyBtn.textContent = p === 'granted' ? 'Alerts on' : p === 'denied' ? 'Alerts blocked' : 'Enable alerts';
+    label.textContent = p === 'granted' ? 'Alerts on' : p === 'denied' ? 'Alerts blocked' : 'Enable alerts';
     ui.notifyBtn.setAttribute('aria-pressed', p === 'granted' ? 'true' : 'false');
     ui.notifyBtn.title = p === 'denied' ? 'Notifications are blocked for this site in the browser settings' : 'Browser notifications for new replies and items that need you';
   }
@@ -1960,7 +2014,7 @@
     store.set('notifiedReply', last);
     if (!document.hidden && activeTab === 'bridge') return;
     const r = fresh[fresh.length - 1];
-    notify(fresh.length > 1 ? `First mate (${fresh.length} new)` : 'First mate', r.text, 'shipdeck-reply', () => showTab('bridge'));
+    notify(fresh.length > 1 ? `First mate (${fresh.length} new)` : 'First mate', r.text, 'shipdeck-reply', () => openChat());
   }
   // New "needs you" items: workers entering decision/blocked/failed, or new queue decisions.
   function notifyNeeds() {
@@ -2012,7 +2066,8 @@
   }
 
   // ---------- health strip ----------
-  // First mate listening (transcript activity < 2 min), Monitoring, Updated; "Deck offline" only when it is.
+  // Monitoring in the top bar (its word shows only when it is late or off), the last update in the
+  // More menu, "Deck offline" only when it is. The first mate's own state is in the panel head.
   function setHealth(el, cls, text, title) {
     el.classList.remove('ok', 'warn', 'err');
     if (cls) el.classList.add(cls);
@@ -2021,11 +2076,6 @@
   }
   function renderHealth() {
     if (!snap || snap.firstRun) return;
-    const fmAt = act.lastAt;
-    const listening = act.working || (fmAt && Date.now() - fmAt < LISTENING_MS);
-    setHealth(ui.healthFm, listening ? 'ok' : act.loaded && !act.sessionId ? 'err' : null,
-      listening ? 'First mate listening' : act.loaded && !act.sessionId ? 'First mate not found' : 'First mate quiet',
-      fmAt ? `Last first mate activity ${agoLong(fmAt)}` : 'No first mate activity seen yet');
     const w = snap.watcher;
     setHealth(ui.healthMon, w.lastBeat ? (w.healthy ? 'ok' : 'warn') : 'err',
       w.lastBeat ? (w.healthy ? 'Monitoring on' : 'Monitoring late') : 'Not monitoring',
@@ -2040,7 +2090,6 @@
     ui.home.textContent = 'No firstmate folder yet';
     ui.firstRunChecked.replaceChildren(...['The --home flag', 'The FM_HOME variable', ...(snap.checked || [])].map((p, i) =>
       h('li', null, h('span', { class: 'ic todo' }, icon('i-dash')), h('div', null, i < 2 ? h('b', { text: p }) : h('code', { text: p }), h('span', { text: i < 2 ? 'Not set' : 'Not a firstmate folder' })))));
-    ui.healthFm.hidden = true;
     ui.healthMon.hidden = true;
   }
   $('fr-copy').addEventListener('click', (e) => copyText($('fr-cmd').textContent, e.currentTarget));
@@ -2051,6 +2100,7 @@
     if (snap.firstRun) return renderFirstRun();
     ui.home.textContent = snap.homeLabel || snap.home;
     ui.home.title = `Firstmate home (read-only): ${snap.home}`;
+    noteMoves();
     if (view === 'board') renderBoard();
     else {
       renderBridge();
@@ -2227,7 +2277,7 @@
     }
     if (gPending && Date.now() - gPending < 1500) {
       gPending = 0;
-      const go = { b: () => setView('board'), s: () => setView('ship'), c: () => { showTab('bridge'); ui.chatText.focus(); }, a: () => showTab('activity'), l: () => openLibrary() }[k];
+      const go = { b: () => setView('board'), s: () => setView('ship'), c: () => openChat(), a: () => { if (wide.matches && document.body.classList.contains('chat-hidden')) setChatHidden(false, true); showTab('activity'); }, l: () => openLibrary() }[k];
       if (go) { e.preventDefault(); if (selected && k !== 'c' && k !== 'a') closeDrawer(); go(); }
       return;
     }
