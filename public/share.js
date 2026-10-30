@@ -14,6 +14,7 @@
     { key: 'notes', name: 'Captain notes and memory', desc: 'Your rules for the first mate, which their agent can use too. Read them before sharing.', on: false, col: 1 },
     { key: 'chat', name: 'First mate chat and activity', desc: 'Your conversation and its tool calls', on: false, col: 1 },
     { key: 'ask', name: 'Questions about skills and notes', desc: 'Their agent can ask questions and gets up to 3 short quoted passages each, without copying your skills and notes to them. Each question (redacted) shows in your log. Many questions can piece the text together, so share only what you would let them read.', on: false, col: 0 },
+    { key: 'suggest', name: 'Suggest answers', desc: 'They can suggest an option on a waiting decision, with a note. You see it on the decision; nothing reaches your agent unless you answer with it yourself. Needs the Board.', on: false, col: 1 },
   ];
   const NAME = Object.fromEntries(SCOPES.map((s) => [s.key, s.name]));
   const NEVER = [

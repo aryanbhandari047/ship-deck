@@ -70,6 +70,11 @@ read per changed captain: 10 knowledge changes a day reaching 5 teammates each i
 commands a day (≈ 14,000/month, 3%). Library pushes bump the version only when the content
 changed, never on the hourly keep-alive.
 
+Suggestions (`suggest`): a suggestion is about 9 commands (session, snapshot and captain in
+one pipeline, a rate counter, the write, version and audit), a deck list 2 only when the version
+moved, a used/dismissed report 4; the version read itself is free (deck-auth MGET). At 50 a day,
+well under 1% of the free tier.
+
 Team pool: the deck auth MGET also reads `pool:ver`, so it costs nothing until the first
 approval; after that a knowledge list adds one HGET, and a member's pool read is 3-4 commands
 (the read, an approver lookup, an audit row) only when the pool changed. Approver actions are
@@ -215,6 +220,8 @@ fails when they drift.
 | `POST /v1/library`, `DELETE /v1/library` | deck token | store or remove the knowledge library projection (re-sanitised, 512 KB) |
 | `GET /v1/knowledge[?since=<version>]`, `GET /v1/knowledge/<captainSub>` | deck token | a teammate's own deck: what every captain shares with this account (hashes), and one captain's granted skills and notes with their text |
 | `GET /v1/agent/library`, `GET /v1/agent/library/<captainSub>/<key>` | agent key | the library list (JSON) and one item (markdown) |
+| `GET`, `POST /v1/decks/<captainSub>/suggestions` | viewer session | live pairing (scope `suggest`): the viewer's own suggestions with their states; `POST { ref, letter, note? }` for a visible worker waiting on a decision, a current option letter, note ≤ 300 characters; same-origin check; 5 waiting per viewer, 20 per deck, 10 an hour; 24 h |
+| `GET /v1/suggestions`, `POST /v1/suggestions/<id>` | deck token | the captain's deck lists pending suggestions (grant re-checked per viewer) and reports `{ state: used \| dismissed }`; the version (`sugv:<sub>`) rides in the deck-auth MGET and on grant and push answers as `suggest` |
 | `GET /v1/pool`, `POST /v1/pool/offers`, `POST /v1/pool/offers/<id>/approve`, `DELETE /v1/pool/offers/<id>`, `DELETE /v1/pool/items/<id>` | deck token | the team pool: approved items for every account, pending offers (with text) for approvers and their author; anyone offers, approvers approve or remove, an author may withdraw. Members' decks get approved items through `/v1/knowledge` as the deck `team-pool` |
 | `POST /v1/ask` | deck token | a teammate's deck asks `{ question, captain? }` of captains whose grant to this account has `ask`: up to 3 passages (≤ 600 characters, `lines`, title, dates) ranked by BM25 over the term summary stored as `lib:<sub>` field `x` at library push; 30 an hour / 200 a day per grant (`askh:`/`askd:`); one audit row per captain with the question (redacted by the deck) and what was quoted |
 | `POST /v1/usage`, `GET /v1/usage` | deck token | a teammate's deck reports how often its agent used what captains share with it (counts and times only; items not in the captain's library or not granted to this account are dropped; one audit row per captain); the captain reads their counts (`use:<sub>`, 90 days) |

@@ -315,7 +315,7 @@ the backstop. `--no-wake` turns it off.
 | kind | target | payload | meaning |
 | --- | --- | --- | --- |
 | `chat` | - | `text` (multi-line, max 4000; may be empty when there are attachments), optional `attachments` | Free-text message from the Bridge. Answer with `reply`. |
-| `decision` | crew id | `option` (`A`-`H` or `null`), `text` | Answer to a needs-decision/blocked worker; `text` is `(B) <option text>` plus any note, or a free answer. |
+| `decision` | crew id | `option` (`A`-`H` or `null`), `text`, optional `suggestedBy` | Answer to a needs-decision/blocked worker; `text` is `(B) <option text>` plus any note, or a free answer. `suggestedBy` (an email) is present when the captain answered with a teammate's suggestion; the server sets it after checking the suggestion (`suggestion: <id>` in the request), never from the request itself. |
 | `answer` | crew id | `text` | Legacy free-text answer (older UI). |
 | `status` | crew id | - | Ask the worker for a status update. |
 | `merge` | crew id | - | Merge its PR. Irreversible: confirm with the captain first. |
@@ -564,6 +564,20 @@ Share your deck** in the top bar opens **Settings > Sharing** (`/share.html`):
    shared skills are used**. Many questions can piece the text together, so share only what
    you would let them read. Revoking stops it at once; the `teammate-ask` skill goes on their
    next check.
+9. **Suggest answers** (scope `suggest`, off by default, only with Board): on the relay page a
+   teammate can suggest one of the current options for a worker waiting on a decision, with a
+   note of up to 300 characters. Your deck picks it up with its regular grant check (at most 10
+   minutes; the version rides on that answer) and shows it on the worker's decision: "<who>
+   suggests B", their note marked "shown to you only and never sent", and **Answer with B**,
+   **Dismiss**, **Stop suggestions from them**. Nothing reaches an agent unless you answer: Answer
+   with B opens the usual confirm and sends the same `decision` order as clicking B yourself,
+   with only `suggestedBy` added (set by the server after checking the suggestion is still
+   pending for that worker and letter; never taken from the request); the note is never sent.
+   The relay checks the worker is visible under their projects and still waiting, and the
+   letter is on offer; at most 5 waiting per viewer, 20 per deck, 10 new an hour per viewer;
+   suggestions last 24 hours. Revoking or narrowing the grant hides theirs at once (the relay
+   re-checks the grant on every read). Each suggestion, refusal, use and dismissal is a row in
+   your log, and the viewer sees whether theirs was used.
 
 ![Settings > Sharing: people with access, what they can see, and the audit log](share-settings.png)
 ![A teammate's read-only view of the sample fleet on the relay](share-viewer.png)
@@ -587,8 +601,9 @@ dropped; their full text still travels in the library). Workers are keyed by an 
 | Captain notes and memory (also given to their agent as one reference skill) | off | |
 | First mate chat and activity (labels only) | off | |
 | Questions about skills and notes (`ask`: 3 short quoted passages per question, nothing synced) | off | the question shows in your log |
+| Suggest answers (`suggest`: an option letter + a note you see; only you can send it) | off | needs Board |
 | Attachments, paths, worktrees, windows, session ids, orders | never | not in the allow-list |
-| Sending anything | never | viewers can only make and revoke their own agent keys; `/v1/knowledge` and `/v1/agent` are GET only |
+| Sending anything | never | viewers can only make and revoke their own agent keys and, with `suggest`, suggest an option you may use; `/v1/knowledge` and `/v1/agent` are GET only |
 
 Nothing is pushed until someone has an active grant. The share agent pushes only when the
 redacted snapshot changes, at most every 30 s, plus a keep-alive every 10 minutes; on quota,

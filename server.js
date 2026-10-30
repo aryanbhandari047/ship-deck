@@ -34,7 +34,7 @@ const MAX_BODY = 16 * 1024;
 const ORDERS_IN_SNAPSHOT = 60;
 const THREAD_LIMIT = 300;
 const POST_ROUTES = new Set(['/api/send', '/api/orders', '/api/config', '/api/settings']);
-const SHARE_POST = new Set(['/api/share/signin', '/api/share/signout', '/api/share/grant', '/api/share/revoke', '/api/share/invite', '/api/share/pause', '/api/share/knowledge', '/api/share/item', '/api/share/pool', '/api/share/ask']);
+const SHARE_POST = new Set(['/api/share/signin', '/api/share/signout', '/api/share/grant', '/api/share/revoke', '/api/share/invite', '/api/share/pause', '/api/share/knowledge', '/api/share/item', '/api/share/pool', '/api/share/ask', '/api/share/suggestion']);
 // Library files a "notes and memory" grant may carry (plus memory/*).
 const SHARE_NOTES = ['home:data/captain.md', 'home:data/captain-shared.md', 'home:data/learnings.md'];
 const USAGE = 'usage: ship-deck [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--no-open] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR] [--agents-dir DIR] [--cursor-dir DIR] [--captain-name NAME] [--no-wake] [--share --share-relay URL | --no-share] [--verify-days 30]';
@@ -281,6 +281,8 @@ function createServer(opts) {
     snap.settings = settings.readSettings(ordersDir);
     snap.homeLabel = tildePath(opts.home);
     snap.firstmate = { session: sessionView(known[sessions.FIRST_MATE_KEY], 'claude') };
+    // Teammates' suggested answers (live pairing), shown on the decision; never sent by themselves.
+    snap.suggestions = agent ? agent.suggestions(snap.tasks) : [];
     return snap;
   }
 
@@ -373,6 +375,10 @@ function createServer(opts) {
       if (url.pathname === '/api/share/item') return json(res, 200, { ok: true, items: await agent.setItem({ key: body.key, verified: body.verified, tag: body.tag }) });
       if (url.pathname === '/api/share/invite') return json(res, 200, { ok: true, invite: await agent.invite(body.email) });
       if (url.pathname === '/api/share/pause') return json(res, 200, { ok: true, status: agent.setPaused(!!body.paused) });
+      if (url.pathname === '/api/share/suggestion') {
+        if (body.action === 'stop') return json(res, 200, { ok: true, grants: await agent.stopSuggestions(body.id) });
+        return json(res, 200, { ok: true, done: await agent.resolveSuggestion(body.id, 'dismissed') });
+      }
       if (url.pathname === '/api/share/pool') {
         if (body.action === 'use') return json(res, 200, { ok: true, status: agent.setUsePool(!!body.on) });
         return json(res, 200, { ok: true, pool: body.action === 'offer' ? await agent.poolOffer(body.key) : await agent.poolAct(body.action, body.id) });
@@ -450,8 +456,17 @@ function createServer(opts) {
     }
     if (url.pathname === '/api/orders') {
       try {
-        const order = orders.createOrder(ordersDir, body, await orderContext(opts.home));
+        const ctx = await orderContext(opts.home);
+        // Answering with a viewer's suggestion (live pairing): it must still be pending for this
+        // worker and letter; the order records only who suggested it, never their note.
+        const sugId = body.suggestion === undefined || body.suggestion === null ? null : String(body.suggestion);
+        if (sugId) {
+          if (!agent || body.kind !== 'decision') throw new Error('only a decision can use a suggestion');
+          ctx.suggestedBy = agent.takeSuggestion(sugId, body.target, body.option, (await buildSnapshot(opts.home, { tmux: false })).tasks).by;
+        }
+        const order = orders.createOrder(ordersDir, body, ctx);
         if (opts.wake !== false) wake.wake(opts.home, order);
+        if (sugId) agent.resolveSuggestion(sugId, 'used').catch((e) => console.warn('share: suggestion: ' + e.message));
         return json(res, 200, { ok: true, order });
       } catch (e) {
         return json(res, 400, { ok: false, error: e.message });

@@ -245,6 +245,7 @@
         [has('notes'), 'Notes and memory'],
         [has('chat'), 'Chat and activity'],
         [has('ask'), 'Answers to your agent\'s questions (short quotes; they see each question)'],
+        [has('suggest'), 'Suggest answers to decisions (they decide)'],
       ];
       for (const [yes, text] of rows) list.append(h('li', { class: yes ? 'yes' : 'no' }, icon(yes ? 'i-check' : 'i-dash'), text));
       list.append(h('li', { class: 'no' }, icon('i-lock'), 'Attachments, paths, sessions'));
@@ -256,7 +257,9 @@
       // Ship Deck syncs skills and notes into the viewer's agent on its own; keys are for agents without it.
       if (has('skills') || has('notes')) extras.append(h('button', { class: 'btn sm', type: 'button', onclick: (e) => openKeys(e.currentTarget) }, icon('i-lock'), 'Agent keys'));
     }
-    $('aside-ask').textContent = `You can look but not act. To ask ${first(name)} something, message them directly.`;
+    $('aside-ask').textContent = g && g.scopes.includes('suggest')
+      ? `You can look and suggest answers to decisions; ${first(name)} decides and sends. To ask something else, message them directly.`
+      : `You can look but not act. To ask ${first(name)} something, message them directly.`;
     const box = $('decks');
     box.textContent = '';
     for (const x of decks) {
@@ -307,6 +310,7 @@
     if (w.summary) body.append(h('p', { class: 'card-summary' }, rtext(w.summary)));
     for (const o of w.options || []) body.append(h('div', { class: 'opt-ro' }, h('b', { text: o.letter }), rtext(o.text)));
     const g = board.grant;
+    if (g.scopes.includes('suggest') && ['needs-decision', 'blocked'].includes(w.state) && (w.options || []).length) body.append(await suggestForm(w));
     if (g.scopes.includes('updates')) {
       const d = await scope('updates', w.ref);
       const list = (d && d.updates && d.updates[w.ref]) || [];
@@ -321,6 +325,27 @@
         ? h('div', { class: 'term' }, h('pre', { class: 'peek wrap', tabindex: '0' }, rtext(t.lines.join('\n'))), h('div', { class: 'term-foot', text: `Captured ${ago(t.at)} ago` }))
         : h('p', { class: 'empty', text: 'No terminal for this worker right now' })));
     }
+  }
+  // Live pairing: suggest one of the options, with a note the captain sees but never sends.
+  // Nothing is sent to their agent until they answer it themselves.
+  async function suggestForm(w) {
+    const mine = await get(`/v1/decks/${encodeURIComponent(current)}/suggestions`);
+    const list = ((mine.data && mine.data.suggestions) || []).filter((s) => s.ref === w.ref);
+    const STATE = { pending: 'Waiting for them', used: 'They answered with it', dismissed: 'Not used' };
+    const pick = h('select', { class: 'input', 'aria-label': 'Option to suggest' }, (w.options || []).map((o) => h('option', { value: o.letter, text: o.letter })));
+    const note = h('input', { class: 'input', maxlength: '300', placeholder: 'Why (optional; they see it, it is never sent to their agent)', 'aria-label': 'Note for the captain' });
+    const out = h('p', { class: 'muted', role: 'status' });
+    const btn = h('button', { class: 'btn sm', type: 'button', text: 'Suggest' });
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      const r = await post(`/v1/decks/${encodeURIComponent(current)}/suggestions`, { ref: w.ref, letter: pick.value, note: note.value });
+      btn.disabled = false;
+      out.textContent = r.status === 200 ? `Suggested ${pick.value}. It reaches their agent only if they answer with it.` : (r.data && r.data.error) || 'Could not suggest right now';
+      if (r.status === 200) note.value = '';
+    });
+    return h('section', null, h('h3', { text: 'Suggest an answer' }),
+      list.length ? h('ul', { class: 'v-list' }, list.map((s) => h('li', null, h('span', { class: 'when', text: `You suggested ${s.letter} · ${STATE[s.state] || s.state}` }), s.note ? h('span', null, rtext(s.note)) : null))) : null,
+      h('div', { class: 'btn-row' }, pick, note, btn), out);
   }
   async function openScope(k, from) {
     const body = openSheet(SCOPE_NAME[k], from);
