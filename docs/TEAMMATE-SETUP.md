@@ -64,12 +64,19 @@ The installer:
 - copies Ship Deck to `~/.ship-deck/app` and adds a `ship-deck` command in
   `~/.local/bin`.
 
-It never uses `sudo` and changes nothing else unless you ask:
+On a Mac, a first install also offers **Stay awake with the lid closed** (on
+by default: press Enter to keep it, `n` to skip; macOS asks for your password
+once). It keeps your agents running when you close the lid. Turn it off any
+time in Settings > You or with `ship-deck awake off`.
+
+Apart from that one password prompt it never uses `sudo`, and it changes
+nothing else unless you ask:
 
 | Add this | To |
 | --- | --- |
 | `--home /path/to/firstmate` | keep firstmate in another folder (set up there when it is missing; Ship Deck remembers it) |
 | `--no-edit-path` | do not add `~/.local/bin` to your PATH in your shell settings (it does by default when missing; with this it prints the line for you to add) |
+| `--no-keep-awake` | Mac only: leave normal sleep alone (`--keep-awake` turns it on without asking, also on a re-run; re-runs otherwise keep your choice) |
 | `--autostart` | start Ship Deck at login (a LaunchAgent on a Mac, a systemd user service on Linux) |
 | `--no-share` | turn sharing off (it is on by default, with the Keychain relay, so skills teammates share reach your agent; nothing is sent until you sign in). Remembered by `ship-deck`, `--autostart` and later installs until `--share` (or `--share-relay URL` for another relay) |
 

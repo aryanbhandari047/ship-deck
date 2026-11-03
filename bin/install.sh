@@ -13,9 +13,12 @@
 #   - sharing on by default (the Keychain relay, or --share-relay URL), so teammates' shared skills
 #     reach this computer's agent; --no-share turns it off, and the launcher, autostart and later
 #     installs remember the choice until --share;
-#   - adds ~/.local/bin to PATH in your shell rc file when missing (--no-edit-path to skip).
+#   - adds ~/.local/bin to PATH in your shell rc file when missing (--no-edit-path to skip);
+#   - macOS, first install only: "stay awake with the lid closed" (pmset disablesleep, via the
+#     `ship-deck awake on` CLI and the terminal's own sudo prompt); asked, on by default,
+#     --no-keep-awake skips it, --keep-awake turns it on without asking (also on a re-run).
 # Safe to re-run: it replaces its own files and nothing else.
-#   sh bin/install.sh [--home DIR] [--from GIT_URL] [--autostart] [--share | --share-relay URL | --no-share] [--no-edit-path]
+#   sh bin/install.sh [--home DIR] [--from GIT_URL] [--autostart] [--share | --share-relay URL | --no-share] [--keep-awake | --no-keep-awake] [--no-edit-path]
 set -eu
 
 DEFAULT_REPO=https://github.com/aryanbhandari047/ship-deck.git
@@ -28,7 +31,7 @@ warn() { printf 'warning: %s\n' "$*" >&2; }
 die() { printf 'ship-deck install: %s\n' "$*" >&2; exit 1; }
 
 usage() {
-  say "usage: sh bin/install.sh [--home DIR] [--from GIT_URL] [--autostart] [--share | --share-relay URL | --no-share] [--no-edit-path]"
+  say "usage: sh bin/install.sh [--home DIR] [--from GIT_URL] [--autostart] [--share | --share-relay URL | --no-share] [--keep-awake | --no-keep-awake] [--no-edit-path]"
   say "  --home DIR      your firstmate home, set up there when missing (default: \$FM_HOME, else ~/firstmate)"
   say "  --from GIT_URL  install from a fresh clone of this repo instead of this checkout"
   say "                  (default when not run from a checkout: $DEFAULT_REPO)"
@@ -36,6 +39,8 @@ usage() {
   say "  --share         sharing on (the default, $DEFAULT_RELAY): teammates' shared skills reach your agent"
   say "  --share-relay URL  sharing on with another relay"
   say "  --no-share      sharing off; remembered by later installs until --share"
+  say "  --keep-awake    macOS: keep the Mac awake with the lid closed, without asking (first install: asked, on by default)"
+  say "  --no-keep-awake macOS: leave normal sleep alone (change it later: ship-deck awake on|off)"
   say "  --no-edit-path  do not add ~/.local/bin to PATH in your shell rc file (added by default when missing)"
 }
 
@@ -44,6 +49,7 @@ from=
 autostart=0
 edit_path=1
 share=keep
+keep_awake=ask
 while [ $# -gt 0 ]; do
   case $1 in
     --home) [ $# -ge 2 ] || die "--home needs a folder"; home_flag=$2; shift ;;
@@ -55,6 +61,8 @@ while [ $# -gt 0 ]; do
     --share-relay) [ $# -ge 2 ] || die "--share-relay needs a URL"; share=$2; shift ;;
     --share-relay=*) share=${1#--share-relay=} ;;
     --no-share) share=off ;;
+    --keep-awake) keep_awake=1 ;;
+    --no-keep-awake) keep_awake=0 ;;
     --edit-path) edit_path=1 ;; # old flag, now the default
     --no-edit-path) edit_path=0 ;;
     -h|--help) usage; exit 0 ;;
@@ -174,6 +182,8 @@ is_checkout "$src" || die "$src is not a Ship Deck checkout (no server.js / pack
 if [ -e "$app" ] && [ ! -f "$app/.ship-deck-install" ]; then
   die "$app exists but was not made by this installer; move it away and run this again"
 fi
+fresh=1
+[ -f "$app/.ship-deck-install" ] && fresh=0
 stage=$deck/.app.new
 rm -rf "$stage"
 mkdir -p "$stage"
@@ -236,6 +246,39 @@ if [ "$on_path" = 0 ]; then
   else
     warn "$bindir is not on your PATH. Add this line to your shell rc file (or re-run without --no-edit-path):"
     warn "  $path_line"
+  fi
+fi
+
+# ---------- stay awake with the lid closed (macOS) ----------
+# First install: asked, on by default. Re-runs leave the user's choice alone unless --keep-awake.
+awake_cli() { "$node_bin" "$app/server.js" awake "$@"; }
+awake_note=
+if [ "$os" = macos ]; then
+  if [ "$keep_awake" = ask ] && [ "$fresh" = 0 ]; then keep_awake=0; fi
+  # The terminal to ask on (SHIP_DECK_TTY: tests feed an answer file instead).
+  tty=${SHIP_DECK_TTY:-/dev/tty}
+  tty_ok=0
+  (: <"$tty") 2>/dev/null && tty_ok=1
+  if [ "$keep_awake" = ask ]; then
+    say "Stay awake with the lid closed: your Mac keeps your agents running when you close the lid (macOS may ask for your password once)."
+    if [ "$tty_ok" = 1 ]; then
+      printf '  Enter to keep, n to skip: '
+      ans=
+      read -r ans <"$tty" || ans=
+      case $ans in [nN]*) keep_awake=0 ;; *) keep_awake=1 ;; esac
+    else
+      keep_awake=1
+    fi
+  fi
+  if [ "$keep_awake" = 1 ]; then
+    # With a terminal: its sudo prompt; without one: the native macOS dialog.
+    if [ "$tty_ok" = 1 ]; then awake_cli on <"$tty" || warn "could not turn it on; later: ship-deck awake on"
+    else awake_cli on </dev/null || warn "could not turn it on; later: ship-deck awake on"; fi
+  fi
+  if awake_cli status 2>/dev/null | grep -q ': on$'; then
+    awake_note="on: turn it off in Settings > You or with  ship-deck awake off"
+  else
+    awake_note="off (ship-deck awake on keeps the Mac awake with the lid closed)"
   fi
 fi
 
@@ -319,5 +362,6 @@ if [ "$share" != off ]; then
 else
   say "Sharing:               off (re-run with --share to receive teammates' skills)"
 fi
+[ -n "$awake_note" ] && say "Lid closed, stay awake: $awake_note"
 say "Guide: $app/docs/TEAMMATE-SETUP.md"
 say "Already running? Restart it to use this version."

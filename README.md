@@ -206,6 +206,25 @@ Sharing goes through a small relay service you deploy once for your team
 The full walkthrough, from both sides: [docs/TEAMMATE-SETUP.md](docs/TEAMMATE-SETUP.md)
 (steps 8 and 9) and the Sharing section of [docs/REFERENCE.md](docs/REFERENCE.md#sharing-read-only-opt-in).
 
+## Stay awake with the lid closed (macOS)
+
+Closing a Mac's lid puts it to sleep, and with it your first mate, its
+workers and Ship Deck. The installer offers to keep the Mac awake with the
+lid closed (on by default; macOS asks for your password once). It uses macOS's
+own setting for this (`pmset disablesleep`); Ship Deck never sees or stores
+your password.
+
+Turn it off in **Settings > You** (the switch shows the Mac's real setting), or:
+
+```sh
+ship-deck awake off
+```
+
+`ship-deck awake on` turns it back on and `ship-deck awake status` shows it.
+Keep the Mac on its charger while it is on, and don't put it in a bag closed:
+it can get hot. It stays on until you turn it off, even when Ship Deck is not
+running. Skip it at install with `--no-keep-awake`.
+
 ## How it works
 
 Ship Deck is a small Node server that runs on your own machine and is
