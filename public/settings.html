@@ -20,6 +20,7 @@
       <symbol id="i-share" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="7" r="3"/><path d="M2.5 16.5c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5M15 6v5M12.5 8.5h5"/></symbol>
       <symbol id="i-back" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 5l-5 5 5 5"/></symbol>
       <symbol id="i-check" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 10.5l3.5 3.5 7.5-8"/></symbol>
+      <symbol id="i-bolt" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M11 2L4.5 11H10l-1 7 6.5-9H10z"/></symbol>
       <symbol id="i-helm" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="4.5"/><circle cx="10" cy="10" r="1.2" fill="currentColor"/><path d="M10 1.5v4M10 14.5v4M1.5 10h4M14.5 10h4M4 4l2.8 2.8M13.2 13.2L16 16M16 4l-2.8 2.8M6.8 13.2L4 16"/></symbol>
     </defs>
   </svg>
@@ -65,6 +66,20 @@
               <span class="hint" id="address-status" role="status"></span>
             </div>
           </form>
+        </section>
+
+        <!-- macOS only: shown when GET /api/awake says supported. -->
+        <section class="panel-box" id="awake-box" aria-labelledby="awake-h" hidden>
+          <div class="pb-head">
+            <h2 id="awake-h">Stay awake with the lid closed</h2>
+            <span class="hint" id="awake-word"></span>
+            <button class="toggle" id="awake-toggle" type="button" role="switch" aria-checked="false" aria-labelledby="awake-h" disabled></button>
+          </div>
+          <div class="awake-body">
+            <p>Your Mac keeps running when you close the lid, so the first mate, its workers and Ship Deck carry on. macOS asks for your password each time you change this.</p>
+            <div class="callout warn"><svg aria-hidden="true"><use href="#i-bolt"/></svg><span class="callout-text">Keep the Mac on its charger, and don't put it in a bag while it's closed: it can get hot.</span></div>
+            <p class="hint" id="awake-status" role="status"></p>
+          </div>
         </section>
       </div>
     </div>

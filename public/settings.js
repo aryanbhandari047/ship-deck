@@ -77,4 +77,44 @@
     render();
   });
   load();
+
+  // Stay awake with the lid closed (macOS): the switch shows what pmset reports, re-read on
+  // focus and every 30 s; a change opens macOS's own password dialog.
+  const awakeBox = $('awake-box');
+  const awakeToggle = $('awake-toggle');
+  let awakeWaiting = false;
+  function renderAwake(s) {
+    if (!s || !s.supported) { awakeBox.hidden = true; return; }
+    awakeBox.hidden = false;
+    awakeToggle.setAttribute('aria-checked', String(s.on === true));
+    awakeToggle.disabled = awakeWaiting || s.on === null;
+    $('awake-word').textContent = s.on === null ? 'Unknown' : s.on ? 'On' : 'Off';
+    $('awake-status').textContent = awakeWaiting ? 'Waiting for your Mac password…'
+      : s.on === null ? `Could not read the sleep setting: ${s.error || 'pmset failed'}`
+        : s.on && s.charger === false ? `On battery${s.battery !== null ? ` (${s.battery}%)` : ''}: plug in the charger, or turn this off.` : '';
+  }
+  async function loadAwake() {
+    if (awakeWaiting) return;
+    try { renderAwake(await (await fetch('/api/awake', { cache: 'no-store' })).json()); } catch { /* deck not reachable: leave as is */ }
+  }
+  awakeToggle.addEventListener('click', async () => {
+    const on = awakeToggle.getAttribute('aria-checked') !== 'true';
+    awakeWaiting = true;
+    renderAwake({ supported: true, on: !on });
+    let r;
+    try {
+      const res = await fetch('/api/awake', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Ship-Deck': '1' }, body: JSON.stringify({ on }) });
+      r = await res.json();
+    } catch {
+      r = { ok: false, error: 'Ship Deck is not reachable' };
+    }
+    awakeWaiting = false;
+    renderAwake(r.status);
+    if (r.ok) toast(on ? 'Your Mac stays awake with the lid closed' : 'Normal sleep is back', 'ok');
+    else if (!r.cancelled) toast(`Not changed: ${r.error}`, 'err');
+    loadAwake();
+  });
+  window.addEventListener('focus', loadAwake);
+  setInterval(loadAwake, 30000);
+  loadAwake();
 })();

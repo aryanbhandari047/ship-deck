@@ -6,7 +6,8 @@
 //                  [--captain-name <name>] [--share --share-relay <https url> | --no-share]
 // Binds to 127.0.0.1 only. Writes to FM_HOME only one wake line per order (lib/wake.js,
 // --no-wake); other file writes go to the orders dir (~/.ship-deck). The only commands run are tmux list-windows,
-// tmux capture-pane and <home>/bin/fm-send.sh (see lib/actions.js), plus the browser opener at startup.
+// tmux capture-pane and <home>/bin/fm-send.sh (see lib/actions.js), the browser opener at startup,
+// and on macOS pmset (read) or the admin-prompted disablesleep change (lib/awake.js).
 // --share (off here; the installed launcher turns it on unless install.sh --no-share) adds one
 // outbound HTTPS client: lib/share.js pushes a redacted snapshot.
 
@@ -27,17 +28,18 @@ const activity = require('./lib/activity');
 const homes = require('./lib/home');
 const share = require('./lib/share');
 const settings = require('./lib/settings');
+const awake = require('./lib/awake');
 
 const DEFAULT_PORT = 4747;
 const PORT_TRIES = 20;
 const MAX_BODY = 16 * 1024;
 const ORDERS_IN_SNAPSHOT = 60;
 const THREAD_LIMIT = 300;
-const POST_ROUTES = new Set(['/api/send', '/api/orders', '/api/config', '/api/settings']);
+const POST_ROUTES = new Set(['/api/send', '/api/orders', '/api/config', '/api/settings', '/api/awake']);
 const SHARE_POST = new Set(['/api/share/signin', '/api/share/signout', '/api/share/grant', '/api/share/revoke', '/api/share/invite', '/api/share/pause', '/api/share/knowledge', '/api/share/item', '/api/share/pool', '/api/share/ask', '/api/share/suggestion']);
 // Library files a "notes and memory" grant may carry (plus memory/*).
 const SHARE_NOTES = ['home:data/captain.md', 'home:data/captain-shared.md', 'home:data/learnings.md'];
-const USAGE = 'usage: ship-deck [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--no-open] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR] [--agents-dir DIR] [--cursor-dir DIR] [--captain-name NAME] [--no-wake] [--share --share-relay URL | --no-share] [--verify-days 30]';
+const USAGE = 'usage: ship-deck [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--no-open] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR] [--agents-dir DIR] [--cursor-dir DIR] [--captain-name NAME] [--no-wake] [--share --share-relay URL | --no-share] [--verify-days 30]\n       ship-deck awake on|off|status   (macOS: keep the Mac awake with the lid closed)';
 
 // env and cwd are injectable for tests; the home falls back per lib/home.js detectHome.
 function parseArgs(argv, { env = process.env, cwd = process.cwd() } = {}) {
@@ -254,6 +256,9 @@ function firstRunServer(opts) {
 
 function createServer(opts) {
   const exec = opts.exec || actions.defaultExec;
+  // pmset/osascript, injectable separately so tests never touch real sleep settings.
+  const awakeDeps = { exec: opts.awakeExec || actions.defaultExec, platform: opts.platform };
+  let awakeBusy = false;
   const ordersDir = opts.ordersDir || orders.defaultDir();
   const claudeDir = opts.claudeDir || sessions.defaultClaudeDir();
   const memoryDir = opts.memoryDir === undefined ? (opts.home ? homes.memoryDirFor(claudeDir, opts.home) : null) : opts.memoryDir;
@@ -454,6 +459,17 @@ function createServer(opts) {
       }
       return json(res, 200, { ok: true, settings: next, order });
     }
+    if (url.pathname === '/api/awake') {
+      // { on }: macOS asks for an admin password in its own dialog; the answer is read back from pmset.
+      if (!body || typeof body.on !== 'boolean') return json(res, 400, { ok: false, error: 'on must be true or false' });
+      if (!awake.supported(awakeDeps.platform)) return json(res, 400, { ok: false, error: 'macOS only' });
+      if (awakeBusy) return json(res, 409, { ok: false, error: 'already waiting for the password prompt' });
+      awakeBusy = true;
+      try {
+        const r = await awake.setWithPrompt(body.on, awakeDeps);
+        return json(res, r.ok || r.cancelled ? 200 : 502, { ...r, status: r.status || await awake.status(awakeDeps) });
+      } finally { awakeBusy = false; }
+    }
     if (url.pathname === '/api/orders') {
       try {
         const ctx = await orderContext(opts.home);
@@ -486,6 +502,7 @@ function createServer(opts) {
       if (url.pathname === '/api/fleet') return json(res, 200, await fleetSnapshot());
       if (url.pathname === '/api/share' || url.pathname.startsWith('/api/share/')) return await handleShareGet(req, res, url);
       if (url.pathname === '/api/settings') return json(res, 200, { ...settings.readSettings(ordersDir), default: settings.DEFAULT_ADDRESS, max: settings.MAX_ADDRESS, suggestions: settings.suggestions(captain) });
+      if (url.pathname === '/api/awake') return json(res, 200, await awake.status(awakeDeps));
       if (url.pathname === '/api/thread') {
         return json(res, 200, { sig: orders.threadSignature(ordersDir), items: orders.buildThread(ordersDir, { limit: THREAD_LIMIT }) });
       }
@@ -569,6 +586,7 @@ function openBrowser(url) {
 }
 
 async function main(argv) {
+  if (argv[0] === 'awake') process.exit(await awake.cli(argv.slice(1), { exec: actions.defaultExec }));
   const opts = parseArgs(argv);
   if (!opts.home) {
     console.warn('No firstmate home found (checked --home, FM_HOME, ' + opts.homeChecked.join(', ') + ').');

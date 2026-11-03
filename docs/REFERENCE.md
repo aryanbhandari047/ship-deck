@@ -140,6 +140,9 @@ replace the path with your clone, save it as
   an `address the captain as: ...` line while it differs from "Captain".
 
   ![Settings > You: what Ship Deck and the first mate call you](settings.png)
+
+  Below it, on macOS only, **Stay awake with the lid closed**: see
+  [Stay awake with the lid closed](#stay-awake-with-the-lid-closed-macos).
 - **Board** (default): a greeting (with your form of address) and how many things need you ("All clear"
   when none), then **Needs you** (flag K) across the top: workers waiting on
   your call, blocked or failed, then queued questions, as full cards that
@@ -276,7 +279,10 @@ checked by `test/contrast.test.js` against the tokens in `public/style.css`.
 Those fm-send calls (plus `tmux capture-pane` and `tmux list-windows`) are the
 only commands it runs while serving, always via `execFile` with a fixed argv;
 at startup it may also run the platform's browser opener (`open`,
-`xdg-open` or `start`) with its own URL (`--no-open` skips it). The page only
+`xdg-open` or `start`) with its own URL (`--no-open` skips it). On macOS it
+also reads `pmset -g` / `pmset -g batt`, and only on the captain's Settings
+switch runs the admin-prompted `pmset -a disablesleep 0|1` (see Stay awake with
+the lid closed). The page only
 sends worker ids, library keys and allow-listed values; the terminal target
 always comes from `state/<id>.meta`. The only files it writes are in
 `~/.ship-deck/` (dir 0700, files 0600), attachments included, plus the wake
@@ -613,11 +619,41 @@ and `lib/share.js` cannot reach orders or fm-send (a test checks its imports). T
 itself (Vercel + Upstash free tiers, deploy steps, cost estimate) is in
 [`relay/README.md`](../relay/README.md).
 
+## Stay awake with the lid closed (macOS)
+
+A Mac sleeps when its lid closes, which stops the first mate, its workers and
+Ship Deck. `caffeinate` only prevents idle sleep; `pmset -a disablesleep 1`
+also prevents lid-close sleep and needs admin rights (`lib/awake.js`).
+
+- **State**: always read from `pmset -g` (`SleepDisabled 1` while on); nothing
+  is saved. `pmset -g batt` adds the power source and battery level.
+- **Settings > You**: a switch (hidden unless `GET /api/awake` says
+  `supported`), re-read on focus and every 30 s. `POST /api/awake {"on": bool}`
+  (same guards as the other POST routes) runs `osascript -e 'do shell script
+  "/usr/bin/pmset -a disablesleep 0|1" with prompt ... with administrator
+  privileges'`, so macOS shows its own password dialog; cancelling it is not an
+  error. It warns to keep the Mac on its charger and out of a bag while closed,
+  and says so again when it is on and running on battery.
+- **CLI**: `ship-deck awake on|off|status`. In a terminal it runs `sudo
+  /usr/bin/pmset -a disablesleep 0|1` (the terminal's own password prompt),
+  otherwise the dialog above. A no-op when already in that state; on other
+  systems it prints "macOS only" and exits 0.
+- **Install**: `bin/install.sh` asks on a first macOS install ("Enter to keep, n
+  to skip", on without a terminal), then runs `ship-deck awake on`.
+  `--no-keep-awake` skips it, `--keep-awake` turns it on without asking (also on
+  a re-run); otherwise re-runs leave it as it is.
+- **No automatic restore**: it stays on until turned off, whether or not Ship
+  Deck runs, and is not turned off on low battery. Every change needs an admin
+  password, so an automatic one would mean an unattended password dialog
+  (nobody answers it with the lid closed) or a stored password or sudoers rule
+  (never). Instead the switch, the CLI and the installer summary say how to turn
+  it off, and the battery warning shows while it is on.
+
 ## Security
 
 - Binds `127.0.0.1` only; every request must carry `Host: 127.0.0.1:<port>` or
   `localhost:<port>` (blocks DNS rebinding).
-- `POST /api/send`, `POST /api/orders`, `POST /api/config` and `POST /api/settings` also require `X-Ship-Deck: 1`,
+- `POST /api/send`, `POST /api/orders`, `POST /api/config`, `POST /api/settings` and `POST /api/awake` also require `X-Ship-Deck: 1`,
   `Content-Type: application/json`, a same-origin `Origin` when one is sent, and
   no cross-site `Sec-Fetch-Site`. Bodies are capped at 16 KB.
 - `POST /api/attachments` has the same header, Origin and Sec-Fetch-Site checks,
@@ -681,6 +717,11 @@ and `GET /api/activity`.
 persistence across a restart, the empty value, validation and the POST guard,
 the optional `address` message (one per change, plus its wake line and nothing
 else under the home) and the `bin/orders.js` reminder line.
+`test/awake.test.js` covers Stay awake with the lid closed against fake
+pmset/osascript/sudo: the parsers, the CLI (sudo in a terminal, the dialog
+otherwise, cancel, a change that did not stick, battery warning, "macOS only"),
+and `GET`/`POST /api/awake` with its guard; `test/install.test.js` covers the
+installer step (default on, `n`, `--no-keep-awake`, re-runs, Linux).
 `test/parsers.test.js` covers the parsers against the fabricated fixtures
 (including prose in parentheses not being read as a queue tag).
 `test/board.test.js` covers the status flag mapping (every state to its tone,
@@ -729,6 +770,7 @@ All paths are relative to the fleet home. Missing files are fine.
 | `~/.claude/projects/*/<uuid>.jsonl` (head only) | Session discovery for resume commands |
 | `~/.claude/projects/<encoded FM_HOME>/<uuid>.jsonl` (tail, newest session) | The first mate activity feed |
 | `~/.claude/skills/*/SKILL.md`, `<home>/.agents/skills/*/SKILL.md` | Skills in the Ship's Library (name and description from the frontmatter); `teammate-*` skills synced from a teammate (with `--share`) are grouped as "Shared by <name>" and never shared on |
+| `pmset -g`, `pmset -g batt` (macOS) | Stay awake with the lid closed: its real state, the power source and battery level |
 | `tmux list-windows -a` | Optional: marks whether a crew member's window is open. Skipped if tmux is missing. |
 
 ## Layout
@@ -745,6 +787,7 @@ lib/share.js       Sharing (--share): redacted snapshot and knowledge pushes, kn
 lib/knowledge.js   Teammates' shared knowledge as marked teammate-* skills and rules (the only ~/.claude, ~/.agents, ~/.cursor writer)
 lib/usage.js       Counts uses of teammates' shared skills in Claude Code transcripts (read only)
 lib/sessions.js    Claude session discovery and ~/.ship-deck/sessions.json
+lib/awake.js       Stay awake with the lid closed (macOS pmset; `ship-deck awake`)
 lib/settings.js    The captain's preferences (form of address) in ~/.ship-deck/settings.json
 lib/activity.js    First mate activity feed: read-only transcript tail
 lib/config.js      Per-harness model/effort allow-list and slash commands
@@ -752,7 +795,7 @@ bin/orders.js      Orders, replies, thread and sessions CLI for the first mate
 bin/orders-check.sh  Watcher wake check (POSIX sh)
 bin/ship-deck.js   `ship-deck` / `npx` entry (same flags as server.js)
 bin/start.sh       Start the server in the background unless it already answers
-bin/install.sh     Per-person install: prerequisites, firstmate home, ~/.ship-deck/app, launcher, opt-in autostart
+bin/install.sh     Per-person install: prerequisites, firstmate home, ~/.ship-deck/app, launcher, keep-awake (macOS), opt-in autostart
 docs/TEAMMATE-SETUP.md  Step-by-step setup guide
 docs/REFERENCE.md  This reference
 public/            index.html, settings.html/.js (Settings > You), share.html/.js (Settings > Sharing), style.css, app.js, board.js (flags + Board grouping), markdown.js, labels.js, ansi.js (no build step)

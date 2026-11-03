@@ -37,6 +37,12 @@ function sandbox(t, { firstmate = true, uname = null, brew = false } = {}) {
   for (const cmd of ['launchctl', 'systemctl', 'curl', ...(brew ? ['brew'] : [])]) {
     fs.writeFileSync(path.join(shims, cmd), `#!/bin/sh\necho "${cmd} $*" >> '${log}'\n`, { mode: 0o755 });
   }
+  // Sleep settings are fakes too: pmset reads a state file that osascript/sudo "change".
+  const sleepFile = path.join(base, 'sleepdisabled');
+  fs.writeFileSync(path.join(shims, 'pmset'), `#!/bin/sh\nif [ "$*" = "-g batt" ]; then echo "Now drawing from 'AC Power'"; exit 0; fi\n[ "$(cat '${sleepFile}' 2>/dev/null)" = 1 ] && echo " SleepDisabled 1"\necho " sleep 1"\n`, { mode: 0o755 });
+  for (const cmd of ['osascript', 'sudo']) {
+    fs.writeFileSync(path.join(shims, cmd), `#!/bin/sh\necho "${cmd} $*" >> '${log}'\ncase "$*" in *"disablesleep 1"*) echo 1 > '${sleepFile}' ;; *"disablesleep 0"*) echo 0 > '${sleepFile}' ;; esac\n`, { mode: 0o755 });
+  }
   if (uname) fs.writeFileSync(path.join(shims, 'uname'), `#!/bin/sh\necho ${uname}\n`, { mode: 0o755 });
   if (firstmate) {
     const fm = path.join(home, 'firstmate');
@@ -51,13 +57,15 @@ function sandbox(t, { firstmate = true, uname = null, brew = false } = {}) {
   fs.writeFileSync(path.join(repo, 'bin', 'fm-spawn.sh'), '#!/bin/sh\nexit 0\n');
   const g = (...a) => execFileSync(git, ['-C', repo, ...a], { stdio: 'ignore' });
   g('init', '-q'); g('add', '.'); g('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'init');
-  const env = { HOME: home, PATH: `${shims}:/usr/bin:/bin`, SHELL: '/bin/zsh', FIRSTMATE_REPO: repo };
+  // No terminal to ask on unless a test feeds an answer file (never the developer's /dev/tty).
+  const env = { HOME: home, PATH: `${shims}:/usr/bin:/bin`, SHELL: '/bin/zsh', FIRSTMATE_REPO: repo, SHIP_DECK_TTY: path.join(base, 'no-tty') };
   const run = (...args) => {
-    const r = spawnSync('/bin/sh', [INSTALL, ...args], { env, cwd: base, encoding: 'utf8' });
+    const r = spawnSync('/bin/sh', [INSTALL, ...args], { env: { ...env, ...(run.env || {}) }, cwd: base, encoding: 'utf8' });
     return { code: r.status, out: r.stdout + r.stderr };
   };
   const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '');
-  return { base, home, env, run, calls };
+  const sleepDisabled = () => (fs.existsSync(sleepFile) ? fs.readFileSync(sleepFile, 'utf8').trim() : '0');
+  return { base, home, env, run, calls, sleepDisabled };
 }
 
 // Every path under dir with its size and mtime, for "nothing else changed" checks.
@@ -261,4 +269,50 @@ test('install.sh --autostart writes and enables a systemd user unit on Linux', (
   assert.match(unit, /WantedBy=default\.target/);
   assert.match(s.calls(), /systemctl --user enable --now ship-deck\.service/);
   assert.ok(!fs.existsSync(path.join(s.home, 'Library')), 'no LaunchAgent on Linux');
+});
+
+// macOS only (process.platform drives the CLI); pmset, osascript and sudo are the sandbox fakes.
+test('install.sh keep-awake: on by default on a first install, asked, declinable, re-runs keep the choice', { skip: process.platform !== 'darwin' && 'macOS only' }, (t) => {
+  const s = sandbox(t, { uname: 'Darwin' });
+  let r = s.run('--no-edit-path');
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /Stay awake with the lid closed: .*password once/);
+  assert.match(s.calls(), /^osascript -e do shell script "\/usr\/bin\/pmset -a disablesleep 1" .*with administrator privileges$/m, 'no terminal: the native dialog');
+  assert.equal(s.sleepDisabled(), '1');
+  assert.match(r.out, /Lid closed, stay awake: on: turn it off in Settings > You/);
+
+  fs.writeFileSync(path.join(s.base, 'sleepdisabled'), '0');
+  const before = s.calls();
+  r = s.run('--no-edit-path');
+  assert.equal(r.code, 0, r.out);
+  const count = (x) => (x.match(/^(osascript|sudo) /gm) || []).length;
+  assert.equal(count(s.calls()), count(before), 're-run: the user\'s off is left alone');
+  assert.match(r.out, /Lid closed, stay awake: off/);
+  r = s.run('--no-edit-path', '--keep-awake');
+  assert.equal(s.sleepDisabled(), '1', '--keep-awake turns it on on a re-run');
+
+  const d = sandbox(t, { uname: 'Darwin' });
+  r = d.run('--no-edit-path', '--no-keep-awake');
+  assert.equal(r.code, 0, r.out);
+  assert.doesNotMatch(d.calls(), /osascript|sudo/);
+  assert.equal(d.sleepDisabled(), '0');
+
+  const q = sandbox(t, { uname: 'Darwin' });
+  fs.writeFileSync(path.join(q.base, 'answer'), 'n\n');
+  q.run.env = { SHIP_DECK_TTY: path.join(q.base, 'answer') };
+  r = q.run('--no-edit-path');
+  assert.match(r.out, /Enter to keep, n to skip/);
+  assert.doesNotMatch(q.calls(), /osascript|sudo/, '"n" skips it');
+  fs.writeFileSync(path.join(q.base, 'answer'), '\n');
+  fs.rmSync(path.join(q.home, '.ship-deck'), { recursive: true });
+  r = q.run('--no-edit-path');
+  assert.equal(q.sleepDisabled(), '1', 'Enter keeps it on');
+});
+
+test('install.sh on Linux skips keep-awake', (t) => {
+  const s = sandbox(t, { uname: 'Linux' });
+  const r = s.run('--no-edit-path');
+  assert.equal(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /stay awake/i);
+  assert.doesNotMatch(s.calls(), /osascript|sudo/);
 });

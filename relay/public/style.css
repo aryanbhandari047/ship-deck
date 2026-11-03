@@ -955,6 +955,11 @@ table.tbl { width: 100%; border-collapse: collapse; }
 .addr-preview { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: var(--r-card); background: var(--surface-2); }
 .addr-tell { display: flex; align-items: center; gap: 8px; font-size: var(--t-sm); color: var(--ink-2); }
 .addr-tell input { accent-color: var(--primary); width: 16px; height: 16px; margin: 0; }
+/* Settings > You: stay awake with the lid closed */
+.awake-body { display: grid; gap: var(--s3); padding: var(--s4) 18px 18px; max-width: 640px; }
+.awake-body p { margin: 0; color: var(--ink-2); }
+.awake-body .hint:empty { display: none; }
+.toggle:disabled { cursor: progress; opacity: .6; }
 @media (max-width: 900px) {
   .settings { grid-template-columns: minmax(0, 1fr); }
   .s-nav { display: none; }
