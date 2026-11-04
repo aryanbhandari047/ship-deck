@@ -4,16 +4,21 @@
 # unless --no-open). Used by bin/install.sh and login auto-start. Args go to server.js.
 #   sh bin/start.sh [--port 4747] [--no-open] [server.js flags...]
 port=${SHIP_DECK_PORT:-4747}
+home=
 prev=
 for a in "$@"; do
-  case $a in --port=*) port=${a#--port=} ;; esac
+  case $a in --port=*) port=${a#--port=} ;; --home=*) home=${a#--home=} ;; esac
   [ "$prev" = --port ] && port=$a
+  [ "$prev" = --home ] && home=$a
   prev=$a
 done
+# With --home, only a deck serving that home counts as already running.
+want='"app":"ship-deck"'
+[ -n "$home" ] && [ -d "$home" ] && want="\"home\":\"$(cd "$home" && pwd -P)\""
 here=$(cd "$(dirname "$0")/.." && pwd)
 p=$port
 while [ "$p" -lt $((port + 20)) ]; do
-  if curl -s --max-time 1 "http://127.0.0.1:$p/api/health" 2>/dev/null | grep -q '"app":"ship-deck"'; then
+  if curl -s --max-time 1 "http://127.0.0.1:$p/api/health" 2>/dev/null | grep '"app":"ship-deck"' | grep -qF "$want"; then
     echo "ship-deck: already running at http://127.0.0.1:$p/"
     exit 0
   fi

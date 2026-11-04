@@ -264,6 +264,27 @@ test('the launcher opens a deck already running on the same home instead of star
   assert.equal(out.trim(), `Ship Deck is already running: http://127.0.0.1:${port}/`);
 });
 
+test('start.sh with --home skips a deck that serves another home', async (t) => {
+  const mine = fixtureHome(tempDir(t));
+  const other = fixtureHome(tempDir(t));
+  const server = createServer({ home: other, tmux: false, ordersDir: tempDir(t), claudeDir: tempDir(t), memoryDir: null, exec: async () => ({ code: 1 }) });
+  server.on('error', () => server.listen(20000 + Math.floor(Math.random() * 9000), '127.0.0.1'));
+  await new Promise((r) => { server.once('listening', r); server.listen(20000 + Math.floor(Math.random() * 9000), '127.0.0.1'); });
+  t.after(() => server.close());
+  const port = server.address().port;
+  const user = tempDir(t);
+  const run = (home) => new Promise((resolve, reject) => {
+    require('node:child_process').execFile('/bin/sh', [path.join(ROOT, 'bin/start.sh'), '--port', String(port), '--home', home, '--no-open', '--no-tmux'],
+      { env: { PATH: process.env.PATH, HOME: user, SHIP_DECK_NO_OPEN: '1' }, cwd: user, encoding: 'utf8' }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
+  });
+  assert.match(await run(other), new RegExp(`already running at http://127.0.0.1:${port}/`), 'same home: reused');
+  const out = await run(mine);
+  const pid = Number((/pid (\d+)/.exec(out) || [])[1]);
+  if (pid) t.after(() => { try { process.kill(pid); } catch { /* gone */ } });
+  assert.match(out, /started at http:\/\/127\.0\.0\.1:(\d+)\//, 'another home: a deck of its own');
+  assert.equal(fs.readFileSync(path.join(user, '.ship-deck', 'server.pid'), 'utf8').trim(), String(pid));
+});
+
 test('start.sh starts the server on the next port when another app holds it', async (t) => {
   // Below the OS ephemeral range, so other suites' servers (port 0) never sit in the scanned window.
   const busy = http.createServer((q, s) => s.end('another app'));
