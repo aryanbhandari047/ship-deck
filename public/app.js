@@ -23,7 +23,7 @@
     hold: $('hold'), holdSub: $('hold-sub'), crates: $('crates'),
     tabs: { bridge: $('tab-bridge'), activity: $('tab-activity') },
     panes: { bridge: $('pane-bridge'), activity: $('pane-activity') },
-    board: $('board'), scene: $('scene'), cols: $('cols'), mates: $('mates'), projectFilters: $('project-filters'), boardTitle: $('board-title'),
+    board: $('board'), scene: $('scene'), cols: $('cols'), mates: $('mates'), log: $('log'), hoist: $('hoist'), conditions: $('conditions'), themeSeg: $('theme-seg'), projectFilters: $('project-filters'), boardTitle: $('board-title'),
     viewBoard: $('view-board'), viewShip: $('view-ship'), chatJump: $('chat-jump'),
     fmWho: $('fm-who'), fmLive: $('fm-live'), fmNowText: $('fm-now-text'),
     newJobBtn: $('new-job-btn'), jobSheet: $('job-sheet'), jobScrim: $('job-scrim'), jobClose: $('job-close'), jobCancel: $('job-cancel'),
@@ -34,7 +34,7 @@
     notifyBtn: $('notify-btn'), bridgeSub: $('bridge-sub'), chatHint: $('chat-hint'),
     attTray: $('att-tray'), attachBtn: $('attach-btn'), attachInput: $('attach-input'),
     lightbox: $('lightbox'), lightboxImg: $('lightbox-img'), lightboxCap: $('lightbox-cap'), lightboxClose: $('lightbox-close'),
-    jobForm: $('job-form'), jobProject: $('job-project'), jobText: $('job-text'),
+    jobForm: $('job-form'), jobProject: $('job-project'), jobText: $('job-text'), jobPath: $('job-path'),
     jobHarness: $('job-harness'), jobModel: $('job-model'), jobEffort: $('job-effort'),
     drawer: $('drawer'), scrim: $('scrim'), drawerKicker: $('drawer-kicker'), drawerTitle: $('drawer-title'),
     drawerBody: $('drawer-body'), drawerClose: $('drawer-close'), drawerSub: $('drawer-sub'),
@@ -150,7 +150,7 @@
   }
   function staleText(t) { return `${L.quietText(t.lastActivity)} (marked quiet after ${snap.staleDays} d without activity)`; }
   // Worker title (from its queue entry or brief), falling back to the raw id.
-  function titleOf(id) { const t = snap && snap.tasks.find((x) => x.id === id); return t ? t.title || t.id : id; }
+  function titleOf(id) { const t = snap && snap.tasks.find((x) => x.id === id); return (t && B.tidyTitle(t.title)) || id; }
   function lastNote(t) { const l = t.lastStatus[t.lastStatus.length - 1]; return l ? l.note : ''; }
 
   // ---------- filtering ----------
@@ -189,12 +189,12 @@
       setTimeout(() => el.classList.remove('hoist'), 2600);
     }
     el.querySelector('.mast use').setAttribute('href', '#flag-' + st.flag);
-    el.querySelector('.t').textContent = t.title || t.id;
+    el.querySelector('.t').textContent = titleOf(t.id);
     el.querySelector('.rid').textContent = t.title && t.title !== t.id ? t.id : '';
     el.querySelector('.pill').replaceWith(pillEl(st, 'sm'));
     const alive = t.alive === true ? 'terminal open' : t.alive === false ? 'terminal closed' : '';
-    el.title = `${t.title || t.id}\n${t.project}${alive ? ', ' + alive : ''}\n\n${L.summary(t)}`;
-    el.setAttribute('aria-label', `${t.title || t.id}, ${t.project}: ${st.label}. ${L.summary(t)}`);
+    el.title = `${titleOf(t.id)}\n${t.project}${alive ? ', ' + alive : ''}\n\n${L.summary(t)}`;
+    el.setAttribute('aria-label', `${titleOf(t.id)}, ${t.project}: ${st.label}. ${L.summary(t)}`);
   }
 
   // Quiet workers sit after the active ones and before the finished ones.
@@ -309,7 +309,7 @@
     for (const t of metas.sort(sortTasks)) {
       const st = taskStatus(t);
       const c = h('button', { class: `porthole tone-${st.tone}`, type: 'button', title: L.summary(t), onclick: () => openDrawer({ type: 'task', id: t.id }) },
-        h('span', { class: 'ring' }, icon('i-helm')), h('span', { class: 'strong', text: t.title || t.id }), pillEl(st, 'sm'));
+        h('span', { class: 'ring' }, icon('i-helm')), h('span', { class: 'strong', text: titleOf(t.id) }), pillEl(st, 'sm'));
       c.classList.toggle('hidden-by-filter', !matchesTask(t));
       kids.push(c);
     }
@@ -333,7 +333,7 @@
       return h('button', {
         class: 'crate' + (q.captainCall ? ' call' : ''), type: 'button', title: q.captainCall ? 'Needs your answer' : 'Up next',
         onclick: () => openDrawer({ type: 'backlog', id: itemKey(q), section: 'queued', index }),
-      }, q.captainCall ? flagEl('k') : null, h('span', { text: q.title || q.id }));
+      }, q.captainCall ? flagEl('k') : null, h('span', { text: B.tidyTitle(q.title || q.id) }));
     });
     if (shown.length > MAX_CRATES) kids.push(h('span', { class: 'crate more', text: `${shown.length - MAX_CRATES} more` }));
     if (!shown.length) kids.push(h('p', { class: 'hint', text: snap.backlog.present ? 'The queue is empty.' : 'No queue yet.' }));
@@ -473,13 +473,35 @@
   }
 
   // ---------- the Board (default view) ----------
-  // Needs you / Working / Waiting (+ quiet and the queue) / Done. Cards are keyed and rebuilt
-  // only when their content changes, so typing in a card's reply box survives polling.
+  // The hoist (the fleet at a glance) and the conditions line, then Needs you: workers waiting on
+  // the captain as full cards, queued questions as a compact list. Below, the Working / Waiting /
+  // Done / Up next lanes and the fleet row (second mates, recently finished). Cards are keyed and
+  // rebuilt only when their content changes, so a typed answer survives polling.
   function emptyRow(text) { return h('li', null, h('div', { class: 'empty', text })); }
   function itemKey(b) { return b.id || b.title; }
   let boardProject = store.get('boardProject');
   const cards = new Map(); // key -> { sig, el, age }
   const colEls = new Map(); // column key -> { root, head, body }
+  // Lists shown in full ("Show all"), remembered per viewer.
+  const opened = new Set(store.json('boardOpen', []));
+  function toggleOpen(key) {
+    if (opened.has(key)) opened.delete(key); else opened.add(key);
+    store.set('boardOpen', opened.size ? JSON.stringify([...opened]) : null);
+    renderAll();
+  }
+  const openCalls = new Set(); // queued questions with their answer box open
+  const EXPLAIN = [
+    ['Firstmate', ' is a lead agent, the first mate, that runs a fleet of coding agents for you.'],
+    [null, 'It starts workers that ship pull requests or scout and report back, and checks on them.'],
+    ['Ship Deck', ' shows that fleet, brings you its decisions and lets you chat with the first mate.'],
+  ];
+  const LANES = [
+    { key: 'working', title: 'Working', flag: 'p', limit: 8, empty: 'No one is working right now.' },
+    { key: 'waiting', title: 'Waiting', flag: 'x', limit: 6, empty: 'Nothing is waiting.' },
+    { key: 'done', title: 'Done', flag: 'c', limit: 6, empty: 'Nothing finished yet.' },
+    { key: 'queue', title: 'Up next', icon: 'i-queue', limit: 6, empty: 'The queue is empty.' },
+  ];
+  const CALLS_SHOWN = 5;
 
   function answerText(opt, extra) {
     return opt ? `(${opt.letter}) ${opt.text}${extra ? '\n\n' + extra : ''}` : extra;
@@ -504,31 +526,57 @@
   // sug: a teammate's suggestion being used; the order then records who suggested it (the server
   // checks it is still current), never their note.
   function answerTask(t, opt, text, sug) {
-    const name = t.title || t.id;
+    const name = titleOf(t.id);
     const body = answerText(opt, text);
     return queueOrder({ kind: 'decision', target: t.id, option: opt ? opt.letter : null, text: body, ...(sug ? { suggestion: sug.id } : {}) }, {
       title: opt ? `Answer “${name}” with option ${opt.letter}${sug ? ` (suggested by ${sug.by})` : ''}?` : `Send this answer to “${name}”?`, body,
     });
   }
   function answerCall(b, opt, text) {
-    const name = b.title || b.id;
+    const name = B.tidyTitle(b.title || b.id);
     const body = answerText(opt, text);
     return queueOrder({ kind: 'backlog-answer', item: b.id, option: opt ? opt.letter : null, text: body }, {
       title: opt ? `Answer “${name}” with option ${opt.letter}?` : `Send this answer on “${name}”?`, body,
     });
   }
   function cleanupTask(t) {
-    return queueOrder({ kind: 'cleanup', target: t.id }, { title: `Ask the first mate to clean up “${t.title || t.id}”?`, body: 'Closes its terminal and workspace once its work is safe.' });
+    return queueOrder({ kind: 'cleanup', target: t.id }, { title: `Ask the first mate to clean up “${titleOf(t.id)}”?`, body: 'Closes its terminal and workspace once its work is safe.' });
   }
   function openReport(t) { openDrawer({ type: 'task', id: t.id }); openDataFile(t.id, 'report.md'); }
 
-  // A card: status pill, project and age, title (opens the drawer), summary, then actions.
-  // Cards that need the captain are full size; the rest are compact (id, tool and the rest
-  // are one click away in the drawer).
-  function cardShell(key, tone, hoist, pill, title, onOpen, project, summary, ...rest) {
+  // The delivery track: one segment per step and the current step in words; full = labelled steps
+  // for the drawer.
+  const STEP_WORDS = { done: 'done', now: 'in progress', wait: 'waiting', fail: 'stopped', todo: 'not yet' };
+  const stepLabel = (d, s) => (s.key === 'merge' ? (d.merge === 'firstmate' ? 'Merge (first mate)' : 'Merge (you)') : s.label);
+  function trackEl(d, full) {
+    if (!d) return null;
+    const said = d.steps.map((s) => `${stepLabel(d, s)}: ${STEP_WORDS[s.state]}`).join('; ');
+    if (full) {
+      return h('ol', { class: 'track full', 'aria-label': `${d.word}. ${said}` },
+        ...d.steps.map((s) => h('li', { class: 'step st-' + s.state }, h('span', { class: 'dot', 'aria-hidden': 'true' }), h('span', { text: stepLabel(d, s) }))));
+    }
+    return h('span', { class: 'track', title: `${d.word}. ${said}` },
+      h('span', { class: 'track-segs', 'aria-hidden': 'true' }, ...d.steps.map((s) => h('span', { class: 'st-' + s.state }))),
+      h('span', { class: 'track-label', text: d.label }));
+  }
+  function kindEl(t) {
+    const scout = t.kind === 'scout';
+    return h('span', { class: 'kind', title: scout ? 'Scout: investigates and writes a report' : 'Ship: makes the change' }, icon(scout ? 'i-scout' : 'i-ship'), h('span', { class: 'sr-only', text: scout ? 'Scout' : 'Ship' }));
+  }
+  function prChip(url, ci) {
+    const u = safeUrl(url);
+    if (!u) return null;
+    const ciWord = { green: 'checks green', running: 'checks running', failed: 'checks failing' }[ci];
+    return h('a', { class: 'chip pr-chip' + (ci ? ' ci-' + ci : ''), href: u, target: '_blank', rel: 'noopener noreferrer', title: `Open the pull request${ciWord ? ` (${ciWord})` : ''}` },
+      icon('i-pr'), prNumber(u), ci ? h('span', { class: 'ci-dot', 'aria-hidden': 'true' }) : null, ciWord ? h('span', { class: 'sr-only', text: ciWord }) : null);
+  }
+
+  // A card: status, project and age, title (opens the drawer), summary, then answers and the foot.
+  // Cards that need the captain are full size; the rest are compact rows in their lane.
+  function cardShell(key, tone, hoist, pill, title, onOpen, meta, summary, ...rest) {
     const age = h('span', { class: 'age' });
     const el = h('article', { class: `bcard tone-${tone}` + (hoist ? ' hoist' : ' compact'), 'data-key': key },
-      h('div', { class: 'card-top' }, pill, project ? h('span', { class: 'card-proj', text: project }) : null, age),
+      h('div', { class: 'card-top' }, pill, ...meta.filter(Boolean), age),
       h('h3', { class: 'card-title' }, h('button', { class: 'card-link', type: 'button', onclick: onOpen }, title)),
       summary ? h('p', { class: 'card-summary', text: summary }) : null,
       ...rest);
@@ -550,10 +598,10 @@
   }
   function taskCard(t, col) {
     const st = taskStatus(t);
-    const summary = B.cardSummary(t);
-    const sig = JSON.stringify([col, st, t.title, t.project, summary, t.options, t.pr, t.hasReport, t.state]);
+    const summary = B.tidyTitle(B.cardSummary(t));
+    const d = B.deliveryOf(t);
+    const sig = JSON.stringify([col, st, t.title, t.project, summary, t.options, t.pr, t.hasReport, t.state, t.fromX, d && [d.label, d.steps.map((s) => s.state), d.merge, d.ci, d.pr]]);
     const c = cached('t:' + t.id, sig, () => {
-      const name = t.title || t.id;
       let ask = null;
       if (t.state === 'needs-decision' || t.state === 'blocked') {
         ask = !t.stale && t.options.length
@@ -561,30 +609,52 @@
           : !t.stale ? replyRow('card.' + t.id, t.state === 'blocked' ? 'Reply to unblock…' : 'Your answer…', 'Send', (text) => answerTask(t, null, text)) : null;
       }
       const foot = [
-        safeUrl(t.pr) ? h('a', { class: 'chip', href: safeUrl(t.pr), target: '_blank', rel: 'noopener noreferrer', title: 'Open the pull request' }, icon('i-pr'), prNumber(t.pr)) : null,
+        h('span', { class: 'track-wrap' }, kindEl(t), trackEl(d)),
+        prChip(d && d.pr, d && d.ci),
         t.state === 'done' && t.hasReport ? h('button', { class: 'chip', type: 'button', onclick: () => openReport(t) }, icon('i-file'), 'Read report') : null,
         t.state === 'failed' ? h('button', { class: 'btn sm', type: 'button', text: 'Ask for status', onclick: () => queueOrder({ kind: 'status', target: t.id }) }) : null,
         t.state === 'done' ? h('button', { class: 'btn sm ghost', type: 'button', text: 'Clean up', onclick: () => cleanupTask(t) }) : null,
       ].filter(Boolean);
-      return cardShell('t:' + t.id, st.tone, col === 'needs', pillEl(st), name, () => openDrawer({ type: 'task', id: t.id }),
-        t.project, summary, ask, foot.length ? h('div', { class: 'card-foot' }, ...foot) : null);
+      const meta = [
+        h('span', { class: 'card-proj', text: t.project }),
+        t.fromX ? h('span', { class: 'tag', title: 'Started from a mention on X (X mode)' }, icon('i-at'), h('span', { class: 'lbl', text: 'From X' })) : null,
+      ];
+      return cardShell('t:' + t.id, st.tone, col === 'needs', pillEl(st), titleOf(t.id), () => openDrawer({ type: 'task', id: t.id }),
+        meta, summary, ask, h('div', { class: 'card-foot' }, ...foot));
     });
     if (moves.has(t.id)) animateMove(c.el, col);
     c.el.classList.toggle('selected', !!selected && selected.type === 'task' && selected.id === t.id);
     c.age.textContent = t.lastActivity ? agoLong(t.lastActivity) : '';
     return c.el;
   }
-  function callCard(b) {
+  // A queued question (a Captain's Call item): one row; Answer opens its options or a reply box
+  // in place, the title opens it in the drawer.
+  function callRow(b) {
     const key = 'c:' + itemKey(b);
     const hold = b.tags && b.tags.hold ? B.cardSummary({ options: b.options, lastStatus: [{ note: b.tags.hold }] }, 200) : '';
-    const sig = JSON.stringify([b.id, b.title, hold, b.options, b.section, b.index, b.tags && b.tags.repo]);
+    const repo = b.tags && b.tags.repo ? b.tags.repo.replace(/\/+$/, '').split('/').pop() : null;
+    const sig = JSON.stringify([b.id, b.title, hold, b.options, b.section, b.index, repo]);
     const c = cached(key, sig, () => {
-      const open = (focus) => openDrawer({ type: 'backlog', id: itemKey(b), section: b.section, index: b.index, focus });
+      const open = () => openDrawer({ type: 'backlog', id: itemKey(b), section: b.section, index: b.index });
       const ask = !b.id ? h('p', { class: 'hint', text: 'No id, so answer it in the chat.' })
         : b.options && b.options.length ? optionButtons(b.options, (o) => answerCall(b, o, ''))
           : replyRow('call.' + b.id, 'Your answer…', 'Answer', (text) => answerCall(b, null, text));
-      return cardShell(key, 'needs', true, pillEl(B.callStatus()), b.title || b.id, () => open(false),
-        (b.tags && b.tags.repo) || 'Queue', hold, ask);
+      const age = h('span', { class: 'age' });
+      const toggle = h('button', { class: 'btn sm', type: 'button', 'aria-expanded': 'false', text: 'Answer' });
+      const el = h('article', { class: 'qrow', 'data-key': key },
+        flagEl('k'),
+        h('div', { class: 'q-main' },
+          h('h3', { class: 'q-title' }, h('button', { class: 'card-link', type: 'button', onclick: open, text: B.tidyTitle(b.title || b.id) })),
+          hold ? h('p', { class: 'q-note', text: hold }) : null,
+          h('div', { class: 'q-answer' }, ask)),
+        h('div', { class: 'q-side' }, repo ? h('span', { class: 'card-proj', text: repo }) : null, age, toggle));
+      const setOpen = (on) => { el.classList.toggle('open', on); toggle.setAttribute('aria-expanded', String(on)); toggle.textContent = on ? 'Close' : 'Answer'; if (on) openCalls.add(key); else openCalls.delete(key); };
+      toggle.addEventListener('click', () => {
+        setOpen(!el.classList.contains('open'));
+        if (el.classList.contains('open')) { const f = el.querySelector('.q-answer input, .q-answer .opt'); if (f) f.focus(); }
+      });
+      if (openCalls.has(key)) setOpen(true);
+      return { el, age };
     });
     c.age.textContent = b.tags && b.tags.since ? `since ${shortDate(b.tags.since)}` : '';
     return c.el;
@@ -592,19 +662,51 @@
   function queueRow({ b, index }) {
     const key = 'q:' + itemKey(b);
     const after = b.tags && b.tags.after;
-    const sub = after ? `after ${titleOf(after)}` : (b.tags && b.tags.repo) || (b.id ? '' : 'No id: ask in the chat to start it');
+    const repo = b.tags && b.tags.repo ? b.tags.repo.replace(/\/+$/, '').split('/').pop() : null;
+    const sub = after ? `Starts after ${titleOf(after)}` : repo || (b.id ? '' : 'No id: ask in the chat to start it');
     const c = cached(key, JSON.stringify([b.id, b.title, sub, index]), () => {
-      const el = h('div', { class: 'row-card', 'data-key': key },
+      const el = h('div', { class: 'row-card' + (after ? ' gated' : ''), 'data-key': key },
         h('div', { class: 't' },
-          h('button', { class: 'card-link', type: 'button', text: b.title || b.id, onclick: () => openDrawer({ type: 'backlog', id: itemKey(b), section: 'queued', index }) }),
-          sub ? h('span', { text: sub }) : null),
-        b.id ? h('button', { class: 'btn sm', type: 'button', text: 'Start', onclick: () => startBacklog(b) }) : null);
+          h('button', { class: 'card-link', type: 'button', text: B.tidyTitle(b.title || b.id), onclick: () => openDrawer({ type: 'backlog', id: itemKey(b), section: 'queued', index }) }),
+          sub ? h('span', { class: after ? 'gate' : null }, after ? icon('i-lock') : null, sub) : null),
+        b.id ? h('button', { class: 'btn sm', type: 'button', text: 'Start', title: after ? 'It waits on other work; starting it now is up to you' : 'Ask the first mate to start it', onclick: () => startBacklog(b) }) : null);
       return { el, age: null };
     });
     return c.el;
   }
-  function allClear(text) { return h('div', { class: 'all-clear' }, flagEl('c', 'lg'), h('p', null, h('b', { text: 'Nothing needs you. ' }), text)); }
-  function subHead(text, n) { return h('div', { class: 'sub-head' }, text, h('span', { class: 'count', text: n })); }
+  function allClear(text, bold = 'Nothing needs you. ') { return h('div', { class: 'all-clear' }, flagEl('c', 'lg'), h('p', null, h('b', { text: bold }), text)); }
+  // An empty fleet: what Firstmate and Ship Deck do, and how to start.
+  function welcome() {
+    return cached('welcome', '1', () => ({
+      el: h('div', { class: 'welcome', 'data-key': 'welcome' },
+        h('h3', { text: 'Your fleet is in harbour' }),
+        h('ol', { class: 'explain' }, ...EXPLAIN.map(([b, rest]) => h('li', null, b ? h('b', { text: b }) : null, rest))),
+        h('div', { class: 'btn-row' },
+          h('button', { class: 'btn primary', type: 'button', onclick: openJobSheet }, icon('i-plus'), 'Start a new job'),
+          h('button', { class: 'btn', type: 'button', onclick: () => openChat() }, icon('i-chat'), 'Ask the first mate'))),
+      age: null,
+    })).el;
+  }
+  function subHead(text, n, key) {
+    const on = opened.has(key);
+    return cached('sub:' + key, JSON.stringify([text, n, on]), () => ({
+      el: h('button', { class: 'sub-head', type: 'button', 'aria-expanded': String(on), 'data-key': 'sub:' + key, onclick: () => toggleOpen(key) }, icon(on ? 'i-down' : 'i-chev'), text, h('span', { class: 'count', text: n })),
+      age: null,
+    })).el;
+  }
+  function moreBtn(key, total, shown) {
+    const on = opened.has(key);
+    return cached('more:' + key, JSON.stringify([total, shown, on]), () => ({
+      el: h('button', { class: 'more', type: 'button', 'data-key': 'more:' + key, onclick: () => toggleOpen(key), text: on ? 'Show fewer' : `Show ${total - shown} more` }),
+      age: null,
+    })).el;
+  }
+  // The first `limit` items, or all once opened, plus the toggle.
+  function limited(key, items, limit, make) {
+    const all = opened.has(key);
+    const shown = all ? items : items.slice(0, limit);
+    return [...shown.map(make), ...(items.length > limit ? [moreBtn(key, items.length, limit)] : [])];
+  }
   // "2026-01-03" -> "3 Jan" (year kept when it differs).
   function shortDate(s) {
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || ''));
@@ -619,12 +721,12 @@
     el.replaceChildren(...kids);
     if (focused && focused.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true });
   }
-  function column(key) {
+  function column(key, title, extra) {
     let c = colEls.get(key);
     if (!c) {
       const head = h('div', { class: 'col-head' });
       const body = h('div', { class: 'col-body' });
-      c = { root: h('section', { class: 'col', 'data-col': key, 'aria-label': B.COLUMNS.find((x) => x.key === key).title }, head, body), head, body };
+      c = { root: h('section', { class: 'col', 'data-col': key, id: 'col-' + key, 'aria-label': title }, head, ...(extra || []), body), head, body };
       colEls.set(key, c);
     }
     return c;
@@ -648,64 +750,180 @@
     const hello = hr < 5 ? 'On the night watch' : hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
     return address() ? `${hello}, ${address()}` : hello;
   }
+  function headline(g) {
+    const w = g.counts.workers;
+    const c = g.counts.calls;
+    if (w) return `${w} ${w === 1 ? 'worker needs' : 'workers need'} you`;
+    if (c) return `${c} queued question${c === 1 ? '' : 's'} for you`;
+    if (g.counts.working) return `All clear, ${g.counts.working} at work`;
+    return 'All clear';
+  }
   let prevNeeds = null;
+
+  // The hoist: one signal per part of the board, with its count; each jumps to its section.
+  function jumpTo(key) {
+    const root = $('col-' + key) || $(key);
+    if (!root) return;
+    root.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    const first = root.querySelector('.card-link');
+    if (first) first.focus({ preventScroll: true });
+  }
+  function renderHoist(g) {
+    const n = g.counts;
+    if (unchanged('hoist', n)) return;
+    const sig = (key, mark, count, word, sub) => h('button', { class: 'signal' + (key === 'needs' && count ? ' up' : '') + (count ? '' : ' none'), type: 'button', title: `${word}: ${count}. Go there`, onclick: () => jumpTo(key) },
+      h('span', { class: 'signal-flag' }, mark),
+      h('span', { class: 'signal-body' }, h('span', { class: 'signal-line' }, h('span', { class: 'signal-n', text: count }), h('span', { class: 'signal-word', text: word })), sub ? h('small', { text: sub }) : null));
+    ui.hoist.replaceChildren(
+      sig('needs', flagEl('k'), n.needs, 'Needs you', !n.calls ? null : n.workers ? `${n.workers} worker${n.workers === 1 ? '' : 's'}, ${n.calls} queued` : `${n.calls} queued question${n.calls === 1 ? '' : 's'}`),
+      sig('working', flagEl('p'), n.working, 'Working'),
+      sig('waiting', flagEl('x'), n.waiting, 'Waiting', n.quiet ? `${n.quiet} quiet` : null),
+      sig('done', flagEl('c'), n.done, 'Done'),
+      sig('queue', icon('i-queue'), n.queue, 'Up next'));
+  }
+
+  // The conditions line: the first mate (when the chat is put away), monitoring, away mode, X mode,
+  // second mates and messages not picked up yet.
+  function fmNow() {
+    const has = act.loaded && !!act.sessionId;
+    const latest = [...act.events.values()].sort((a, b) => b.seq - a.seq).find((e) => e.kind === 'tool' || e.kind === 'text');
+    const doing = latest && latest.kind === 'tool' ? latest.label.charAt(0).toLowerCase() + latest.label.slice(1) : 'thinking';
+    return {
+      working: has && act.working, doing,
+      text: !has ? (act.loaded ? 'No session found' : 'Loading…') : act.working ? `Working: ${doing}` : `Idle, last active ${act.lastAt ? agoLong(act.lastAt) : 'a while ago'}`,
+    };
+  }
+  function renderConditions() {
+    if (!snap || snap.firstRun || view !== 'board') return;
+    const w = snap.watcher;
+    const fm = fmNow();
+    const pending = (snap.orders && snap.orders.pending) || 0;
+    const reg = (snap.secondmates && snap.secondmates.registry) || [];
+    const live = snap.tasks.filter((t) => t.kind === 'secondmate');
+    const mates = new Set([...reg.map((r) => r.id), ...live.map((t) => t.id)]).size;
+    const x = snap.xMode || { on: false, pending: 0 };
+    if (unchanged('conditions', fm.text, fm.working, w.healthy, !!w.lastBeat, Math.round((Date.now() - (w.lastBeat || 0)) / 30000), snap.afk, pending, mates, live.length, x)) return;
+    const item = (cls, title, onclick, ...kids) => h(onclick ? 'button' : 'span', { class: 'cond ' + cls, type: onclick ? 'button' : null, title, onclick }, ...kids);
+    ui.conditions.replaceChildren(...[
+      item('cond-fm', 'The first mate: open its session and monitoring', openFirstMate, h('span', { class: 'live' + (fm.working ? '' : ' off') }), h('b', { text: 'First mate' }), h('span', { class: 'muted', text: fm.text })),
+      item('mon ' + (w.lastBeat ? (w.healthy ? 'ok' : 'warn') : 'err'), w.lastBeat ? `The first mate's monitoring last checked the fleet ${agoLong(w.lastBeat)}` : 'Monitoring has not checked in: the first mate is not watching the fleet',
+        null, h('span', { class: 'sync-dot' }), w.lastBeat ? (w.healthy ? 'Monitoring' : 'Monitoring late') : 'Not monitoring', w.lastBeat ? h('span', { class: 'muted', text: agoLong(w.lastBeat) }) : null),
+      snap.afk
+        ? item('afk on', 'Away mode is on: the first mate keeps supervising and only brings you decisions, finished work and failures', null, icon('i-anchor'), h('b', { text: 'Away mode' }), h('span', { class: 'muted', text: 'only what needs you reaches you' }))
+        : item('afk', 'When you step away, tell the first mate /afk: it keeps supervising and only escalates what needs you', null, icon('i-anchor'), 'Away mode off'),
+      x.on ? item('xmode', 'X mode is on: the first mate answers eligible mentions on X', null, icon('i-at'), h('b', { text: 'X mode' }), x.pending ? h('span', { class: 'muted', text: `${x.pending} mention${x.pending === 1 ? '' : 's'} waiting` }) : null) : null,
+      mates ? item('mates', 'Second mates: leads with their own lane and fleet', () => jumpTo('mates'), icon('i-helm'), `${mates} second mate${mates === 1 ? '' : 's'}`, h('span', { class: 'muted', text: `${live.length} running` })) : null,
+      pending ? item('pending', 'Messages the first mate has not picked up yet', () => openChat(), icon('i-chat'), `${pending} message${pending === 1 ? '' : 's'} not picked up`) : null,
+    ].filter(Boolean));
+  }
 
   function renderBoard() {
     const g = B.groupBoard(snap, { project: boardProject, match: matchesTask, matchItem: matchesCrate });
-    if (boardProject && !g.projects.some((p) => p.toLowerCase() === boardProject.toLowerCase())) { boardProject = null; store.set('boardProject', null); return renderBoard(); }
-    const n = g.counts.needs;
+    if (boardProject && !g.projects.some((p) => B.projectKey(p) === B.projectKey(boardProject))) { boardProject = null; store.set('boardProject', null); return renderBoard(); }
     ui.greeting.textContent = greeting();
-    ui.boardTitle.textContent = (n ? `${n} ${n === 1 ? 'thing needs' : 'things need'} you` : 'All clear') + (boardProject ? ` in ${boardProject}` : '');
+    ui.boardTitle.textContent = headline(g) + (boardProject ? ` in ${boardProject}` : '');
     if (!unchanged('board-filters', g.projects, boardProject)) {
       const chipBtn = (name, label) => h('button', { class: 'filter', type: 'button', 'aria-pressed': String((boardProject || null) === name), text: label,
         onclick: () => { boardProject = name; store.set('boardProject', name); renderAll(); } });
       ui.projectFilters.replaceChildren(...(g.projects.length > 1 ? [chipBtn(null, 'All projects'), ...g.projects.map((p) => chipBtn(p, p))] : []));
     }
+    renderHoist(g);
+    renderConditions();
     const filtered = !!(query || boardProject);
-    const nothing = !snap.tasks.length && !(snap.backlog.queued || []).length;
+    const nothing = !snap.tasks.some((t) => t.kind !== 'secondmate') && !(snap.backlog.queued || []).length && !(snap.backlog.calls || []).length;
+    const workers = g.needs.filter((x) => x.type === 'task');
+    const calls = g.needs.filter((x) => x.type === 'call');
+    ui.hoist.hidden = nothing && !filtered;
+
+    // Needs you: worker cards, then the queued questions.
+    if (!needsEls) {
+      needsEls = { grid: h('div', { class: 'needs-grid' }), callsHead: h('div', { class: 'calls-head' }), callsList: h('div', { class: 'calls-list' }) };
+      needsEls.calls = h('div', { class: 'calls' }, needsEls.callsHead, needsEls.callsList);
+    }
+    const nc = column('needs', 'Needs you', [needsEls.grid, needsEls.calls]);
+    if (!unchanged('col-head-needs', g.counts.needs)) {
+      const bump = prevNeeds !== null && g.counts.needs > prevNeeds;
+      nc.head.replaceChildren(flagEl('k'), h('h2', { text: 'Needs you' }),
+        h('span', { class: 'count' + (g.counts.needs ? ' needs' : '') + (bump ? ' bump' : ''), text: g.counts.needs, title: `${g.counts.needs} need you` }),
+        h('span', { class: 'col-sub', text: 'Workers waiting on your call, blocked or failed, then questions parked in the queue' }));
+    }
+    prevNeeds = g.counts.needs;
+    setKids(needsEls.grid, workers.length ? workers.map((x) => taskCard(x.t, 'needs'))
+      : [nothing && !filtered ? welcome() : calls.length ? allClear('The queued questions below wait until you are ready.', 'No worker is waiting on you. ')
+        : allClear(filtered ? 'Nothing that matches the filter, at least.' : 'Workers are moving. A flag goes up here, with an alert if you turn them on, when one needs your call.')]);
+    needsEls.calls.hidden = !calls.length;
+    if (calls.length && !unchanged('calls-head', calls.length)) {
+      needsEls.callsHead.replaceChildren(h('h3', { text: 'Queued questions' }), h('span', { class: 'count', text: calls.length }),
+        h('span', { class: 'col-sub', text: 'Decisions the first mate parked in the queue until you answer' }));
+    }
+    setKids(needsEls.callsList, limited('calls', calls, CALLS_SHOWN, (x) => callRow(x.b)));
+
+    // The lanes.
     const bodies = {
-      needs: g.needs.length ? g.needs.map((x) => (x.type === 'task' ? taskCard(x.t, 'needs') : callCard(x.b)))
-        : [allClear(nothing ? 'No workers yet. Ask the first mate for work in the chat, or start a New job.'
-          : filtered ? 'Nothing that matches the filter, at least.' : 'Workers are moving. A flag goes up here, with an alert if you turn them on, when one needs your call.')],
-      working: g.working.length ? g.working.map((t) => taskCard(t, 'working')) : [h('p', { class: 'col-note', text: 'No one is working right now.' })],
+      working: limited('working', g.working, 8, (t) => taskCard(t, 'working')),
       waiting: [
-        ...g.waiting.map((t) => taskCard(t, 'waiting')),
-        ...(g.quiet.length ? [subHead('Quiet for a while', g.quiet.length), ...g.quiet.map((t) => taskCard(t, 'quiet'))] : []),
-        ...(g.queue.length ? [subHead('Up next in the queue', g.queue.length), ...g.queue.map(queueRow)] : []),
+        ...limited('waiting', g.waiting, 6, (t) => taskCard(t, 'waiting')),
+        ...(g.quiet.length ? [subHead('Quiet for a while', g.quiet.length, 'quiet'), ...(opened.has('quiet') ? g.quiet.map((t) => taskCard(t, 'quiet')) : [])] : []),
       ],
-      done: g.done.length ? g.done.map((t) => taskCard(t, 'done')) : [h('p', { class: 'col-note', text: 'Nothing finished yet.' })],
+      done: limited('done', g.done, 6, (t) => taskCard(t, 'done')),
+      queue: limited('queue', g.queue, 6, queueRow),
     };
-    if (!bodies.waiting.length) bodies.waiting.push(h('p', { class: 'col-note', text: 'Nothing is waiting.' }));
-    const counts = { needs: g.counts.needs, working: g.counts.working, waiting: g.counts.waiting, done: g.counts.done };
-    const roots = B.COLUMNS.map((def) => {
-      const c = column(def.key);
+    const counts = { working: g.counts.working, waiting: g.counts.waiting, done: g.counts.done, queue: g.counts.queue };
+    const roots = LANES.map((def) => {
+      const c = column(def.key, def.title);
       if (!unchanged('col-head-' + def.key, counts[def.key], def.key === 'done' && g.done.map((t) => t.id))) {
-        const bump = def.key === 'needs' && prevNeeds !== null && counts.needs > prevNeeds;
-        c.head.replaceChildren(...[flagEl(def.flag), h('h2', { text: def.title }),
-          h('span', { class: 'count' + (def.key === 'needs' && counts.needs ? ' needs' : '') + (bump ? ' bump' : ''), text: counts[def.key], title: `${counts[def.key]} in ${def.title}` }),
+        c.head.replaceChildren(...[def.flag ? flagEl(def.flag) : icon(def.icon), h('h2', { text: def.title }),
+          h('span', { class: 'count', text: counts[def.key], title: `${counts[def.key]} in ${def.title}` }),
           h('span', { class: 'spacer' }),
           def.key === 'done' && g.done.length ? h('button', { class: 'btn sm ghost', type: 'button', text: g.done.length === 1 ? 'Clean up' : 'Clean up all', onclick: () => cleanupDone(g.done) }) : null].filter(Boolean));
       }
-      setKids(c.body, bodies[def.key]);
+      setKids(c.body, bodies[def.key].length ? bodies[def.key] : [h('p', { class: 'col-note', text: filtered ? 'Nothing that matches.' : def.empty })]);
       return c.root;
     });
-    prevNeeds = counts.needs;
-    setKids(ui.cols, roots);
-    // Forget cards that left the board.
-    const live = new Set([...ui.cols.querySelectorAll('[data-key]')].map((el) => el.dataset.key));
-    for (const k of cards.keys()) if (!live.has(k)) cards.delete(k);
+    setKids(ui.cols, [nc.root, ...roots]);
+    ui.cols.removeAttribute('aria-busy');
     renderMates(g);
+    renderLog();
+    // Forget cards that left the board.
+    const live = new Set([...ui.board.querySelectorAll('[data-key]')].map((el) => el.dataset.key));
+    for (const k of cards.keys()) if (!live.has(k)) cards.delete(k);
   }
+  let needsEls = null;
 
-  // Second mates: one chip each, vacant ones dashed.
+  // Second mates: each lead's lane, scope and projects; running ones open their worker drawer.
   function renderMates(g) {
-    ui.mates.hidden = !g.mates.length && !g.vacant.length;
-    if (ui.mates.hidden || unchanged('mates', g.mates.map((t) => [t.id, t.title, taskStatus(t), lastNote(t)]), g.vacant)) return;
-    ui.mates.replaceChildren(h('h3', { text: 'Second mates' }),
-      ...g.mates.map((t) => h('button', { class: 'mate-chip', type: 'button', title: L.summary(t), onclick: () => openDrawer({ type: 'task', id: t.id }) },
-        h('span', { class: 'fm-avatar' }, icon('i-helm')), h('span', { class: 'strong', text: t.title || t.id }), pillEl(taskStatus(t), 'sm'))),
-      ...g.vacant.map((r) => h('button', { class: 'mate-chip vacant', type: 'button', onclick: () => openDrawer({ type: 'secondmate', id: r.id }) },
-        h('span', { text: r.id }), h('span', { class: 'muted', text: 'not running' }))));
+    const reg = (snap.secondmates && snap.secondmates.registry) || [];
+    const byId = new Map(reg.map((r) => [r.id, r]));
+    const rows = [...g.mates.map((t) => ({ t, r: byId.get(t.id) })), ...g.vacant.map((r) => ({ r }))];
+    ui.mates.hidden = !rows.length;
+    if (!rows.length || unchanged('mates', rows.map(({ t, r }) => [t && [t.id, t.title, taskStatus(t), lastNote(t)], r]))) return;
+    ui.mates.replaceChildren(
+      h('div', { class: 'sec-head' }, icon('i-helm'), h('h2', { id: 'mates-title', text: 'Second mates' }), h('span', { class: 'count', text: rows.length }),
+        h('span', { class: 'col-sub', text: 'Leads with their own fleet; the first mate routes work in their lane to them' })),
+      h('div', { class: 'mate-list' }, ...rows.map(({ t, r }) => {
+        const st = t ? taskStatus(t) : null;
+        return h('article', { class: 'mate' + (t ? '' : ' vacant') },
+          h('div', { class: 'mate-top' }, h('span', { class: 'fm-avatar small' }, icon('i-helm')),
+            h('h3', { class: 'card-title' }, h('button', { class: 'card-link', type: 'button', text: r ? r.id : t.id, onclick: () => openDrawer(t ? { type: 'task', id: t.id } : { type: 'secondmate', id: r.id }) })),
+            t ? pillEl(st, 'sm') : h('span', { class: 'pill sm plain', text: 'Not running' })),
+          r && (r.description || r.scope) ? h('p', { class: 'mate-desc', text: sentence(r.description || r.scope) }) : null,
+          h('dl', { class: 'mate-facts' }, ...[r && r.scope ? [h('dt', { text: 'Lane' }), h('dd', { text: r.scope })] : null, r && r.projects ? [h('dt', { text: 'Projects' }), h('dd', { text: r.projects })] : null, t && lastNote(t) ? [h('dt', { text: 'Latest' }), h('dd', { text: sentence(lastNote(t)) })] : null].filter(Boolean).flat()));
+      })));
+  }
+  // Recently finished: the queue's Done list, newest first as the first mate keeps it.
+  function renderLog() {
+    const done = (snap.backlog.done || []).filter((b) => matchesCrate(b) && (!boardProject || !b.tags.repo || B.projectKey(b.tags.repo) === B.projectKey(boardProject)));
+    ui.log.hidden = !done.length;
+    if (!done.length || unchanged('log', done, opened.has('log'))) return;
+    const when = (b) => b.tags.landed || b.tags.done || b.tags.reported || null;
+    const shown = opened.has('log') ? done : done.slice(0, 6);
+    ui.log.replaceChildren(...[
+      h('div', { class: 'sec-head' }, icon('i-log'), h('h2', { id: 'log-title', text: 'Recently finished' }), h('span', { class: 'count', text: done.length }),
+        h('span', { class: 'col-sub', text: 'From the queue’s Done list' })),
+      h('ol', { class: 'log-list' }, ...shown.map((b) => h('li', null, flagEl('c'),
+        h('span', { class: 'log-title', text: B.tidyTitle(b.title || b.id) }),
+        when(b) ? h('time', { text: shortDate(when(b)) }) : null))),
+      done.length > 6 ? h('button', { class: 'more', type: 'button', onclick: () => { toggleOpen('log'); }, text: opened.has('log') ? 'Show fewer' : `Show ${done.length - 6} more` }) : null].filter(Boolean));
   }
 
   function needsCaptain() { return snap.tasks.filter((t) => ATTENTION.has(t.state) && !t.stale).sort(sortTasks); }
@@ -727,6 +945,7 @@
     ui.jobSheet.hidden = false;
     ui.jobScrim.hidden = false;
     renderJobProjects();
+    renderJobPath();
     renderJobConfig();
     (ui.jobProject.value ? ui.jobText : ui.jobProject).focus();
   }
@@ -746,9 +965,23 @@
     if (unchanged('job-projects', names)) return;
     const want = ui.jobProject.value || store.get('draft.job.project');
     ui.jobProject.replaceChildren(h('option', { value: '', text: names.length ? 'Choose a project…' : 'No projects in data/projects.md' }),
-      ...names.map(([n, mode]) => h('option', { value: n, text: mode ? `${n}  ·  ${mode}` : n })));
+      ...names.map(([n]) => h('option', { value: n, text: n })));
     if (want && names.some(([n]) => n === want)) ui.jobProject.value = want;
+    renderJobPath();
   }
+  // The chosen project's delivery path (data/projects.md "[mode]", "+yolo" when it runs on its own).
+  function renderJobPath() {
+    const p = snap && snap.projects.find((x) => x.name === ui.jobProject.value);
+    const mode = p && p.mode ? p.mode.split(/\s+/)[0] : null;
+    const scout = (ui.jobForm.querySelector('input[name="job-kind"]:checked') || {}).value === 'scout';
+    ui.jobPath.hidden = !p;
+    if (!p) return;
+    const path = scout ? B.PATHS.scout : B.PATHS[mode];
+    ui.jobPath.textContent = scout ? `${path.word}.` : path
+      ? `${path.word}. ${/\+yolo\b/.test(p.mode) ? 'The first mate merges green work in this project.' : 'Merging waits for your word.'}`
+      : 'No delivery path recorded for this project; the first mate picks one.';
+  }
+  ui.jobProject.addEventListener('change', renderJobPath);
   // Harness/model/effort pickers from the server's allow-list; '' model = first mate default.
   function fillSelect(sel, items, want) {
     sel.replaceChildren(...items.map(([v, label]) => h('option', { value: v, text: label })));
@@ -772,7 +1005,7 @@
   const savedKind = store.get('draft.job.kind');
   for (const r of ui.jobForm.querySelectorAll('input[name="job-kind"]')) {
     if (savedKind && r.value === savedKind) r.checked = true;
-    r.addEventListener('change', () => store.set('draft.job.kind', r.value));
+    r.addEventListener('change', () => { store.set('draft.job.kind', r.value); renderJobPath(); });
   }
   ui.jobForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -850,7 +1083,7 @@
 
   // firstmate kind and mode in words.
   const KIND_WORDS = { ship: 'Ship: makes the change and opens a pull request', scout: 'Scout: diagnoses and writes a report', secondmate: 'Second mate: runs its own lane' };
-  const MODE_WORDS = { 'no-mistakes': 'Full review pipeline before push', 'direct-PR': 'Opens a pull request directly', 'local-only': 'Local only, no pull request' };
+  const MERGE_WORDS = { captain: 'Merging waits for your word.', firstmate: 'The first mate merges it once it is green (this project runs on its own).' };
 
   // The worker drawer keeps its interactive parts (terminal, message box, tabs, file viewer)
   // across polls; the header and each tab's facts are rebuilt only when they change.
@@ -871,8 +1104,9 @@
     if (!td || td.id !== t.id || !td.root.isConnected) buildTaskDrawer(t);
     td.task = t;
     ui.drawerKicker.replaceChildren(pillEl(taskStatus(t)), h('span', { text: t.lastActivity ? `Last update ${agoLong(t.lastActivity)}` : 'No update yet' }));
-    ui.drawerTitle.textContent = t.title || t.id;
-    if (!unchanged('drawer-head', t.id, t.title, t.project, t.pr, B.toolText(t), t.window, t.alive)) renderTaskHead(t);
+    ui.drawerTitle.textContent = titleOf(t.id);
+    const dv = B.deliveryOf(t);
+    if (!unchanged('drawer-head', t.id, t.title, t.project, t.pr, B.toolText(t), t.window, t.alive, t.kind, t.fromX, dv)) renderTaskHead(t, dv);
     if (!unchanged('drawer-resume', t.id, t.session)) td.termOpen.replaceChildren(h('p', { class: 'hint', text: 'Copy into a terminal to pick up this worker’s Claude Code session.' }), resumeBlock(t.session));
     if (!unchanged('drawer-decision', t.id, t.state, t.stale, lastNote(t), t.options, suggestionsFor(t))) renderDecision(t);
     if (!unchanged('drawer-updates', t.id, t.lastStatus)) renderUpdates(t);
@@ -883,17 +1117,25 @@
     if (!t.window && td.tab === 'terminal') showDrawerTab('updates');
   }
 
-  function renderTaskHead(t) {
+  function renderTaskHead(t, dv) {
     const d = td;
+    const pr = safeUrl(t.pr) || (dv && safeUrl(dv.pr));
     d.meta.replaceChildren(...[
       t.title && t.title !== t.id ? h('code', { text: t.id }) : null,
       h('span', { text: t.project }),
-      safeUrl(t.pr) ? h('a', { class: 'chip', href: safeUrl(t.pr), target: '_blank', rel: 'noopener noreferrer', title: 'Open the pull request (O)' }, icon('i-pr'), prNumber(t.pr), icon('i-ext')) : null,
+      t.kind !== 'secondmate' ? h('span', { class: 'chip' }, icon(t.kind === 'scout' ? 'i-scout' : 'i-ship'), t.kind === 'scout' ? 'Scout' : 'Ship') : null,
+      pr ? h('a', { class: 'chip' + (dv && dv.ci ? ' pr-chip ci-' + dv.ci : ''), href: pr, target: '_blank', rel: 'noopener noreferrer', title: 'Open the pull request (O)' }, icon('i-pr'), prNumber(pr), dv && dv.ci ? h('span', { class: 'ci-dot', 'aria-hidden': 'true' }) : null, icon('i-ext')) : null,
       h('span', { class: 'chip', text: B.toolText(t) }),
+      t.fromX ? h('span', { class: 'chip', title: 'Started from a mention on X (X mode)' }, icon('i-at'), 'From X') : null,
       t.window && t.alive === false ? h('span', { class: 'chip', text: 'Terminal closed' }) : null,
     ].filter(Boolean));
-    d.mergeBtn.hidden = !t.pr;
-    d.prLink = safeUrl(t.pr);
+    d.track.hidden = !dv;
+    if (dv) {
+      d.track.replaceChildren(trackEl(dv, true),
+        h('p', { class: 'hint' }, h('b', { text: dv.label }), `. ${dv.word}.`));
+    }
+    d.mergeBtn.hidden = !pr;
+    d.prLink = pr;
   }
 
   // Latest update first, every one with its flag and one timestamp format.
@@ -915,7 +1157,7 @@
     if (last) {
       const st = B.statusOf({ state: last.state });
       const ms = last.ts ? localTime(last.ts) : last.approxTs;
-      td.latest.replaceChildren(flagEl(st.flag, 'lg'), h('span', { class: 'latest-note', text: sentence(last.note) }), h('span', { class: 'when', text: ms ? whenText(ms) : '' }));
+      td.latest.replaceChildren(flagEl(st.flag, 'lg'), h('span', { class: 'latest-note', text: B.tidyTitle(sentence(last.note)) }), h('span', { class: 'when', text: ms ? whenText(ms) : '' }));
     }
   }
 
@@ -928,7 +1170,10 @@
     const dl = h('dl', { class: 'facts' });
     fact(dl, 'Project', t.project);
     fact(dl, 'Kind', KIND_WORDS[t.kind] || sentence(t.kind));
-    fact(dl, 'Checks', t.mode ? MODE_WORDS[t.mode] || t.mode : null);
+    const dv = B.deliveryOf(t);
+    fact(dl, 'Delivery', dv ? `${dv.word}${t.mode && !dv.path ? ` (${t.mode})` : ''}` : null);
+    fact(dl, 'Merges', dv && dv.merge ? MERGE_WORDS[dv.merge] : null);
+    fact(dl, 'Started from', t.fromX ? 'A mention on X (X mode)' : null);
     fact(dl, 'Tool', B.toolText(t));
     fact(dl, 'Terminal', t.window ? (t.alive === true ? 'Open' : t.alive === false ? 'Closed' : snap.tmux.available ? 'Not found' : 'Not checked (no tmux)') : 'None');
     if (t.worktree) {
@@ -984,7 +1229,8 @@
     if (!show) { td.decision.replaceChildren(); td.latest.hidden = !t.lastStatus.length; return; }
     const st = taskStatus(t);
     td.decision.className = `decision-sec tone-${st.tone}`;
-    td.decision.replaceChildren(
+    // replaceChildren would print a missing block as "null"
+    td.decision.replaceChildren(...[
       h('h3', null, flagEl(st.flag), t.state === 'blocked' ? 'Blocked: help it along' : 'Needs your call'),
       h('div', { class: 'decision-note', text: B.cardSummary(t, 2000) || 'No note.' }),
       suggestionBlock(t),
@@ -993,7 +1239,7 @@
         draftKey: 'decision.' + t.id,
         placeholder: t.options.length ? 'Optional note, or your own answer…' : 'Your answer…',
         send: (opt, extra) => answerTask(t, opt, extra),
-      }));
+      })].filter(Boolean));
     td.latest.hidden = true;
   }
 
@@ -1012,7 +1258,7 @@
         continue;
       }
       const choice = L.configChoices(list, c[field], c.pending[field]);
-      const sel = h('select', { 'aria-label': `${label} for ${t.title || t.id}` }, ...choice.options.map(([v, text]) => h('option', { value: v, text })));
+      const sel = h('select', { 'aria-label': `${label} for ${titleOf(t.id)}` }, ...choice.options.map(([v, text]) => h('option', { value: v, text })));
       sel.value = choice.selected;
       const btn = h('button', { class: 'btn', type: 'button', disabled: true, text: live ? 'Apply live' : 'Send change', onclick: () => sel.value && applyConfig(t, field, sel.value, live) });
       sel.addEventListener('change', () => { btn.disabled = !sel.value; });
@@ -1027,7 +1273,7 @@
   }
   async function applyConfig(t, field, value, live) {
     const ok = await confirmDialog({
-      title: `Set the ${field} of “${t.title || t.id}” to ${value}?`,
+      title: `Set the ${field} of “${titleOf(t.id)}” to ${value}?`,
       body: live
         ? `Types “/${field} ${value}” into its terminal now. It applies from the worker's next turn, and the first mate is told about the change.`
         : 'Tells the first mate, who applies it when it next restarts this worker.',
@@ -1035,7 +1281,7 @@
     });
     if (!ok) return;
     const r = await post('/api/config', { id: t.id, field, value });
-    if (r.ok) { toast(r.applied ? `Sent ${r.command} to ${t.title || t.id}` : `Sent: ${field} ${value} on restart`, 'ok'); poll(); }
+    if (r.ok) { toast(r.applied ? `Sent ${r.command} to ${titleOf(t.id)}` : `Sent: ${field} ${value} on restart`, 'ok'); poll(); }
     else toast(`Settings change failed: ${r.error}`, 'err');
   }
 
@@ -1057,10 +1303,11 @@
     stopPeek();
     const id = t.id;
     const d = { id };
-    const name = () => (td && td.task && td.task.title) || id;
+    const name = () => titleOf(id);
 
     // Header: meta chips, the asks, the "Open in terminal" panel and the tabs.
     d.meta = h('div', { class: 'd-meta' });
+    d.track = h('div', { class: 'd-track', hidden: true });
     d.mergeBtn = h('button', { class: 'btn sm', type: 'button', text: 'Merge PR…', onclick: () => queueOrder({ kind: 'merge', target: id }, { title: `Ask the first mate to merge the pull request of “${name()}”?`, body: (td && td.task && td.task.pr) || null }) });
     d.termOpen = h('div', { class: 'term-open', hidden: true });
     d.termBtn = h('button', { class: 'btn sm', type: 'button', 'aria-expanded': 'false', title: 'Show the command that resumes this worker’s session in your terminal', onclick: () => {
@@ -1088,7 +1335,7 @@
       d.tabBtns[k] = b;
       tabs.append(b);
     });
-    ui.drawerSub.replaceChildren(d.meta, actions, d.termOpen, tabs);
+    ui.drawerSub.replaceChildren(d.meta, d.track, actions, d.termOpen, tabs);
 
     // File viewer: replaces the drawer body while open.
     d.fileTitle = h('span', { class: 'mono' });
@@ -1276,7 +1523,7 @@
     const call = b && b.id ? (snap.backlog.calls || []).find((c) => c.id === b.id) : null;
     const st = call ? B.callStatus() : { captain: B.callStatus(), inFlight: { tone: 'working', flag: 'p', label: 'In progress' }, queued: { tone: 'waiting', flag: 'x', label: 'Up next in the queue' }, done: { tone: 'done', flag: 'c', label: 'Done' } }[selected.section] || { tone: 'waiting', flag: 'x', label: 'In the queue' };
     ui.drawerKicker.replaceChildren(pillEl(st), h('span', { text: 'From the queue' }));
-    ui.drawerTitle.textContent = (b && b.title) || selected.id;
+    ui.drawerTitle.textContent = B.tidyTitle((b && b.title) || selected.id);
     if (!b) { ui.drawerSub.replaceChildren(); ui.drawerBody.replaceChildren(h('p', { text: 'This item is no longer in the queue.' })); return; }
     if (unchanged('drawer-backlog', selected.id, selected.section, b, call && call.options, (snap.orders && snap.orders.list || []).filter((o) => o.item === b.id))) return;
     ui.drawerSub.replaceChildren(h('div', { class: 'd-meta' }, ...[b.id ? h('code', { text: b.id }) : null, b.tags.repo ? h('span', { text: b.tags.repo }) : null].filter(Boolean)));
@@ -1461,6 +1708,17 @@
   });
   setChatHidden(store.get('chatHidden') === '1', false);
 
+  // Theme (More menu): system, light or dark; theme.js applies the saved one before first paint.
+  function setTheme(name, save) {
+    const t = name === 'light' || name === 'dark' ? name : 'system';
+    if (t === 'system') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = t;
+    if (save) store.set('theme', t === 'system' ? null : t);
+    for (const b of ui.themeSeg.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.theme === t));
+  }
+  ui.themeSeg.addEventListener('click', (e) => { const b = e.target.closest('button[data-theme]'); if (b) setTheme(b.dataset.theme, true); });
+  setTheme(store.get('theme') || 'system', false);
+
   // The More menu (a native popover): close it once an item is picked.
   ui.menu.addEventListener('click', (e) => { if (e.target.closest('.menu-item') && ui.menu.hidePopover) ui.menu.hidePopover(); });
 
@@ -1573,15 +1831,14 @@
       ? `Live from the first mate's Claude Code transcript (read-only). Last line ${act.lastAt ? agoLong(act.lastAt) : 'unknown'}.`
       : act.loaded ? 'No first mate Claude Code transcript found yet.' : 'Loading…';
     const list = [...act.events.values()].sort((a, b) => b.seq - a.seq);
-    const latest = list.find((e) => e.kind === 'tool' || e.kind === 'text');
     // Panel head: what the first mate is doing right now.
+    const fm = fmNow();
     ui.fmLive.classList.toggle('off', !act.working);
-    ui.fmNowText.textContent = !has ? (act.loaded ? 'No session found' : 'Loading…')
-      : act.working ? `Working: ${latest && latest.kind === 'tool' ? latest.label.charAt(0).toLowerCase() + latest.label.slice(1) : 'thinking'}`
-        : `Idle, last active ${act.lastAt ? agoLong(act.lastAt) : 'a while ago'}`;
-    ui.workingNow.hidden = !(has && act.working);
-    if (has && act.working) ui.workingNowText.textContent = `First mate is ${latest && latest.kind === 'tool' ? latest.label.charAt(0).toLowerCase() + latest.label.slice(1) : 'thinking'}`;
-    ui.fmShipNow.textContent = ui.fmNowText.textContent;
+    ui.fmNowText.textContent = fm.text;
+    ui.workingNow.hidden = !fm.working;
+    if (fm.working) ui.workingNowText.textContent = `First mate is ${fm.doing}`;
+    ui.fmShipNow.textContent = fm.text;
+    renderConditions();
     if (activeTab !== 'activity' || unchanged('feed', act.epoch, act.rev, list.length)) return;
     ui.feed.replaceChildren(...(list.length ? list.map(evRow) : [emptyRow(has ? 'No tool calls in the transcript yet.' : 'Nothing to show until the first mate has a Claude Code session in its home.')]));
   }
@@ -2043,7 +2300,7 @@
   // New "needs you" items: workers entering decision/blocked/failed, or new queue decisions.
   function notifyNeeds() {
     const now = [
-      ...needsCaptain().map((t) => ({ key: `t:${t.id}:${t.state}:${t.statusCount}`, title: `${t.title || t.id} needs you`, body: L.summary(t), open: () => openDrawer({ type: 'task', id: t.id }) })),
+      ...needsCaptain().map((t) => ({ key: `t:${t.id}:${t.state}:${t.statusCount}`, title: `${titleOf(t.id)} needs you`, body: L.summary(t), open: () => openDrawer({ type: 'task', id: t.id }) })),
       ...(snap.backlog.calls || []).filter((b) => b.id).map((b) => ({ key: `c:${b.id}`, title: `Needs you: ${b.title || b.id}`, body: b.id, open: () => openDrawer({ type: 'backlog', id: b.id, section: b.section, index: b.index }) })),
     ];
     const seen = store.json('seenNeeds', null);
@@ -2240,11 +2497,12 @@
   // Cards (board) or berths (ship) in reading order, column by column.
   function navItems() {
     if (view === 'ship') return [...ui.areas.querySelectorAll('.berth:not(.hidden-by-filter)')];
-    return [...ui.cols.querySelectorAll('.card-link')];
+    return [...ui.board.querySelectorAll('.card-link')];
   }
+  const CARD_SEL = '.bcard, .row-card, .qrow, .mate';
   function currentItem(items) {
     const a = document.activeElement;
-    return items.findIndex((el) => el === a || (a && el.closest('.bcard, .row-card') && el.closest('.bcard, .row-card').contains(a)));
+    return items.findIndex((el) => el === a || (a && el.closest(CARD_SEL) && el.closest(CARD_SEL).contains(a)));
   }
   function focusItem(el) {
     if (!el) return;
@@ -2252,7 +2510,7 @@
     el.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
   }
   function moveColumn(dir) {
-    const cols = [...ui.cols.querySelectorAll('.col')];
+    const cols = [...ui.board.querySelectorAll('.col')];
     const here = document.activeElement && document.activeElement.closest('.col');
     let i = cols.indexOf(here);
     for (let n = 0; n < cols.length; n++) {
@@ -2305,7 +2563,7 @@
       if (go) { e.preventDefault(); if (selected && k !== 'c' && k !== 'a') closeDrawer(); go(); }
       return;
     }
-    const optCard = document.activeElement && document.activeElement.closest('.bcard');
+    const optCard = document.activeElement && document.activeElement.closest('.bcard, .qrow');
     if (k === 'g' && !(optCard && optCard.querySelector('.opt[data-letter="G"]'))) { gPending = Date.now(); return; }
     // In an open worker drawer.
     if (selected && selected.type === 'task' && td) {
@@ -2334,7 +2592,7 @@
       const i = needs.indexOf(document.activeElement);
       focusItem(needs[(i + 1) % needs.length]);
     } else if (/^[a-h]$/.test(k) && view === 'board') {
-      const card = document.activeElement && document.activeElement.closest('.bcard');
+      const card = document.activeElement && document.activeElement.closest('.bcard, .qrow');
       const opt = card && card.querySelector(`.opt[data-letter="${k.toUpperCase()}"]`);
       if (opt) { e.preventDefault(); opt.click(); }
     }
