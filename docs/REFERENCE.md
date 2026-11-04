@@ -28,7 +28,7 @@ The first of these wins:
 4. `~/firstmate`, if it looks like a firstmate home
 
 If none matches, the page shows a first-run screen listing where it looked,
-pointing to `sh ~/ship-deck/bin/install.sh` to set one up, and how to point it
+pointing to `sh ~/.ship-deck/app/bin/install.sh` to set one up, and how to point it
 at an existing home. The Claude Code data for the home (the
 first mate's transcripts and its memory folder) is found from the home path,
 the same way Claude Code names its project folders

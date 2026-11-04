@@ -33,7 +33,7 @@ from the relay. Skills a teammate shared with *you* are never passed on.
 
 ## Teammate: nothing to do
 
-Run your own Ship Deck with sharing (on after install; `sh ~/ship-deck/bin/install.sh --share`
+Run your own Ship Deck with sharing (on after install; `sh ~/.ship-deck/app/bin/install.sh --share`
 if you turned it off) and sign in under Settings > Sharing (see [TEAMMATE-SETUP.md](TEAMMATE-SETUP.md)). Then:
 
 - On sign-in, and at most every 10 minutes after, your deck checks whether anything

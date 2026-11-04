@@ -59,6 +59,8 @@ function parseArgs(argv, { env = process.env, cwd = process.cwd() } = {}) {
     verifyDays: Number(env.SHIP_DECK_VERIFY_DAYS) || undefined, // shared items unchecked this long are flagged (30)
     agentsDir: null, // ~/.agents/skills and ~/.cursor/rules unless given (see below)
     cursorDir: null,
+    // The installed launcher: open a deck already running on this home instead of a second one.
+    reuse: !!env.SHIP_DECK_REUSE && !argv.some((a) => /^--(port|orders-dir)(=|$)/.test(a)),
   };
   let homeFlag = null;
   for (let i = 0; i < argv.length; i++) {
@@ -585,6 +587,24 @@ function openBrowser(url) {
   try { execFile(cmd, args, { timeout: 10000 }, () => { /* no browser: the URL is printed */ }).unref(); } catch { /* ignore */ }
 }
 
+// Port of a deck already serving this home in [port, port + tries), else null.
+async function findRunning(home, port, tries = PORT_TRIES) {
+  for (let p = port; p < port + tries && p <= 65535; p++) {
+    const health = await new Promise((resolve) => {
+      const req = http.get({ host: '127.0.0.1', port: p, path: '/api/health', timeout: 500 }, (res) => {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (c) => { if (body.length < 4096) body += c; });
+        res.on('end', () => { try { resolve(JSON.parse(body)); } catch { resolve(null); } });
+      });
+      req.on('timeout', () => req.destroy());
+      req.on('error', () => resolve(null));
+    });
+    if (health && health.app === 'ship-deck' && health.home === home) return p;
+  }
+  return null;
+}
+
 async function main(argv) {
   if (argv[0] === 'awake') process.exit(await awake.cli(argv.slice(1), { exec: actions.defaultExec }));
   const opts = parseArgs(argv);
@@ -593,6 +613,15 @@ async function main(argv) {
     console.warn('The page explains how to point Ship Deck at one: ship-deck --home /path/to/firstmate');
   } else if (!fs.existsSync(path.join(opts.home, 'state'))) {
     console.warn(`warning: ${opts.home}/state not found; the deck will be empty`);
+  }
+  if (opts.reuse && opts.home) {
+    const running = await findRunning(opts.home, opts.port);
+    if (running) {
+      const url = `http://127.0.0.1:${running}/`;
+      console.log(`Ship Deck is already running: ${url}`);
+      if (opts.open) openBrowser(url);
+      return;
+    }
   }
   let port;
   let server;
@@ -619,4 +648,4 @@ async function main(argv) {
 
 if (require.main === module) main(process.argv.slice(2));
 
-module.exports = { createServer, parseArgs, postGuard, knownIds, orderContext, listen, main, DEFAULT_PORT };
+module.exports = { createServer, parseArgs, postGuard, knownIds, orderContext, listen, findRunning, main, DEFAULT_PORT };

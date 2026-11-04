@@ -112,7 +112,7 @@
     if (!s.enabled) {
       box.append(h('div', { class: 'callout warn' }, icon('i-lock'), h('span', null,
         'Sharing is off: Ship Deck sends nothing, and skills teammates share with you do not reach your agent. Turn it back on with ',
-        h('code', { text: 'sh ~/ship-deck/bin/install.sh --share' }), ' and restart Ship Deck (installs have it on unless you chose ',
+        h('code', { text: 'sh ~/.ship-deck/app/bin/install.sh --share' }), ' and restart Ship Deck (installs have it on unless you chose ',
         h('code', { text: '--no-share' }), '). Your deck stays on this computer either way.')));
       return;
     }

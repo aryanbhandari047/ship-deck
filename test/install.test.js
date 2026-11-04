@@ -58,14 +58,15 @@ function sandbox(t, { firstmate = true, uname = null, brew = false } = {}) {
   const g = (...a) => execFileSync(git, ['-C', repo, ...a], { stdio: 'ignore' });
   g('init', '-q'); g('add', '.'); g('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'init');
   // No terminal to ask on unless a test feeds an answer file (never the developer's /dev/tty).
-  const env = { HOME: home, PATH: `${shims}:/usr/bin:/bin`, SHELL: '/bin/zsh', FIRSTMATE_REPO: repo, SHIP_DECK_TTY: path.join(base, 'no-tty') };
+  // Not started unless a test asks (SHIP_DECK_NO_START), never a real browser.
+  const env = { HOME: home, PATH: `${shims}:/usr/bin:/bin`, SHELL: '/bin/zsh', FIRSTMATE_REPO: repo, SHIP_DECK_TTY: path.join(base, 'no-tty'), SHIP_DECK_NO_START: '1', SHIP_DECK_NO_OPEN: '1' };
   const run = (...args) => {
     const r = spawnSync('/bin/sh', [INSTALL, ...args], { env: { ...env, ...(run.env || {}) }, cwd: base, encoding: 'utf8' });
     return { code: r.status, out: r.stdout + r.stderr };
   };
   const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '');
   const sleepDisabled = () => (fs.existsSync(sleepFile) ? fs.readFileSync(sleepFile, 'utf8').trim() : '0');
-  return { base, home, env, run, calls, sleepDisabled };
+  return { base, home, shims, env, run, calls, sleepDisabled };
 }
 
 // Every path under dir with its size and mtime, for "nothing else changed" checks.
@@ -126,6 +127,8 @@ test('install.sh without a firstmate home sets one up at ~/firstmate, then leave
   for (const d of ['state', 'data', 'projects']) assert.equal(fs.statSync(path.join(fm, d)).mode & 0o777, 0o700, d);
   assert.ok(require('../lib/home').looksLikeHome(fm), 'Ship Deck finds it');
   assert.doesNotMatch(fs.readFileSync(path.join(s.home, '.local', 'bin', 'ship-deck'), 'utf8'), /FM_HOME=/);
+  assert.equal(fs.readFileSync(path.join(fm, 'data', 'learnings.md'), 'utf8'), fs.readFileSync(path.join(ROOT, 'docs', 'FIRST-MATE.md'), 'utf8'), 'a fresh home is taught the chat contract');
+  assert.doesNotMatch(r.out, /tell your first mate once/);
 
   fs.writeFileSync(path.join(fm, 'state', 'w.status'), 'working: x\n');
   const before = fingerprint(fm);
@@ -133,6 +136,67 @@ test('install.sh without a firstmate home sets one up at ~/firstmate, then leave
   assert.equal(again.code, 0, again.out);
   assert.doesNotMatch(again.out, /Setting up firstmate/);
   assert.deepEqual(fingerprint(fm), before, 'an existing home is left exactly as is');
+});
+
+test('install.sh tells an existing home how to learn the chat, without writing to it', (t) => {
+  const s = sandbox(t);
+  const r = s.run('--no-edit-path');
+  assert.equal(r.code, 0, r.out);
+  assert.ok(!fs.existsSync(path.join(s.home, 'firstmate', 'data', 'learnings.md')));
+  assert.match(r.out, /tell your first mate once: "Read ~\/\.ship-deck\/app\/docs\/FIRST-MATE\.md/);
+  assert.match(r.out, /Try these first:\n {2}1\. Start your first mate in a new terminal: {2}cd ~\/firstmate && claude/);
+  fs.writeFileSync(path.join(s.home, 'firstmate', 'data', 'learnings.md'), 'Ship Deck: node ~/.ship-deck/app/bin/orders.js list\n');
+  assert.doesNotMatch(s.run('--no-edit-path').out, /tell your first mate once/, 'already taught');
+});
+
+test('install.sh installs Node with Homebrew when it is missing', (t) => {
+  const s = sandbox(t, { brew: true });
+  fs.rmSync(path.join(s.shims, 'node'));
+  fs.writeFileSync(path.join(s.shims, 'brew'), `#!/bin/sh\necho "brew $*" >> '${path.join(s.base, 'calls.log')}'\ncase "$*" in *node*) ln -s '${process.execPath}' '${path.join(s.shims, 'node')}' ;; esac\n`, { mode: 0o755 });
+  const r = s.run('--no-edit-path');
+  assert.equal(r.code, 0, r.out);
+  assert.match(s.calls(), /^brew install node$/m);
+  assert.match(r.out, /ok {4}node v\d+/);
+  fs.rmSync(path.join(s.shims, 'node'));
+  fs.rmSync(path.join(s.shims, 'brew'));
+  const none = s.run('--no-edit-path');
+  assert.notEqual(none.code, 0);
+  assert.match(none.out, /Node\.js 18 or newer is required/);
+});
+
+test('install.sh piped into sh (curl | sh) installs from --from, not from the current folder', (t) => {
+  const s = sandbox(t);
+  const src = path.join(s.base, 'src');
+  const git = (...a) => execFileSync('git', a, { stdio: 'ignore' });
+  fs.mkdirSync(src);
+  for (const f of ['server.js', 'package.json', 'README.md', 'lib', 'public', 'bin', 'docs']) fs.cpSync(path.join(ROOT, f), path.join(src, f), { recursive: true });
+  git('-C', src, 'init', '-q'); git('-C', src, 'add', '.'); git('-C', src, '-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'init');
+  const r = spawnSync('/bin/sh', ['-s', '--', '--from', src, '--no-edit-path'], { input: fs.readFileSync(INSTALL), env: s.env, cwd: s.home, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, new RegExp(`Cloning Ship Deck from ${src}`));
+  assert.ok(fs.existsSync(path.join(s.home, '.ship-deck', 'app', 'server.js')));
+});
+
+test('install.sh starts the deck, then a re-run restarts it on the new version', async (t) => {
+  const s = sandbox(t);
+  const port = 21000 + Math.floor(Math.random() * 8000);
+  s.run.env = { SHIP_DECK_NO_START: '', SHIP_DECK_PORT: String(port) };
+  const pidOf = () => Number(fs.readFileSync(path.join(s.home, '.ship-deck', 'server.pid'), 'utf8'));
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  t.after(() => { try { process.kill(pidOf()); } catch { /* gone */ } });
+  const r = s.run('--no-edit-path');
+  assert.equal(r.code, 0, r.out);
+  const m = /Ship Deck is running at (http:\/\/127\.0\.0\.1:(\d+)\/)/.exec(r.out);
+  assert.ok(m, r.out);
+  const health = await (await fetch(m[1] + 'api/health')).json();
+  assert.equal(health.home, path.join(s.home, 'firstmate'));
+  const first = pidOf();
+  const again = s.run('--no-edit-path');
+  assert.equal(again.code, 0, again.out);
+  assert.match(again.out, /restarted on this version/);
+  assert.ok(!alive(first), 'the old deck is stopped');
+  assert.notEqual(pidOf(), first);
+  assert.ok(alive(pidOf()), 'a new one runs');
 });
 
 test('install.sh refuses a non-empty folder that is not firstmate and installs nothing', (t) => {
