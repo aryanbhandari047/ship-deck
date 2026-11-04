@@ -33,30 +33,34 @@ password prompt (see [Stay awake](#stay-awake-with-the-lid-closed-macos)).
 
 ## Why you'd want it
 
-**Know what needs you.** Workers waiting on your call, blocked or failed rise
-to the top. The rest sit in compact **Working**, **Waiting**, **Done** and
-**Up next** lanes. A signal line counts each one, so you know where you stand
-at a glance.
-
-**Answer without a terminal.** Pick an option or type a reply on the card.
-Open a worker to see its question, its delivery track (build, ready branch,
-merge) and its live terminal, in colour.
+- **No more terminal hopping.** Every agent, on every project, sits on one
+  live board. One tab replaces the stack of terminals.
+- **Run many agents in parallel; see who needs you first.** Each task gets its
+  own agent and clean git worktree. Anything blocked or waiting on your call
+  rises to **Needs you**; the rest stay quiet.
+- **Answer in place.** Pick an option or type a reply on the card. Open a
+  worker for its question, its delivery track and its live terminal.
+- **Your teammates' know-how works for you.** When a teammate shares, their
+  skills and notes install for your agent automatically, and it can ask their
+  library questions and get cited answers.
+- **Build your own library, and share it.** Keep your skills and notes in one
+  place. Share them with your team by email, read-only, with private notes
+  never leaving your machine.
+- **Stay in the terminal if you like.** You never need the UI. Work with your
+  lead agent in its terminal and the board keeps itself in sync.
+- **Close the lid; the work goes on.** On macOS, keep-awake keeps your agents
+  running with the lid closed. One switch turns it off.
+- **One command to set up, one to update.** The installer brings everything
+  you need; `ship-deck update` (or the **Update** button) keeps you current
+  and never discards your changes.
 
 ![A worker that needs you: the question, the answer buttons and its live terminal](docs/decision.png)
 
-**Talk to one agent, not ten.** The chat goes to your first mate, the lead
-agent that runs the crew. Paste screenshots or drop screen recordings; videos
-become stills it can read. Its replies are markdown, with links to the PRs.
-
-**See the whole fleet.** The same crew on a nautical chart, grouped by
-project. Each worker flies a status flag. Status is always a flag, a colour
-and a word, so it reads without colour too.
+The **Ship** view shows the same crew as a nautical chart, grouped by project.
+Status is always a flag, a colour and a word, so it reads without colour too.
+Light and dark themes pass WCAG AA, and the layout works on a phone.
 
 ![The Ship view: the fleet as a chart, one berth per worker](docs/ship.png)
-
-**Take it with you.** Light and dark themes (both pass WCAG AA), keyboard
-shortcuts (press `?`), browser alerts when something needs you, and a layout
-that works on a phone.
 
 <p>
   <img src="docs/board-dark.png" alt="The Board in dark mode" width="68%">
