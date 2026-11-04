@@ -296,7 +296,7 @@ if [ "$on_path" = 0 ]; then
       printf '\n%s  # added by ship-deck install\n' "$path_line" >> "$rc"
       say "Added ~/.local/bin to PATH in $rc (open a new terminal)"
     fi
-  else
+  elif [ -z "${SHIP_DECK_UPDATING:-}" ]; then
     warn "$bindir is not on your PATH. Add this line to your shell rc file (or re-run without --no-edit-path):"
     warn "  $path_line"
   fi
@@ -335,19 +335,19 @@ if [ "$os" = macos ]; then
   fi
 fi
 
-# ---------- stop the deck an earlier install started (start.sh records its pid) ----------
+# ---------- stop decks running from this install, so the new version starts ----------
+# Every node process running $app/server.js: the one start.sh recorded, a foreground one, or
+# one from an install made before start.sh kept a pid file.
 restarted=0
-pidf=$deck/server.pid
-if [ "$start" = 1 ] && [ -f "$pidf" ]; then
-  old=$(cat "$pidf" 2>/dev/null || true)
-  case $old in ''|*[!0-9]*) old= ;; esac
-  if [ -n "$old" ] && kill -0 "$old" 2>/dev/null && ps -p "$old" -o command= 2>/dev/null | grep -qF "$app/server.js"; then
-    kill "$old" 2>/dev/null || true
+if [ "$start" = 1 ]; then
+  for old in $(ps -ax -o pid=,command= 2>/dev/null | grep -F "$app/server.js" | grep -v grep | awk '{print $1}'); do
+    [ "$old" = "$$" ] && continue
+    kill "$old" 2>/dev/null || continue
     i=0
     while kill -0 "$old" 2>/dev/null && [ $i -lt 30 ]; do sleep 0.1; i=$((i + 1)); done
     restarted=1
-  fi
-  rm -f "$pidf"
+  done
+  rm -f "$deck/server.pid"
 fi
 
 # ---------- autostart (only when asked) ----------

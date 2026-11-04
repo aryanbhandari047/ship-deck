@@ -6,7 +6,7 @@ Everything runs on your laptop. There is nothing to host, no server to share
 and no one else's fleet to reach: your Ship Deck talks only to your first mate,
 at `http://127.0.0.1:4747/`, the same way the captain's does.
 
-Setup is three commands and a couple of sign-ins.
+Setup is one command and a couple of sign-ins.
 
 ## What you will see (60 seconds)
 
@@ -39,30 +39,29 @@ Press `?` any time for keyboard shortcuts. It follows your Mac's dark mode.
 
 *(Screenshots use made-up sample data.)*
 
-## 1. Before you start
+## 1. Install Ship Deck (one command)
 
-You need **Node.js 18 or newer** (`node --version`) and **git**. The installer
-sets up everything else.
-
-## 2. Install Ship Deck (one command)
-
-The Ship Deck repo is public, so anyone can clone it:
+On a Mac or Linux, paste this in a terminal:
 
 ```sh
-git clone https://github.com/aryanbhandari047/ship-deck.git ~/ship-deck
-sh ~/ship-deck/bin/install.sh
+curl -fsSL https://raw.githubusercontent.com/aryanbhandari047/ship-deck/main/bin/install.sh | sh
 ```
 
 The installer:
 
-- adds the tools your agents need when they are missing: tmux and the GitHub
-  CLI with Homebrew, and Claude Code with its official installer. When it
-  cannot (no Homebrew, or Linux), it prints the one command to run;
+- checks for Node.js 18 or newer (installs it with Homebrew when missing),
+  git, tmux, the GitHub CLI and the `claude` CLI, and installs what it can
+  without sudo. For anything it cannot install, it prints the one command to
+  run;
 - sets up firstmate, the open-source engine that runs your first mate and its
-  workers, at `~/firstmate`. An existing firstmate there is used as is, and a
-  folder there that is not firstmate stops the install untouched;
-- copies Ship Deck to `~/.ship-deck/app` and adds a `ship-deck` command in
-  `~/.local/bin`.
+  workers, at `~/firstmate`, and teaches it to read Ship Deck's chat. An
+  existing firstmate there is used as is, and a folder there that is not
+  firstmate stops the install untouched;
+- copies Ship Deck to `~/.ship-deck/app` (its source stays in
+  `~/.ship-deck/src` for updates) and adds a `ship-deck` command in
+  `~/.local/bin`;
+- starts Ship Deck and opens it in your browser, then prints its address,
+  three things to try and anything left to do (like `gh auth login`).
 
 On a Mac, a first install also offers **Stay awake with the lid closed** (on
 by default: press Enter to keep it, `n` to skip; macOS asks for your password
@@ -70,7 +69,8 @@ once). It keeps your agents running when you close the lid. Turn it off any
 time in Settings > You or with `ship-deck awake off`.
 
 Apart from that one password prompt it never uses `sudo`, and it changes
-nothing else unless you ask:
+nothing else unless you ask. Add flags after `sh -s --`, for example
+`curl -fsSL <the URL above> | sh -s -- --autostart`:
 
 | Add this | To |
 | --- | --- |
@@ -78,11 +78,21 @@ nothing else unless you ask:
 | `--no-edit-path` | do not add `~/.local/bin` to your PATH in your shell settings (it does by default when missing; with this it prints the line for you to add) |
 | `--no-keep-awake` | Mac only: leave normal sleep alone (`--keep-awake` turns it on without asking, also on a re-run; re-runs otherwise keep your choice) |
 | `--autostart` | start Ship Deck at login (a LaunchAgent on a Mac, a systemd user service on Linux) |
+| `--no-start` | install only; start it later with `ship-deck` |
 | `--no-share` | turn sharing off (it is on by default, with the Keychain relay, so skills teammates share reach your agent; nothing is sent until you sign in). Remembered by `ship-deck`, `--autostart` and later installs until `--share` (or `--share-relay URL` for another relay) |
 
-To update later: `git -C ~/ship-deck pull && sh ~/ship-deck/bin/install.sh`,
-then restart Ship Deck. Running the installer again is always safe and keeps
-your sharing choice.
+Prefer a clone? `git clone https://github.com/aryanbhandari047/ship-deck.git ~/ship-deck`
+then `sh ~/ship-deck/bin/install.sh` does the same.
+
+## 2. Updating
+
+When a new version is out, the deck shows **A new version of Ship Deck is
+ready**. Click **Update**: it gets the new version, restarts the deck and the
+page reloads. Or run `ship-deck update` in a terminal. It prints what changed.
+If you changed files in your copy, it stops and changes nothing.
+
+Installed before updates existed? Run this once:
+`git -C ~/ship-deck pull && sh ~/ship-deck/bin/install.sh`.
 
 ## 3. Sign in and start your first mate
 
@@ -94,18 +104,16 @@ folder and leave that terminal open:
 cd ~/firstmate && claude
 ```
 
-## 4. First run
+## 4. Opening Ship Deck again
 
-```sh
-~/.local/bin/ship-deck
-```
-
-(In a terminal opened after the install, plain `ship-deck` works too.) It opens `http://127.0.0.1:4747/` in your browser (or the next free port, and
-prints which). Ctrl+C stops it. To keep it running in the background instead:
-`sh ~/.ship-deck/app/bin/start.sh`.
+The installer leaves Ship Deck running in the background
+(`~/.ship-deck/server.log` has its log). To open it again, run `ship-deck`:
+it opens the running deck, or starts one if none is running (Ctrl+C stops a
+deck started this way). It lives at `http://127.0.0.1:4747/` (or the next
+free port, and it prints which).
 
 If Ship Deck cannot find your firstmate folder, it shows **Connect Ship Deck to
-your first mate** with the places it looked. Run `sh ~/ship-deck/bin/install.sh`
+your first mate** with the places it looked. Run `sh ~/.ship-deck/app/bin/install.sh`
 again to set one up, or, if yours lives elsewhere, start it with that folder:
 
 ```sh
@@ -126,15 +134,11 @@ Type in the chat on the right and press Enter. Your message is saved in
 `~/.ship-deck/` and a one-line nudge lands in your firstmate's `state/` folder,
 so your first mate notices within its next check.
 
-Tell your first mate about Ship Deck once, in its terminal, so it knows how to
-read and answer the chat:
+A firstmate the installer set up already knows how to read and answer the
+chat (it is in its `data/learnings.md`). If you had firstmate before, the
+installer prints one line to tell it once, in its terminal:
 
-> Ship Deck is my GUI. My messages arrive in `~/.ship-deck/orders.jsonl`
-> (a `ship-deck-inbox.status` line wakes you). List them with
-> `node ~/.ship-deck/app/bin/orders.js list --pending`, answer with
-> `node ~/.ship-deck/app/bin/orders.js reply <id> --ack done "text"`. The full
-> contract is the "Messages and the Bridge" section of
-> `~/.ship-deck/app/docs/REFERENCE.md`. Check for messages every 30 seconds.
+> Read ~/.ship-deck/app/docs/FIRST-MATE.md and add it to data/learnings.md
 
 After that, everything the buttons do (answer a question, merge, clean up,
 start a new job) is a chat message your first mate acts on. Ship Deck never
@@ -167,7 +171,7 @@ through it.
    Ship Deck:
 
    ```sh
-   sh ~/ship-deck/bin/install.sh --share
+   sh ~/.ship-deck/app/bin/install.sh --share
    ```
 
 3. Open **More > Share your deck** in the top bar (**Settings > Sharing**), sign in,
@@ -185,7 +189,7 @@ their own agent that knowledge (next section), with no extra switch.
 
 **Turning it off:** use the switch at the top of Settings > Sharing to pause
 (nothing is sent), **Revoke** a person, or **Sign out** to remove this
-laptop's access. To stop completely, run `sh ~/ship-deck/bin/install.sh --no-share`
+laptop's access. To stop completely, run `sh ~/.ship-deck/app/bin/install.sh --no-share`
 and restart Ship Deck.
 
 ## 9. Optional: let your agent use what teammates share with you
@@ -223,11 +227,11 @@ marker); your own skills are never changed. Details:
 ## Removing Ship Deck
 
 ```sh
-rm -rf ~/.ship-deck/app ~/.local/bin/ship-deck
+rm -rf ~/.ship-deck/app ~/.ship-deck/src ~/.local/bin/ship-deck
 ```
 
-`~/.ship-deck/` also holds your chat history and attachments; delete it too if
-you want them gone. If you used `--autostart`, also remove
+`~/.ship-deck/` also holds your chat history and attachments; delete all of it
+if you want them gone. If you used `--autostart`, also remove
 `~/Library/LaunchAgents/local.ship-deck.plist` (after
 `launchctl bootout gui/$(id -u)/local.ship-deck`) or run
 `systemctl --user disable --now ship-deck.service` and delete

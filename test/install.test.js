@@ -199,6 +199,24 @@ test('install.sh starts the deck, then a re-run restarts it on the new version',
   assert.ok(alive(pidOf()), 'a new one runs');
 });
 
+test('install.sh restarts a deck from an older install that kept no pid file', async (t) => {
+  const s = sandbox(t);
+  assert.equal(s.run('--no-edit-path').code, 0);
+  const app = path.join(s.home, '.ship-deck', 'app');
+  // Stand-in for a deck started before start.sh kept a pid file (or in a terminal).
+  const old = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', path.join(app, 'server.js')], { stdio: 'ignore' });
+  t.after(() => { try { old.kill(); } catch { /* gone */ } });
+  const exited = new Promise((res) => old.on('exit', res));
+  const port = 21000 + Math.floor(Math.random() * 8000);
+  s.run.env = { SHIP_DECK_NO_START: '', SHIP_DECK_PORT: String(port) };
+  const r = s.run('--no-edit-path');
+  const pidFile = path.join(s.home, '.ship-deck', 'server.pid');
+  t.after(() => { try { process.kill(Number(fs.readFileSync(pidFile, 'utf8'))); } catch { /* gone */ } });
+  assert.equal(r.code, 0, r.out);
+  await exited;
+  assert.match(r.out, /Ship Deck is running at http:\/\/127\.0\.0\.1:\d+\/ \(restarted on this version\)/);
+});
+
 test('install.sh refuses a non-empty folder that is not firstmate and installs nothing', (t) => {
   const s = sandbox(t, { firstmate: false });
   const fm = path.join(s.home, 'firstmate');

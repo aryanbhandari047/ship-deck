@@ -15,7 +15,10 @@ the first mate notices it quickly (`--no-wake` turns that off).
 (`FIRSTMATE_REPO` overrides the URL) into `~/firstmate` (or the `--home`
 / `FM_HOME` folder when that is missing or empty) and adds the git-ignored
 `state/`, `data/` and `projects/` folders. An existing home is never changed,
-and a non-empty folder that is not firstmate stops the install.
+and a non-empty folder that is not firstmate stops the install. A home the
+installer sets up also gets `data/learnings.md` from `docs/FIRST-MATE.md`, so
+the first mate reads the chat from its first session; for an existing home the
+installer prints the one line to tell it instead.
 
 ## Which firstmate home it reads
 
@@ -37,7 +40,7 @@ hard-coded to one machine.
 
 The bridge shows your name instead of "Captain": `--captain-name "Your Name"`,
 or else `git config user.name` as configured for the home (read from the git
-config files; Ship Deck runs no git command).
+config files, not with `git`; the only git commands are the update check below).
 
 ## Command-line flags
 
@@ -72,8 +75,12 @@ ship-deck --no-share
 # flag shared skills and notes not updated or verified for this many days,
 # default 30 (or SHIP_DECK_VERIFY_DAYS)
 ship-deck --verify-days 14
+# installed decks: don't check for updates (or SHIP_DECK_NO_UPDATE_CHECK=1)
+ship-deck --no-update-check
 # start in the background unless it already runs; prints the URL
 sh bin/start.sh [flags...]
+# installed decks: get the latest version and restart (see Install and update)
+ship-deck update
 ```
 
 `node server.js [flags]` is the same as `ship-deck [flags]`. The page polls
@@ -88,6 +95,68 @@ ship-deck --home /tmp/ship-deck-sample --port 4748 --orders-dir /tmp/ship-deck-o
 # updates within ~3 s
 echo "done: sample finished" >> /tmp/ship-deck-sample/state/delta-block.status
 ```
+
+## Install and update
+
+One command installs, starts and opens it (macOS and Linux, no sudo):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/aryanbhandari047/ship-deck/main/bin/install.sh | sh
+# flags go after sh -s --
+curl -fsSL https://raw.githubusercontent.com/aryanbhandari047/ship-deck/main/bin/install.sh | sh -s -- --autostart
+```
+
+The whole script is one `{ ... }` group, so the shell reads all of it before
+running a step (safe when piped). Piped, it has no checkout to copy from, so it
+clones the repo into `~/.ship-deck/src` and installs from there; run from a
+clone (`sh bin/install.sh`), it installs from that clone. Either way
+`~/.ship-deck/app/.ship-deck-install` records `source=` (that checkout),
+`revision=` and `share_relay=`. Its header comment lists every step and flag
+(`sh bin/install.sh --help`). `SHIP_DECK_NO_START=1` is the same as
+`--no-start`, `SHIP_DECK_NO_OPEN=1` keeps the browser closed and
+`SHIP_DECK_PORT` moves the port.
+
+At the end it stops any deck running from `~/.ship-deck/app/server.js` and
+starts the new one with `bin/start.sh`, which records its pid in
+`~/.ship-deck/server.pid`. The summary prints the URL, three things to try
+first and what is left to do (missing tools, `gh auth login`, teaching an
+existing first mate). The `ship-deck` launcher opens a deck already serving the
+same home in the port range instead of starting a second one
+(`SHIP_DECK_REUSE`, set by the launcher; never with `--port` or `--orders-dir`).
+
+**Updating.** `ship-deck update` runs `bin/update.sh`:
+
+1. Finds the checkout in `source=` (or `~/.ship-deck/src`; an install from
+   before updates clones its source there once).
+2. Refuses, changing nothing, when the checkout has local changes, its branch
+   has no upstream, the remote cannot be reached, or the branch has commits the
+   remote lacks (`git merge --ff-only`). It never resets, stashes or discards.
+3. Says "Already up to date" when the installed revision is the new head.
+4. Stops the deck running from this install (the recorded pid, or one whose
+   `/api/health` `pid` runs this `server.js`), re-runs the checkout's own
+   installer with `--no-edit-path`, no questions and the recorded choices
+   (sharing, keep-awake, autostart, home), and starts the deck again only if
+   one was running.
+5. Prints `Updated Ship Deck <version> (<old>) -> <version> (<new>)` and up to
+   15 commit subjects.
+
+Re-running the curl command does the same fast-forward of `~/.ship-deck/src`.
+Installs from before this existed update once with
+`git -C ~/ship-deck pull && sh ~/ship-deck/bin/install.sh`.
+
+**Update available.** An installed deck (one with `.ship-deck-install` next to
+its `server.js`) checks 20 s after it starts and every 6 hours
+(`lib/update.js`): `git rev-parse` for the upstream branch, `git ls-remote` on
+that remote (the only network use; offline or any error means "no news") and
+`git cat-file`/`git merge-base` so a checkout ahead of its remote is not
+"behind". `GET /api/update` returns `{ supported, available, current, latest,
+checkedAt, running, result }`. The page shows a notice with **Update** and
+**Later** (Later hides that version in this browser). **Update** is
+`POST /api/update` (same guards as every POST): it runs `bin/update.sh`
+detached, logging to `~/.ship-deck/update.log`. The page waits for
+`/api/health` to report a new `pid` and reloads; if the script stops instead
+(nothing new, local changes, offline), the notice shows its last lines. Nothing
+updates without a click. `--no-update-check` turns the check off.
 
 ## Start at login (macOS)
 
@@ -693,7 +762,7 @@ also prevents lid-close sleep and needs admin rights (`lib/awake.js`).
 
 - Binds `127.0.0.1` only; every request must carry `Host: 127.0.0.1:<port>` or
   `localhost:<port>` (blocks DNS rebinding).
-- `POST /api/send`, `POST /api/orders`, `POST /api/config`, `POST /api/settings` and `POST /api/awake` also require `X-Ship-Deck: 1`,
+- `POST /api/send`, `POST /api/orders`, `POST /api/config`, `POST /api/settings`, `POST /api/awake` and `POST /api/update` also require `X-Ship-Deck: 1`,
   `Content-Type: application/json`, a same-origin `Origin` when one is sent, and
   no cross-site `Sec-Fetch-Site`. Bodies are capped at 16 KB.
 - `POST /api/attachments` has the same header, Origin and Sec-Fetch-Site checks,
@@ -708,6 +777,9 @@ also prevents lid-close sleep and needs admin rights (`lib/awake.js`).
 - Sharing (`--share`; on in installs, `--no-share` turns it off) only makes outbound HTTPS requests to the configured
   relay (http only for localhost). `POST /api/share/*` has the same `X-Ship-Deck`, Origin and
   Sec-Fetch-Site checks. The sign-in password is passed to the relay once and never stored.
+- The update check (installed decks only) runs read-only git in the install's
+  own checkout; `git ls-remote` to its remote is its only network use.
+  `POST /api/update` takes no input and only runs `<app>/bin/update.sh`.
 - Order payloads are validated against the live home: crew ids need a meta,
   `cleanup-done` targets must be done, projects come from `data/projects.md`,
   backlog items must exist, config values come from the allow-list.
@@ -788,7 +860,15 @@ network): the app copy and launcher, idempotent re-runs, setting up firstmate
 from a local `FIRSTMATE_REPO` (and leaving an existing home alone), refusing a
 foreign folder, installing missing tools, `--home`, the default PATH line
 (and `--no-edit-path`), sharing on by default and `--no-share` remembered until `--share`, and that nothing outside `~/.ship-deck`,
-`~/.local/bin` and the shell rc file is written without `--autostart`.
+`~/.local/bin` and the shell rc file is written without `--autostart`. It
+also covers piping into `sh`, installing Node with Homebrew, seeding a fresh
+home's `data/learnings.md`, starting the deck and restarting it on a re-run
+(also one from an older install with no pid file), and `ship-deck update`
+against a local bare remote: fast-forward, "Already up to date", the choices
+kept, refusing local changes and a diverged branch, and restarting the running
+deck. `test/update.test.js` covers the update check (up to date, newer, offline,
+ahead, not installed), the detached run and its result, and `/api/update` with
+its guard.
 
 ## What it reads
 
@@ -831,6 +911,7 @@ lib/share.js       Sharing (--share): redacted snapshot and knowledge pushes, kn
 lib/knowledge.js   Teammates' shared knowledge as marked teammate-* skills and rules (the only ~/.claude, ~/.agents, ~/.cursor writer)
 lib/usage.js       Counts uses of teammates' shared skills in Claude Code transcripts (read only)
 lib/sessions.js    Claude session discovery and ~/.ship-deck/sessions.json
+lib/update.js      Update available: read-only git check, runs bin/update.sh on a click
 lib/awake.js       Stay awake with the lid closed (macOS pmset; `ship-deck awake`)
 lib/settings.js    The captain's preferences (form of address) in ~/.ship-deck/settings.json
 lib/activity.js    First mate activity feed: read-only transcript tail
@@ -839,7 +920,9 @@ bin/orders.js      Orders, replies, thread and sessions CLI for the first mate
 bin/orders-check.sh  Watcher wake check (POSIX sh)
 bin/ship-deck.js   `ship-deck` / `npx` entry (same flags as server.js)
 bin/start.sh       Start the server in the background unless it already answers
-bin/install.sh     Per-person install: prerequisites, firstmate home, ~/.ship-deck/app, launcher, keep-awake (macOS), opt-in autostart
+bin/install.sh     Per-person install: prerequisites, firstmate home, ~/.ship-deck/app, launcher, keep-awake (macOS), start, opt-in autostart
+bin/update.sh      `ship-deck update`: fast-forward the source checkout, reinstall, restart
+docs/FIRST-MATE.md What a new first mate needs to know to read the chat (seeded into data/learnings.md)
 docs/TEAMMATE-SETUP.md  Step-by-step setup guide
 docs/REFERENCE.md  This reference
 public/            index.html, settings.html/.js (Settings > You), share.html/.js (Settings > Sharing), style.css, app.js, board.js (flags, Board grouping, delivery tracks), theme.js, markdown.js, labels.js, ansi.js (no build step)
