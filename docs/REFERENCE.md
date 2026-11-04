@@ -123,12 +123,13 @@ replace the path with your clone, save it as
 
 ## The views
 
-- **Header**: the view switch, the filter, the monitoring dot (its words
-  show only when monitoring is late or off), **New job** (the job form), the
-  chat button (hides or shows the side panel on wide screens, remembered; jumps
-  to it on narrow ones; a dot marks unread replies) and **More**: Ship's
-  Library, Settings, Share your deck, alerts and keyboard shortcuts, with the
-  last update time.
+- **Header**: the view switch, the filter, a monitoring warning (only while
+  monitoring is late or off), **New job** (the job form, which also says the
+  chosen project's delivery path and who merges), the chat button (hides or
+  shows the side panel on wide screens, remembered; jumps to it on narrow ones;
+  a dot marks unread replies) and **More**: Ship's Library, Settings, Share
+  your deck, alerts, keyboard shortcuts and **Theme** (system, light or dark,
+  remembered per browser), with the last update time.
 - **Settings > You** (`/settings.html`): what Ship Deck calls you, "Captain"
   unless you change it (free text up to 40 characters, with Captain, Boss,
   your first name and No title as suggestions; empty means no title). The
@@ -143,20 +144,51 @@ replace the path with your clone, save it as
 
   Below it, on macOS only, **Stay awake with the lid closed**: see
   [Stay awake with the lid closed](#stay-awake-with-the-lid-closed-macos).
-- **Board** (default): a greeting (with your form of address) and how many things need you ("All clear"
-  when none), then **Needs you** (flag K) across the top: workers waiting on
-  your call, blocked or failed, then queued questions, as full cards that
-  answer in place with lettered option buttons or a one-line reply (the same
-  messages and confirm step as the drawer). Below it, quieter and compact:
-  **Working** (P); **Waiting** (X): paused workers and workers with no update
-  yet, then **Quiet for a while** (no activity for `--stale-days`, default 7;
-  done workers are never quiet) and **Up next in the queue** with Start;
-  **Done** (C): finished workers with Read report and Clean up, and "Clean up
-  all" in the column head. Project chips filter the board. Second mates sit
-  under the columns. Cards show the status, project and age, the title, the
-  latest note and the pull request; the id, tool, model and effort are in the
-  drawer. A card that changes column settles in once: hoisted into Needs you,
-  or landing in Done with a "Finished" toast.
+- **Board** (default): a greeting (with your form of address) and a headline
+  ("2 workers need you", "3 queued questions for you", "All clear"), then:
+  - **The hoist**: one flag per part of the board on a single halyard, with its
+    count (Needs you, with how many are workers and how many queued questions;
+    Working; Waiting, with how many are quiet; Done; Up next). Each jumps to
+    its section. It hides while the fleet is empty.
+  - **Conditions**: monitoring (and when it last checked), **Away mode** (on
+    while `state/.afk` exists: the first mate keeps supervising and only brings
+    you what needs you; off says how to turn it on), **X mode** when it is on
+    (with mentions waiting), the second mates (running of registered) and
+    messages the first mate has not picked up yet. While the chat is put away,
+    the first mate's own state leads the line.
+  - **Needs you** (flag K): workers waiting on your call, blocked or failed as
+    full cards that answer in place with lettered option buttons or a one-line
+    reply (the same messages and confirm step as the drawer), then **Queued
+    questions** as one compact list (five, then "Show N more"): **Answer** opens
+    the options or a reply box in the row, the title opens the drawer.
+  - Four lanes of compact rows: **Working** (P); **Waiting** (X): paused
+    workers and workers with no update yet, then **Quiet for a while** (no
+    activity for `--stale-days`, default 7; done workers are never quiet;
+    folded until opened); **Done** (C): finished workers with Read report and
+    Clean up, and "Clean up all" in the lane head; **Up next**: the queue with
+    Start, and "Starts after …" for items waiting on other work. Long lanes
+    show their first six or eight with "Show N more" (remembered per browser).
+  - Every worker shows its **delivery track**: a ship or scout mark, one
+    segment per step of its path and the current step in words. The steps
+    follow the delivery mode in `state/<id>.meta`: no-mistakes is Build,
+    Validate, Pull request, Checks, Merge; direct-PR is Build, Pull request,
+    Merge; local-only is Build, Ready branch, Merge; a scout is Investigate,
+    Report. How far it got is read from the worker's own record and status
+    notes only (its PR, "checks green/failing/running", the review pipeline,
+    "merged"); a no-mistakes worker that is done has green checks by
+    firstmate's contract. Merge waits on you unless the project runs with
+    `yolo=on`, then it says the first mate merges. The pull request chip
+    carries a dot for the last reported checks.
+  - **Second mates** (registry and live records: lane, projects, latest note)
+    and **Recently finished** (the queue's Done list, with dates) sit below.
+  Project chips filter the board (a queue tag `org/repo` counts as `repo`).
+  Titles and summaries show links as words (a Linear link as its key, a pull
+  request as `repo#N`). Cards show the status, project and age, the title, the
+  latest note, the track and the pull request; the id, tool, model and effort
+  are in the drawer. A card that changes column settles in once: hoisted into
+  Needs you, or landing in Done with a "Finished" toast. Until the first
+  answer from the server the board shows placeholders; an empty fleet says
+  what Firstmate and Ship Deck do, with Start a new job and Ask the first mate.
 - **Ship**: the same fleet as a nautical chart. The bridge shows you (Ashore
   when `state/.afk` exists), the first mate with what it is doing, and the
   monitoring lamp. One zone per project with a flag tally (the legend says
@@ -178,11 +210,13 @@ replace the path with your clone, save it as
 - **Worker drawer**: click a card or berth; `#task=<id>` deep-links. The
   status and last update, the title, id, project, pull request and tool, then
   Ask for status, Merge PR, **Open in terminal** (the resume command) and
-  Clean up. A worker that needs you shows its question and answer box on top.
+  Clean up, with its delivery track in words under the facts (each step, and
+  who merges). A worker that needs you shows its question and answer box on top.
   Tabs: **Terminal** (the latest update, the live terminal with Wrap, Follow,
   Pause and Copy, and Message the worker), **Updates** (every status line,
   one timestamp format), **Details** (brief, data files, facts in words,
-  messages about it) and **Model and effort**.
+  messages about it, its delivery path, who merges and whether it came from
+  X) and **Model and effort**.
 - **Queue item drawer**: its question and answer box (queued questions), or
   Start this, its details in words and its notes.
 - **Ship's Library** (**More** menu): the first mate's permanent context files,
@@ -196,8 +230,9 @@ replace the path with your clone, save it as
   closes or goes back. In the chat Enter sends, Shift+Enter adds a line,
   Cmd+V pastes a screenshot.
 
-Follows the OS light/dark theme and respects reduced motion (every
-animation and transition off).
+Follows the OS light/dark theme unless More > Theme picks one (`public/theme.js`
+applies it before the first paint, on Settings too) and respects reduced
+motion (every animation and transition off).
 
 ## Words on screen
 
@@ -221,6 +256,11 @@ names, so nothing changes for the first mate:
 | Tool | harness (claude, codex, ...) |
 | Workspace (details only) | worktree |
 | Monitoring | the watcher heartbeat (`state/.last-watcher-beat`) |
+| Delivery track, its steps | the delivery mode (`mode=` no-mistakes, direct-PR, local-only) or a scout's report |
+| Merge (you) / Merge (first mate) | `yolo=off` / `yolo=on` in the worker's meta |
+| Away mode | away mode (`state/.afk`) |
+| X mode, From X | X mode (`state/x-watch.check.sh`, `state/x-inbox/`), `x_request=` |
+| Recently finished | the backlog's Done section |
 | Terminal | the worker's tmux window |
 
 Message kinds read as: Message (`chat`), Your decision (`decision`,
@@ -255,7 +295,7 @@ and a word, chosen for its meaning at sea (`public/board.js`):
 
 The palette ("Chart room": chart-water canvas, white surfaces, deep-water ink,
 signal blue for actions, signal yellow only for "needs you"; a navy night watch
-in dark mode) passes WCAG AA for every text pair in both themes,
+in dark mode; DIN for headings and counts) passes WCAG AA for every text pair in both themes,
 checked by `test/contrast.test.js` against the tokens in `public/style.css`.
 
 ## What you can do
@@ -728,6 +768,9 @@ installer step (default on, `n`, `--no-keep-awake`, re-runs, Linux).
 flag and word) and the Board grouping on the fixture fleet: columns, sort
 order, quiet workers, queued questions and next items, project and search
 filters, and the card summary.
+`test/delivery.test.js` covers the delivery tracks (every mode and a scout, checks
+green, running and failing, merged, failed, yolo, a PR link found in a note), tidy
+titles, and the yolo, X-linked and X mode facts in the snapshot.
 `test/contrast.test.js` checks every text colour pair the UI uses for WCAG AA
 (4.5:1) in the light and dark tokens of `public/style.css`.
 `test/snapshot.test.js` builds a snapshot from a temp copy of the fixture home,
@@ -753,10 +796,11 @@ All paths are relative to the fleet home. Missing files are fine.
 
 | Source | Used for |
 | --- | --- |
-| `state/<id>.meta` | One crew member per file: `project`, `kind` (ship/scout/secondmate), `mode`, `harness`, `model`, `effort`, `window`, `worktree`, `pr`, `pr_head` |
+| `state/<id>.meta` | One crew member per file: `project`, `kind` (ship/scout/secondmate), `mode`, `yolo`, `harness`, `model`, `effort`, `window`, `worktree`, `pr`, `pr_head`, and whether `x_request` is set |
 | `state/<id>.status` | Last line is the displayed state (`resolved` shows as working); the last 5 lines feed the detail drawer. An optional `YYYY-MM-DD HH:MM` prefix and `[key=...]` are parsed; stray non-status lines are skipped. Only the last 64 KB is read. |
 | `state/<id>.turn-ended` and file mtimes | "Last activity" and "turn ended" times |
-| `state/.afk` | Present means the captain is ashore (shown on the Ship view's bridge) |
+| `state/.afk` | Present means away mode is on: the Board's conditions line, and Ashore on the Ship view's bridge |
+| `state/x-watch.check.sh`, `state/x-inbox/` | Existence only: X mode is on; the number of files waiting in the inbox is the mentions waiting |
 | `state/.last-watcher-beat` mtime | Monitoring lamp and the header's monitoring dot: green under 2 min, amber ("late") otherwise |
 | `data/backlog.md` | Loose parse of Captain's Call / In flight / Queued / Done; unknown sections are tolerated. Queued items become "Up next in the queue" rows (and crates in the Ship view's hold). Captain's Call = every open item in the Captain's Call section or tagged `(kind: captain)` / `(hold-kind: captain)` in any open section (the real file keeps them in Queued); options in its `(hold: ...)` become answer buttons. |
 | `data/projects.md` | Project names (Board filter chips, Ship view zones), delivery modes and descriptions |
@@ -798,6 +842,6 @@ bin/start.sh       Start the server in the background unless it already answers
 bin/install.sh     Per-person install: prerequisites, firstmate home, ~/.ship-deck/app, launcher, keep-awake (macOS), opt-in autostart
 docs/TEAMMATE-SETUP.md  Step-by-step setup guide
 docs/REFERENCE.md  This reference
-public/            index.html, settings.html/.js (Settings > You), share.html/.js (Settings > Sharing), style.css, app.js, board.js (flags + Board grouping), markdown.js, labels.js, ansi.js (no build step)
+public/            index.html, settings.html/.js (Settings > You), share.html/.js (Settings > Sharing), style.css, app.js, board.js (flags, Board grouping, delivery tracks), theme.js, markdown.js, labels.js, ansi.js (no build step)
 test/              node:test suites and fabricated fixtures
 ```

@@ -74,7 +74,9 @@
   }
 
   const byRecent = (key) => (a, b) => (b[key] || 0) - (a[key] || 0) || String(a.id).localeCompare(String(b.id));
-  const sameProject = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
+  // Projects compare by their last path part, so a queue tag "org/repo" matches the project "repo".
+  const projectKey = (p) => String(p || '').trim().toLowerCase().replace(/\/+$/, '').split('/').pop();
+  const sameProject = (a, b) => projectKey(a) === projectKey(b);
 
   // Groups a /api/fleet snapshot for the Board.
   // opts.project: only that project (queue items match on their repo tag);
@@ -110,14 +112,84 @@
     const running = new Set(out.mates.map((t) => t.id));
     out.vacant = ((snap.secondmates && snap.secondmates.registry) || []).filter((r) => !running.has(r.id));
     const names = new Map();
-    for (const t of tasks) if (t.project && t.project !== 'unassigned') names.set(t.project.toLowerCase(), t.project);
+    for (const t of tasks) if (t.project && t.project !== 'unassigned') names.set(projectKey(t.project), t.project);
     for (const b of [...(backlog.calls || []), ...(backlog.queued || [])]) {
       const r = b.tags && b.tags.repo;
-      if (r && !names.has(r.toLowerCase())) names.set(r.toLowerCase(), r);
+      if (r && !names.has(projectKey(r))) names.set(projectKey(r), r.replace(/\/+$/, '').split('/').pop());
     }
     out.projects = [...names.values()].sort((a, b) => a.localeCompare(b));
-    out.counts = { needs: out.needs.length, working: out.working.length, waiting: out.waiting.length + out.quiet.length, quiet: out.quiet.length, done: out.done.length, queue: out.queue.length };
+    const calls = out.needs.filter((x) => x.type === 'call').length;
+    out.counts = { needs: out.needs.length, workers: out.needs.length - calls, calls, working: out.working.length, waiting: out.waiting.length + out.quiet.length, quiet: out.quiet.length, done: out.done.length, queue: out.queue.length };
     return out;
+  }
+
+  // ---------- delivery: the path a worker's change takes, and how far along it is ----------
+  // firstmate delivery modes (state/<id>.meta mode=); a scout writes a report instead.
+  const PATHS = {
+    'no-mistakes': { word: 'Full review pipeline, then a pull request', steps: [['build', 'Build'], ['validate', 'Validate'], ['pr', 'Pull request'], ['checks', 'Checks'], ['merge', 'Merge']] },
+    'direct-PR': { word: 'Pull request straight away', steps: [['build', 'Build'], ['pr', 'Pull request'], ['merge', 'Merge']] },
+    'local-only': { word: 'Local branch, merged on this computer', steps: [['build', 'Build'], ['branch', 'Ready branch'], ['merge', 'Merge']] },
+    scout: { word: 'Report only, no code change', steps: [['investigate', 'Investigate'], ['report', 'Report']] },
+  };
+  const PR_RE = /https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/pull\/\d+/;
+  // Checks as the worker last reported them, newest note first: green, failing or running.
+  function ciOf(notes) {
+    for (const n of notes) {
+      if (/\b(?:ci|checks?)\b[^.\n]{0,30}\b(?:fail(?:s|ed|ing)?|red|broken)\b/i.test(n)) return 'failed';
+      if (/\b(?:ci|checks?)\b[^.\n]{0,30}\b(?:green|pass(?:es|ed|ing)?)\b|\ball checks pass/i.test(n)) return 'green';
+      if (/\b(?:ci|checks?)\b[^.\n]{0,30}\b(?:running|pending|in progress|re-?running|queued)\b|\b(?:waiting|wait) (?:on|for) (?:ci|checks)\b/i.test(n)) return 'running';
+    }
+    return null;
+  }
+  // { path, word, steps: [{ key, label, state: done|now|wait|fail|todo }], at, label, ci, pr, merge }
+  // from the task's kind, mode, PR and its own status notes. null for second mates.
+  function deliveryOf(t) {
+    if (!t || t.kind === 'secondmate') return null;
+    const notes = (t.lastStatus || []).map((e) => String(e.note || '')).reverse();
+    const latest = notes[0] || '';
+    const failed = t.state === 'failed';
+    const done = t.state === 'done';
+    let path = t.kind === 'scout' ? 'scout' : PATHS[t.mode] ? t.mode : null;
+    const def = PATHS[path || 'direct-PR'];
+    const pr = t.pr || ((notes.join('\n').match(PR_RE) || [])[0]) || null;
+    const ci = path === 'scout' ? null : ciOf(notes);
+    const merged = /\b(?:merged|landed)\b/i.test(latest) && !/\b(?:not|un)[- ]?merged\b|\bbefore (?:it is )?merged\b/i.test(latest);
+    const K = def.steps.map(([k]) => k);
+    let at = 0;
+    if (path === 'scout') at = t.hasReport || done ? 2 : 0;
+    else if (merged) at = K.length;
+    else if (path === 'no-mistakes') {
+      if (ci === 'green' || (done && pr)) at = K.indexOf('merge');
+      else if (pr) at = K.indexOf('checks');
+      else if (/\b(?:no-mistakes|pipeline|validat\w*|gate|review step)\b/i.test(notes.join('\n'))) at = K.indexOf('validate');
+    } else if (path === 'local-only') {
+      if (done || /\bready\b[^.\n]{0,20}\bbranch\b|\bbranch\b[^.\n]{0,20}\bready\b/i.test(latest)) at = K.indexOf('merge');
+    } else if (pr) at = K.indexOf('merge');
+    const steps = def.steps.map(([key, label], i) => {
+      let state = i < at ? 'done' : i > at ? 'todo' : 'now';
+      if (state === 'now' && (failed || (key === 'checks' && ci === 'failed'))) state = 'fail';
+      else if (state === 'now' && key === 'merge') state = 'wait';
+      return { key, label, state };
+    });
+    const yolo = !!t.yolo;
+    const words = {
+      build: 'Building', validate: 'Validating', pr: 'Opening a pull request', branch: 'Preparing the branch', investigate: 'Investigating',
+      checks: ci === 'failed' ? 'Checks failing' : ci === 'running' ? 'Checks running' : 'Waiting on checks',
+      merge: path === 'local-only' ? (yolo ? 'Branch ready, first mate merges' : 'Branch ready to merge') : path === 'no-mistakes' ? (yolo ? 'Checks green, first mate merges' : 'Checks green, ready to merge') : (yolo ? 'Pull request open, first mate merges' : 'Pull request open'),
+    };
+    const label = failed ? 'Stopped' : at >= K.length ? (path === 'scout' ? (t.hasReport ? 'Report ready' : 'Finished') : 'Merged') : words[K[at]];
+    return { path, word: path ? def.word : 'Delivery path not recorded', steps, at, label, ci, pr, merge: path === 'scout' ? null : yolo ? 'firstmate' : 'captain' };
+  }
+
+  // Titles keep their words, not raw links: a Linear issue link becomes its key, a pull request
+  // link "repo#N", any other link its host; a key repeated right after itself is dropped.
+  function tidyTitle(s) {
+    let out = String(s || '')
+      .replace(/https?:\/\/linear\.app\/[^\s)]*?\/issue\/([A-Za-z]+-\d+)[^\s)]*/g, (m, k) => k.toUpperCase())
+      .replace(/https?:\/\/github\.com\/[^\s/)]+\/([^\s/)]+)\/pull\/(\d+)[^\s)]*/g, '$1#$2')
+      .replace(/https?:\/\/(?:www\.)?([^\s/)]+)[^\s)]*/g, '$1');
+    out = out.replace(/\b([A-Z]+-\d+)\s*(?:[-–—:]\s*)?\(?\1\b\)?/g, '$1');
+    return out.replace(/\(\s*\)/g, '').replace(/\s+/g, ' ').trim();
   }
 
   // The card's one or two sentences: the worker's latest note, without the lettered options
@@ -145,7 +217,7 @@
     return [name, model && model !== 'default' ? model : null, effort && effort !== 'auto' ? effort : null].filter(Boolean).join(' · ');
   }
 
-  const api = { TONES, TONE_ORDER, STATE_TONE, COLUMNS, toneOf, flagOf, statusOf, callStatus, quietDays, columnOf, groupBoard, cardSummary, toolText };
+  const api = { TONES, TONE_ORDER, STATE_TONE, COLUMNS, PATHS, toneOf, flagOf, statusOf, callStatus, quietDays, columnOf, groupBoard, cardSummary, toolText, projectKey, deliveryOf, tidyTitle };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.ShipDeckBoard = api;
 })(typeof window !== 'undefined' ? window : globalThis);

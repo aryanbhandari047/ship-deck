@@ -79,7 +79,7 @@ test('groupBoard: the fixture fleet lands in Needs you / Working / Waiting / Don
   assert.deepEqual(g.queue.map((q) => q.b.id), ['tide-cache', null], 'queued, not captain calls, not ticked');
   assert.equal(g.queue[0].index, 0, 'the queue index points into backlog.queued');
   assert.deepEqual(g.projects, ['harbor-app', 'lighthouse-api']);
-  assert.deepEqual(g.counts, { needs: 4, working: 2, waiting: 1, quiet: 0, done: 1, queue: 2 });
+  assert.deepEqual(g.counts, { needs: 4, workers: 2, calls: 2, working: 2, waiting: 1, quiet: 0, done: 1, queue: 2 });
 });
 
 test('groupBoard: quiet workers leave their column for Quiet, whatever their state', async () => {
@@ -103,6 +103,10 @@ test('groupBoard: project and search filters apply to workers and queue items', 
   const h = board.groupBoard(snap, { project: 'harbor-app' });
   assert.deepEqual(h.queue.map((q) => q.b.id), ['tide-cache'], 'queue items match on their repo tag');
   assert.deepEqual(h.projects, ['harbor-app', 'lighthouse-api'], 'the chips always list every project');
+  for (const b of snap.backlog.calls) if (b.id === 'pick-beacon-color') b.tags.repo = 'example-org/Lighthouse-API';
+  const o = board.groupBoard(snap, { project: 'lighthouse-api' });
+  assert.ok(ids(o.needs).includes('call:pick-beacon-color'), 'an "org/repo" tag matches its project');
+  assert.deepEqual(o.projects, ['harbor-app', 'lighthouse-api'], 'and adds no second chip for it');
   const s = board.groupBoard(snap, { match: (t) => t.id === 'alpha-fix', matchItem: () => false });
   assert.deepEqual(ids(s.working), ['alpha-fix']);
   assert.deepEqual(s.needs, []);

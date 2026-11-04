@@ -7,6 +7,7 @@
   <title>Ship Deck</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
+  <script src="theme.js"></script>
 </head>
 <body>
   <!-- Status flags (International Code of Signals) and line icons, used as <svg><use href="#..."/></svg>. -->
@@ -64,6 +65,13 @@
       <symbol id="i-more" viewBox="0 0 20 20" fill="currentColor"><circle cx="4.5" cy="10" r="1.6"/><circle cx="10" cy="10" r="1.6"/><circle cx="15.5" cy="10" r="1.6"/></symbol>
       <symbol id="i-sliders" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 6h8.5M15.5 6H17M3 14h1.5M8.5 14H17"/><circle cx="13.5" cy="6" r="2"/><circle cx="6.5" cy="14" r="2"/></symbol>
       <symbol id="i-crew" viewBox="0 0 22 26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="6" r="3.5"/><path d="M4 24v-6a7 7 0 0 1 14 0v6"/><path d="M8 14l3 3 3-3"/></symbol>
+      <symbol id="i-scout" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12.5l11-6 1.6 3-11 6zM15.1 9.5l2.2-1.2-1.6-3-2.2 1.2M8 13l-1.5 4.5M9.5 12.2L11 16.5"/></symbol>
+      <symbol id="i-queue" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="3" y="11" width="14" height="5.5" rx="1"/><rect x="4.5" y="5" width="11" height="6" rx="1"/><path d="M10 5v6M7.5 13.8h5"/></symbol>
+      <symbol id="i-at" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="3"/><path d="M13 7v4a2 2 0 0 0 4 0v-1a7 7 0 1 0-2.8 5.6"/></symbol>
+      <symbol id="i-sun" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="3.2"/><path d="M10 2.5v1.8M10 15.7v1.8M2.5 10h1.8M15.7 10h1.8M4.7 4.7l1.3 1.3M14 14l1.3 1.3M15.3 4.7L14 6M6 14l-1.3 1.3"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M16 12.5A6.5 6.5 0 0 1 7.5 4a6.5 6.5 0 1 0 8.5 8.5z"/></symbol>
+      <symbol id="i-display" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="3.5" width="15" height="10" rx="1.5"/><path d="M7 16.5h6M10 13.5v3"/></symbol>
+      <symbol id="i-log" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M7 5.5h9.5M7 10h9.5M7 14.5h9.5"/><circle cx="3.8" cy="5.5" r=".9" fill="currentColor"/><circle cx="3.8" cy="10" r=".9" fill="currentColor"/><circle cx="3.8" cy="14.5" r=".9" fill="currentColor"/></symbol>
       <symbol id="i-rose" viewBox="0 0 100 100" fill="none" stroke="currentColor"><circle cx="50" cy="50" r="40" stroke-width="1"/><circle cx="50" cy="50" r="31" stroke-width=".6" stroke-dasharray="1 3"/><path d="M50 4L56 44L96 50L56 56L50 96L44 56L4 50L44 44Z" stroke-width="1"/><path d="M50 4L56 44L50 50Z" fill="currentColor" stroke="none"/></symbol>
     </defs>
   </svg>
@@ -101,6 +109,14 @@
       <a class="menu-item" id="share-btn" href="share.html"><svg><use href="#i-share"/></svg><span>Share your deck<small>Read-only access for teammates</small></span></a>
       <button class="menu-item" id="notify-btn" type="button"><svg><use href="#i-bell"/></svg><span><span class="notify-label">Enable alerts</span><small>New replies and items that need you</small></span></button>
       <button class="menu-item" id="help-btn" type="button"><svg><use href="#i-help"/></svg><span>Keyboard shortcuts<small>And what the flags mean</small></span><span class="kbd" aria-hidden="true">?</span></button>
+      <div class="menu-theme" role="group" aria-label="Theme">
+        <span>Theme</span>
+        <span class="seg" id="theme-seg">
+          <button type="button" data-theme="system" title="Follow the system"><svg><use href="#i-display"/></svg><span class="sr-only">System</span></button>
+          <button type="button" data-theme="light" title="Light"><svg><use href="#i-sun"/></svg><span class="sr-only">Light</span></button>
+          <button type="button" data-theme="dark" title="Dark"><svg><use href="#i-moon"/></svg><span class="sr-only">Dark</span></button>
+        </span>
+      </div>
       <p class="menu-foot" id="health-time"></p>
     </div>
   </header>
@@ -108,7 +124,11 @@
     <div class="fr-col">
       <div class="fr-hoist" aria-hidden="true"><span class="line"></span><svg class="flag"><use href="#flag-k"/></svg><svg class="flag"><use href="#flag-p"/></svg><svg class="flag"><use href="#flag-c"/></svg></div>
       <h1 id="first-run-title">Connect Ship Deck to your first mate</h1>
-      <p class="lede">Ship Deck shows the work your first mate is running: what needs you, what is moving and what is done. It reads your firstmate folder and never changes it.</p>
+      <ol class="explain">
+        <li><b>Firstmate</b> is a lead agent, the first mate, that runs a fleet of coding agents for you.</li>
+        <li>It starts workers that ship pull requests or scout and report back, and checks on them.</li>
+        <li><b>Ship Deck</b> shows that fleet, brings you its decisions and lets you chat with the first mate.</li>
+      </ol>
       <section class="box" aria-labelledby="fr-looked">
         <h2 id="fr-looked">No firstmate folder found yet</h2>
         <p class="fine">A firstmate folder has <code>AGENTS.md</code>, <code>bin/fm-spawn.sh</code> and <code>state/</code>. Ship Deck looked here:</p>
@@ -140,8 +160,16 @@
         </div>
         <div class="filters" id="project-filters" role="group" aria-label="Project"></div>
       </div>
-      <div class="cols focus-cols" id="cols"></div>
-      <div class="mates" id="mates" hidden></div>
+      <nav class="halyard" id="hoist" aria-label="The fleet at a glance"></nav>
+      <div class="conditions" id="conditions" aria-label="Fleet conditions"></div>
+      <div class="cols focus-cols" id="cols" aria-busy="true">
+        <div class="skeleton" aria-hidden="true"><span></span><span></span><span></span></div>
+        <p class="sr-only">Loading the fleet…</p>
+      </div>
+      <div class="fleet-row" id="fleet-row">
+        <section class="panel-sec" id="mates" hidden aria-labelledby="mates-title"></section>
+        <section class="panel-sec" id="log" hidden aria-labelledby="log-title"></section>
+      </div>
     </section>
 
     <section class="scene" id="scene" aria-label="Ship view" hidden>
@@ -229,6 +257,7 @@
       <label>Project
         <select id="job-project" required></select>
       </label>
+      <p class="hint job-path" id="job-path" hidden></p>
       <fieldset class="kind-seg" aria-label="Kind of job">
         <label><input type="radio" name="job-kind" value="ship" checked> <span><strong>Ship</strong> Make the change and open a pull request</span></label>
         <label><input type="radio" name="job-kind" value="scout"> <span><strong>Scout</strong> Diagnose and write a report only</span></label>

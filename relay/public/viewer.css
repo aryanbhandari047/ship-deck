@@ -53,3 +53,4 @@
   .v-main { grid-template-columns: minmax(0, 1fr); }
   .v-aside { border-left: 0; border-top: 1px solid var(--line); }
 }
+.viewer-page .board-head { margin-bottom: var(--s5); }
