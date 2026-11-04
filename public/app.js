@@ -442,9 +442,11 @@
     if (o.kind === 'cleanup-done' && o.targets) return `${o.targets.length} worker${o.targets.length === 1 ? '' : 's'}: ${o.targets.map(titleOf).join(', ')}`;
     if (o.kind === 'new-task') return `${sentence(o.taskKind || 'ship')} job in ${o.project}${o.harness ? `, ${B.toolText({ harness: o.harness, model: o.model, effort: o.effort })}` : ''}`;
     if (o.kind === 'config') return `${sentence(o.field)} to ${o.value}, ${o.applied ? 'applied live' : 'on relaunch'}`;
-    if (o.item) return titleOfItem(o.item) + (o.option ? `, option ${o.option}` : '');
-    if (o.option) return `Option ${o.option}`;
-    return '';
+    const by = o.answeredBy ? `answered by ${o.answeredBy}` : o.suggestedBy ? `suggested by ${o.suggestedBy}` : '';
+    if (o.kind === 'help') return `Slack DM to ${o.mate || 'a teammate'}`;
+    if (o.item) return [titleOfItem(o.item) + (o.option ? `, option ${o.option}` : ''), by].filter(Boolean).join(', ');
+    if (o.option) return [`Option ${o.option}`, by].filter(Boolean).join(', ');
+    return by;
   }
   // Sent -> Seen -> Done (or Declined): one row of receipts, each step with its time, then the note.
   function lifecycle(o) {
@@ -597,11 +599,80 @@
     cards.set(key, made);
     return made;
   }
+  // ---------- delegation: teammates who answer for the captain (share scope answer) ----------
+  // On a Needs-you item: answers counting down (Cancel), recent outcomes, open help requests (with
+  // a hint when the first mate could not DM on Slack) and "Ask <mate> for help".
+  const DG = () => snap.delegation || { mates: [], help: [], waiting: [], recent: [] };
+  const sameItem = (x, key) => (key.taskId ? x.taskId === key.taskId : x.itemId === key.itemId);
+  const matesFor = (project) => (DG().mates || []).filter((m) => !project || !m.projects || m.projects.includes('*') || m.projects.some((p) => B.projectKey(p) === B.projectKey(project)));
+  function delegationOf(key, project) {
+    const d = DG();
+    return {
+      waiting: (d.waiting || []).filter((x) => sameItem(x, key)),
+      recent: (d.recent || []).filter((x) => sameItem(x, key)),
+      help: (d.help || []).filter((x) => sameItem(x, key)),
+      mates: matesFor(project),
+    };
+  }
+  const delegationSig = (key, project) => { const x = delegationOf(key, project); return [x.waiting.map((w) => w.id), x.recent.map((r) => [r.id, r.state]), x.help.map((hh) => [hh.id, hh.slack]), x.mates.map((m) => m.email)]; };
+  const answerLine = (x) => [x.letter ? `(${x.letter})` : null, x.text].filter(Boolean).join(' ');
+  const RECENT_WORD = { sent: 'sent to the worker', cancelled: 'cancelled by you', refused: 'not sent' };
+  function delegationStrip(key, project, guarded, name) {
+    const x = delegationOf(key, project);
+    if (!x.mates.length && !x.waiting.length && !x.recent.length && !x.help.length) return null;
+    const kids = [];
+    for (const w of x.waiting) {
+      const left = h('span', { class: 'countdown', 'data-due': String(w.dueAt), text: `Sending in ${Math.max(1, Math.ceil((w.dueAt - Date.now()) / 1000))} s` });
+      kids.push(h('div', { class: 'deleg-row waiting', role: 'status' },
+        h('p', null, h('b', { text: `${w.by} answered: ` }), answerLine(w)),
+        h('div', { class: 'btn-row' }, left,
+          h('button', { class: 'btn sm', type: 'button', text: 'Cancel', onclick: () => cancelAnswer(w) }))));
+    }
+    for (const r of x.recent) kids.push(h('p', { class: 'deleg-row hint' }, h('b', { text: `${r.by} answered: ` }), answerLine(r), ` · ${RECENT_WORD[r.state] || r.state}${r.reason ? ` (${r.reason})` : ''}`));
+    for (const hh of x.help) {
+      kids.push(h('p', { class: 'deleg-row hint' }, `Asked ${hh.email} for help ${agoLong(hh.at)}. Their answer goes to the worker as soon as they send it.`));
+      if (hh.slack === 'declined') kids.push(h('p', { class: 'deleg-row hint' }, `Connect Slack to your agent to also DM ${hh.email}; they still get a notice on their Ship Deck page.`));
+    }
+    if (guarded) kids.push(h('p', { class: 'deleg-row hint', text: 'Only you can answer this one: teammates cannot answer items marked destructive, irreversible or security-sensitive.' }));
+    else if (x.mates.length) {
+      const asked = new Set(x.help.map((hh) => hh.email));
+      const menu = h('details', { class: 'ask-help' },
+        h('summary', { class: 'btn sm' }, icon('i-chat'), h('span', { class: 'lbl', text: 'Ask for help' })),
+        h('div', { class: 'ask-menu', role: 'group', 'aria-label': 'Teammates who can answer for you' }, ...x.mates.map((m) =>
+          h('button', { class: 'btn sm ghost', type: 'button', disabled: asked.has(m.email), text: `Ask ${m.name || m.email}`, onclick: () => askHelp(key, m, name) }))));
+      kids.push(menu);
+    }
+    return kids.length ? h('div', { class: 'deleg' }, ...kids) : null;
+  }
+  async function askHelp(key, m, name) {
+    const ok = await confirmDialog({
+      title: `Ask ${m.name || m.email} for help with “${name}”?`,
+      body: `Their Ship Deck page shows a notice, and the first mate is asked to DM them on Slack. Their answer goes to the worker as soon as they send it.`,
+      yes: 'Ask for help',
+    });
+    if (!ok) return;
+    const r = await post('/api/share/help', { ...(key.taskId ? { target: key.taskId } : { item: key.itemId }), email: m.email });
+    toast(r.ok ? `Asked ${m.email} for help` : `Not asked: ${r.error}`, r.ok ? 'ok' : 'err');
+    poll();
+  }
+  async function cancelAnswer(w) {
+    const r = await post('/api/share/answer', { id: w.id, action: 'cancel' });
+    toast(r.ok ? `Cancelled. ${w.by} sees that it was not sent.` : `Not cancelled: ${r.error}`, r.ok ? 'ok' : 'err');
+    poll();
+  }
+  // Seconds left on every answer counting down.
+  setInterval(() => {
+    for (const el of document.querySelectorAll('.countdown[data-due]')) {
+      const s = Math.max(0, Math.ceil((Number(el.dataset.due) - Date.now()) / 1000));
+      el.textContent = s ? `Sending in ${s} s` : 'Sending…';
+    }
+  }, 500);
+
   function taskCard(t, col) {
     const st = taskStatus(t);
     const summary = B.tidyTitle(B.cardSummary(t));
     const d = B.deliveryOf(t);
-    const sig = JSON.stringify([col, st, t.title, t.project, summary, t.options, t.pr, t.hasReport, t.state, t.fromX, d && [d.label, d.steps.map((s) => s.state), d.merge, d.ci, d.pr]]);
+    const sig = JSON.stringify([col, st, t.title, t.project, summary, t.options, t.pr, t.hasReport, t.state, t.fromX, d && [d.label, d.steps.map((s) => s.state), d.merge, d.ci, d.pr], col === 'needs' && delegationSig({ taskId: t.id }, t.project)]);
     const c = cached('t:' + t.id, sig, () => {
       let ask = null;
       if (t.state === 'needs-decision' || t.state === 'blocked') {
@@ -621,7 +692,7 @@
         t.fromX ? h('span', { class: 'tag', title: 'Started from a mention on X (X mode)' }, icon('i-at'), h('span', { class: 'lbl', text: 'From X' })) : null,
       ];
       return cardShell('t:' + t.id, st.tone, col === 'needs', pillEl(st), titleOf(t.id), () => openDrawer({ type: 'task', id: t.id }),
-        meta, summary, ask, h('div', { class: 'card-foot' }, ...foot));
+        meta, summary, ask, col === 'needs' ? delegationStrip({ taskId: t.id }, t.project, B.guardedOf(t), titleOf(t.id)) : null, h('div', { class: 'card-foot' }, ...foot));
     });
     if (moves.has(t.id)) animateMove(c.el, col);
     c.el.classList.toggle('selected', !!selected && selected.type === 'task' && selected.id === t.id);
@@ -634,7 +705,7 @@
     const key = 'c:' + itemKey(b);
     const hold = b.tags && b.tags.hold ? B.cardSummary({ options: b.options, lastStatus: [{ note: b.tags.hold }] }, 200) : '';
     const repo = b.tags && b.tags.repo ? b.tags.repo.replace(/\/+$/, '').split('/').pop() : null;
-    const sig = JSON.stringify([b.id, b.title, hold, b.options, b.section, b.index, repo]);
+    const sig = JSON.stringify([b.id, b.title, hold, b.options, b.section, b.index, repo, b.id && delegationSig({ itemId: b.id }, repo)]);
     const c = cached(key, sig, () => {
       const open = () => openDrawer({ type: 'backlog', id: itemKey(b), section: b.section, index: b.index });
       const ask = !b.id ? h('p', { class: 'hint', text: 'No id, so answer it in the chat.' })
@@ -647,7 +718,8 @@
         h('div', { class: 'q-main' },
           h('h3', { class: 'q-title' }, h('button', { class: 'card-link', type: 'button', onclick: open, text: B.tidyTitle(b.title || b.id) })),
           hold ? h('p', { class: 'q-note', text: hold }) : null,
-          h('div', { class: 'q-answer' }, ask)),
+          h('div', { class: 'q-answer' }, ask),
+          b.id ? delegationStrip({ itemId: b.id }, repo, B.guardedOf(b), B.tidyTitle(b.title || b.id)) : null),
         h('div', { class: 'q-side' }, repo ? h('span', { class: 'card-proj', text: repo }) : null, age, toggle));
       const setOpen = (on) => { el.classList.toggle('open', on); toggle.setAttribute('aria-expanded', String(on)); toggle.textContent = on ? 'Close' : 'Answer'; if (on) openCalls.add(key); else openCalls.delete(key); };
       toggle.addEventListener('click', () => {
@@ -1109,7 +1181,7 @@
     const dv = B.deliveryOf(t);
     if (!unchanged('drawer-head', t.id, t.title, t.project, t.pr, B.toolText(t), t.window, t.alive, t.kind, t.fromX, dv)) renderTaskHead(t, dv);
     if (!unchanged('drawer-resume', t.id, t.session)) td.termOpen.replaceChildren(h('p', { class: 'hint', text: 'Copy into a terminal to pick up this worker’s Claude Code session.' }), resumeBlock(t.session));
-    if (!unchanged('drawer-decision', t.id, t.state, t.stale, lastNote(t), t.options, suggestionsFor(t))) renderDecision(t);
+    if (!unchanged('drawer-decision', t.id, t.state, t.stale, lastNote(t), t.options, suggestionsFor(t), delegationSig({ taskId: t.id }, t.project))) renderDecision(t);
     if (!unchanged('drawer-updates', t.id, t.lastStatus)) renderUpdates(t);
     if (!unchanged('drawer-details', t, snap.tmux.available)) td.details.replaceChildren(...taskDetails(t));
     if (!unchanged('drawer-config', t.id, t.config, t.window, snap.configOptions)) renderConfig(t);
@@ -1235,6 +1307,7 @@
       h('h3', null, flagEl(st.flag), t.state === 'blocked' ? 'Blocked: help it along' : 'Needs your call'),
       h('div', { class: 'decision-note', text: B.cardSummary(t, 2000) || 'No note.' }),
       suggestionBlock(t),
+      delegationStrip({ taskId: t.id }, t.project, B.guardedOf(t), titleOf(t.id)),
       answerPanel({
         options: t.options,
         draftKey: 'decision.' + t.id,
@@ -1526,13 +1599,15 @@
     ui.drawerKicker.replaceChildren(pillEl(st), h('span', { text: 'From the queue' }));
     ui.drawerTitle.textContent = B.tidyTitle((b && b.title) || selected.id);
     if (!b) { ui.drawerSub.replaceChildren(); ui.drawerBody.replaceChildren(h('p', { text: 'This item is no longer in the queue.' })); return; }
-    if (unchanged('drawer-backlog', selected.id, selected.section, b, call && call.options, (snap.orders && snap.orders.list || []).filter((o) => o.item === b.id))) return;
+    const repo = b.tags.repo ? b.tags.repo.replace(/\/+$/, '').split('/').pop() : null;
+    if (unchanged('drawer-backlog', selected.id, selected.section, b, call && call.options, (snap.orders && snap.orders.list || []).filter((o) => o.item === b.id), call && b.id && delegationSig({ itemId: b.id }, repo))) return;
     ui.drawerSub.replaceChildren(h('div', { class: 'd-meta' }, ...[b.id ? h('code', { text: b.id }) : null, b.tags.repo ? h('span', { text: b.tags.repo }) : null].filter(Boolean)));
     const kids = [];
     if (call) {
       kids.push(h('section', { class: 'decision-sec tone-needs' },
         h('h3', null, flagEl('k'), 'Needs your answer'),
         b.tags.hold ? h('div', { class: 'decision-note', text: sentence(b.tags.hold) }) : null,
+        b.id ? delegationStrip({ itemId: b.id }, repo, B.guardedOf(b), B.tidyTitle(b.title || b.id)) : null,
         answerPanel({
           options: call.options,
           draftKey: 'call.' + b.id,

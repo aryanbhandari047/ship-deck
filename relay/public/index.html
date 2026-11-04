@@ -73,7 +73,7 @@
     <div class="viewbar" role="status">
       <svg class="ico" aria-hidden="true"><use href="#i-eye"/></svg>
       <span>You are viewing <b id="vb-name"></b> deck</span>
-      <span class="ro"><svg aria-hidden="true"><use href="#i-lock"/></svg>Read-only</span>
+      <span class="ro"><svg aria-hidden="true"><use href="#i-lock"/></svg><span id="vb-ro">Read-only</span></span>
       <span class="muted v-health" id="vb-health"></span>
       <span class="age" id="vb-age"></span>
     </div>
@@ -84,6 +84,10 @@
           <div class="filters" id="filters" role="group" aria-label="Project"></div>
           <span class="muted v-hidden" id="hidden-note"></span>
         </div>
+        <section class="v-help" id="help" hidden aria-labelledby="help-title">
+          <div class="v-help-head"><h2 id="help-title"></h2><button class="btn sm" id="notify-btn" type="button" hidden>Turn on notifications</button></div>
+          <ul class="v-list" id="help-list"></ul>
+        </section>
         <p class="callout warn" id="board-note" hidden></p>
         <div class="cols" id="cols"></div>
       </section>

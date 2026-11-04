@@ -143,7 +143,8 @@ After an update, restart your first mate (type `/exit`, then
 
 Invite a teammate by email and choose what they get, for 1, 7 or 30 days.
 Nothing is shared until you sign in and add someone. Every item is read-only,
-except **suggest**, which only proposes:
+except **suggest**, which only proposes, and **answer**, which lets a trusted
+teammate answer for you:
 
 | Share | What they get |
 | --- | --- |
@@ -152,6 +153,7 @@ except **suggest**, which only proposes:
 | **terminal**, **chat** | 40 scrubbed terminal lines per worker; the first mate's chat, labels only. |
 | **ask** | Their agent asks a question and gets up to 3 cited passages from your skills and notes. |
 | **suggest** | They propose an answer to a worker waiting on you. You decide; their note is never sent. |
+| **answer** | "Answer for me": they answer anything in Needs you, including queued questions. Click **Ask for help** on a card to notify them (their page and, through your first mate, a Slack DM); answers you asked for go to the worker at once, others wait 5 seconds so you can cancel. Never merges, clean-ups, new jobs, chat, settings or items marked destructive, irreversible or security-sensitive. |
 
 Secrets are scrubbed before anything leaves your machine. Every view and sync
 is logged. Revoke someone, or let the grant expire, and it is removed from

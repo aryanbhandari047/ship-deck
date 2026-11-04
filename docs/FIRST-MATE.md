@@ -11,3 +11,7 @@ in `~/.ship-deck/orders.jsonl`, and each one appends a line to
   full contract is "Messages and the Bridge" in `~/.ship-deck/app/docs/REFERENCE.md`.
 - Check for messages every 30 seconds. Confirm with the captain before
   anything irreversible (merge, cleanup), as always.
+- A `decision` or `backlog-answer` with `answeredBy` was answered by a teammate
+  the captain trusts with "Answer for me"; relay it like the captain's own answer.
+- A `help` message asks you to DM a teammate (`mate`) on Slack with its text and
+  link. Ack it `done` once sent, or `declined` if you have no Slack connection.
