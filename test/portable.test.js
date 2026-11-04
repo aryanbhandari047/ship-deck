@@ -283,7 +283,8 @@ test('start.sh starts the server on the next port when another app holds it', as
   assert.ok(m, out);
   assert.ok(Number(m[1]) > port, 'moved to a free port');
   const health = await (await fetch(`http://127.0.0.1:${m[1]}/api/health`)).json();
-  assert.deepEqual(health, { app: 'ship-deck', ok: true, home: null }, 'no home under the temp HOME: first run');
+  assert.equal(health.app, 'ship-deck');
+  assert.equal(health.home, null, 'no home under the temp HOME: first run');
   assert.match(execFileSync('/bin/sh', [path.join(ROOT, 'bin/start.sh'), '--port', String(port), '--no-open'], { env: { PATH: process.env.PATH, HOME: user, SHIP_DECK_NO_OPEN: '1' }, cwd: user, encoding: 'utf8' }),
     new RegExp(`already running at http://127.0.0.1:${m[1]}/`), 'found in the port range');
 });

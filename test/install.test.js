@@ -380,3 +380,110 @@ test('install.sh on Linux skips keep-awake', (t) => {
   assert.doesNotMatch(r.out, /stay awake/i);
   assert.doesNotMatch(s.calls(), /osascript|sudo/);
 });
+
+// ---------- ship-deck update ----------
+// A bare "remote" holding this checkout's app files, and a work clone to push new commits from.
+function deckRemote(s) {
+  const bare = path.join(s.base, 'remote.git');
+  const work = path.join(s.base, 'work');
+  const git = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...a], { stdio: 'pipe', encoding: 'utf8' }).trim();
+  git('init', '-q', '--bare', '-b', 'main', bare);
+  fs.mkdirSync(work);
+  for (const f of ['server.js', 'package.json', 'README.md', 'lib', 'public', 'bin', 'docs']) fs.cpSync(path.join(ROOT, f), path.join(work, f), { recursive: true });
+  git('-C', work, 'init', '-q', '-b', 'main');
+  git('-C', work, 'add', '.');
+  git('-C', work, 'commit', '-qm', 'first');
+  git('-C', work, 'remote', 'add', 'origin', bare);
+  git('-C', work, 'push', '-q', '-u', 'origin', 'main');
+  const commit = (msg) => {
+    fs.writeFileSync(path.join(work, 'docs', 'NEW.md'), msg + '\n');
+    git('-C', work, 'add', '.');
+    git('-C', work, 'commit', '-qm', msg);
+    git('-C', work, 'push', '-q');
+    return git('-C', work, 'rev-parse', '--short', 'HEAD');
+  };
+  return { bare, work, git, commit };
+}
+
+test('ship-deck update fast-forwards, reinstalls with the same choices and shows what changed', (t) => {
+  const s = sandbox(t);
+  const r = deckRemote(s);
+  const first = s.run('--from', r.bare, '--no-share', '--no-edit-path', '--no-keep-awake');
+  assert.equal(first.code, 0, first.out);
+  const src = path.join(s.home, '.ship-deck', 'src');
+  const app = path.join(s.home, '.ship-deck', 'app');
+  assert.match(fs.readFileSync(path.join(app, '.ship-deck-install'), 'utf8'), new RegExp(`^source=${src}$`, 'm'), 'updates come from a kept checkout');
+  const launcher = path.join(s.home, '.local', 'bin', 'ship-deck');
+  const update = () => spawnSync(launcher, ['update'], { env: s.env, cwd: s.home, encoding: 'utf8' });
+
+  let u = update();
+  assert.equal(u.status, 0, u.stdout + u.stderr);
+  assert.match(u.stdout, /Already up to date/);
+
+  const to = r.commit('Add the tide chart');
+  u = update();
+  assert.equal(u.status, 0, u.stdout + u.stderr);
+  assert.match(u.stdout, new RegExp(`Updated Ship Deck 0\\.1\\.0 \\([0-9a-f]+\\) -> 0\\.1\\.0 \\(${to}\\)`));
+  assert.match(u.stdout, /What changed:\n {2}[0-9a-f]+ Add the tide chart\n/);
+  assert.doesNotMatch(u.stdout, /Try these first/, 'no first-run tips on an update');
+  assert.ok(fs.existsSync(path.join(app, 'docs', 'NEW.md')), 'the new version is installed');
+  assert.match(fs.readFileSync(path.join(app, '.ship-deck-install'), 'utf8'), /^share_relay=off$/m, 'sharing choice kept');
+  assert.ok(!fs.existsSync(path.join(s.home, '.zshrc')), 'PATH choice kept (no rc edit)');
+  assert.doesNotMatch(s.calls(), /osascript|sudo/, 'no questions, no keep-awake change');
+
+  // Re-running the curl install command is the same fast-forward.
+  r.commit('Second change');
+  const again = s.run('--from', r.bare, '--no-edit-path');
+  assert.equal(again.code, 0, again.out);
+  assert.match(again.out, /Updating Ship Deck from/);
+  assert.match(fs.readFileSync(path.join(app, 'docs', 'NEW.md'), 'utf8'), /Second change/);
+});
+
+test('ship-deck update refuses local changes and a diverged branch, and changes nothing', (t) => {
+  const s = sandbox(t);
+  const r = deckRemote(s);
+  assert.equal(s.run('--from', r.bare, '--no-edit-path').code, 0);
+  const src = path.join(s.home, '.ship-deck', 'src');
+  const app = path.join(s.home, '.ship-deck', 'app');
+  const record = () => fs.readFileSync(path.join(app, '.ship-deck-install'), 'utf8');
+  const before = record();
+  const update = () => spawnSync('/bin/sh', [path.join(app, 'bin', 'update.sh')], { env: s.env, cwd: s.home, encoding: 'utf8' });
+  r.commit('Upstream change');
+
+  fs.appendFileSync(path.join(src, 'README.md'), 'my edit\n');
+  let u = update();
+  assert.notEqual(u.status, 0);
+  assert.match(u.stderr, /has local changes\. Nothing was changed/);
+  assert.match(fs.readFileSync(path.join(src, 'README.md'), 'utf8'), /my edit/, 'the edit is kept');
+  assert.equal(record(), before);
+
+  r.git('-C', src, 'commit', '-qam', 'local commit');
+  u = update();
+  assert.notEqual(u.status, 0);
+  assert.match(u.stderr, /cannot fast-forward\. It was left as is/);
+  assert.match(r.git('-C', src, 'log', '-1', '--format=%s'), /local commit/, 'never reset');
+  assert.equal(record(), before);
+});
+
+test('ship-deck update restarts the deck that was running from this install', async (t) => {
+  const s = sandbox(t);
+  const r = deckRemote(s);
+  assert.equal(s.run('--from', r.bare, '--no-edit-path').code, 0);
+  const deck = path.join(s.home, '.ship-deck');
+  // Stand-in for the running deck: its command line names this install's server.js.
+  const fake = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', path.join(deck, 'app', 'server.js')], { stdio: 'ignore' });
+  t.after(() => { try { fake.kill(); } catch { /* gone */ } });
+  fs.writeFileSync(path.join(deck, 'server.pid'), String(fake.pid));
+  const exited = new Promise((res) => fake.on('exit', res));
+  r.commit('Restart me');
+  const port = 21000 + Math.floor(Math.random() * 8000);
+  const u = spawnSync('/bin/sh', [path.join(deck, 'app', 'bin', 'update.sh')], { env: { ...s.env, SHIP_DECK_NO_START: '', SHIP_DECK_PORT: String(port) }, cwd: s.home, encoding: 'utf8' });
+  const pid = Number(fs.readFileSync(path.join(deck, 'server.pid'), 'utf8'));
+  t.after(() => { try { process.kill(pid); } catch { /* gone */ } });
+  assert.equal(u.status, 0, u.stdout + u.stderr);
+  await exited;
+  assert.notEqual(pid, fake.pid);
+  assert.match(u.stdout, /Ship Deck is running at http:\/\/127\.0\.0\.1:\d+\//);
+  const health = await (await fetch(/(http:\/\/127\.0\.0\.1:\d+\/)/.exec(u.stdout)[1] + 'api/health')).json();
+  assert.equal(health.pid, pid, 'the new deck runs');
+});

@@ -194,11 +194,21 @@ trap cleanup EXIT INT TERM
 if [ -z "$from" ] && { [ -z "$here" ] || ! is_checkout "$here"; }; then from=$DEFAULT_REPO; fi
 if [ -n "$from" ]; then
   command -v git >/dev/null 2>&1 || die "git is needed to install from $from"
-  tmp=$(mktemp -d "$deck/.install.XXXXXX")
-  say "Cloning Ship Deck from $from"
-  git clone --quiet --depth 1 "$from" "$tmp/src" || die "could not clone $from (were you added as a collaborator? is gh auth login done?)"
-  src=$tmp/src
-  source_label=$from
+  # Kept as ~/.ship-deck/src so `ship-deck update` can fast-forward it; never reset or discarded.
+  src=$deck/src
+  if [ -e "$src/.git" ] && [ "$(git -C "$src" remote get-url origin 2>/dev/null)" = "$from" ]; then
+    say "Updating Ship Deck from $from"
+    [ -z "$(git -C "$src" status --porcelain)" ] || die "$src has local changes; it was left as is. Commit or stash them, then run this again"
+    GIT_TERMINAL_PROMPT=0 git -C "$src" fetch --quiet </dev/null || die "could not fetch $from (offline?); nothing was changed"
+    git -C "$src" merge --ff-only --quiet '@{u}' >/dev/null 2>&1 || die "$src has commits that are not on $from; it was left as is"
+  else
+    [ -e "$src" ] && die "$src exists but is not a checkout of $from; move it away and run this again"
+    tmp=$(mktemp -d "$deck/.install.XXXXXX")
+    say "Cloning Ship Deck from $from"
+    GIT_TERMINAL_PROMPT=0 git clone --quiet "$from" "$tmp/src" </dev/null || die "could not clone $from (offline?)"
+    mv "$tmp/src" "$src"
+  fi
+  source_label=$src
 else
   src=$here
   source_label=$here
@@ -261,6 +271,7 @@ node='$node_bin'
 [ -x "\$node" ] || node=node
 ${fm_line}
 ${share_line}
+[ "\${1:-}" = update ] && { shift; exec sh '$app/bin/update.sh' "\$@"; }
 # A deck already running on this home is opened instead of starting a second one.
 SHIP_DECK_REUSE=1; export SHIP_DECK_REUSE
 exec "\$node" '$app/server.js' "\$@"
@@ -327,7 +338,7 @@ fi
 # ---------- stop the deck an earlier install started (start.sh records its pid) ----------
 restarted=0
 pidf=$deck/server.pid
-if [ -f "$pidf" ]; then
+if [ "$start" = 1 ] && [ -f "$pidf" ]; then
   old=$(cat "$pidf" 2>/dev/null || true)
   case $old in ''|*[!0-9]*) old= ;; esac
   if [ -n "$old" ] && kill -0 "$old" 2>/dev/null && ps -p "$old" -o command= 2>/dev/null | grep -qF "$app/server.js"; then
@@ -453,6 +464,10 @@ if [ -n "$url" ]; then
 else
   say "Ship Deck is installed. Start it with:  ship-deck"
 fi
+if [ -n "${SHIP_DECK_UPDATING:-}" ]; then
+  [ -n "$url" ] || [ "$start" = 0 ] || warn "Ship Deck did not restart; start it with: ship-deck"
+  exit 0
+fi
 say ""
 say "Try these first:"
 say "  1. Start your first mate in a new terminal:  cd $(gt "$home") && claude"
@@ -473,7 +488,7 @@ if [ -n "$todo" ]; then
   say "Before you start:$todo"
 fi
 say ""
-say "Reopen it any time: ship-deck. Update: run the install command again."
+say "Reopen it any time: ship-deck. Update: ship-deck update (or the Update button in the deck)."
 if [ "$share" != off ]; then
   say "Sharing: on ($share); nothing is sent until you sign in (More > Share your deck). --no-share turns it off."
 else
