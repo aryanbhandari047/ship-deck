@@ -18,6 +18,7 @@
     healthMon: $('health-mon'), healthTime: $('health-time'), menu: $('menu'), greeting: $('board-greeting'),
     firstRun: $('first-run'), firstRunChecked: $('first-run-checked'), captainName: $('captain-name'),
     reconnect: $('reconnect'), reconnectText: $('reconnect-text'), reconnectNow: $('reconnect-now'),
+    updateNote: $('update-note'), updateText: $('update-text'), updateSub: $('update-sub'), updateNow: $('update-now'), updateLater: $('update-later'),
     captain: $('captain'), captainState: $('captain-state'), firstmate: $('firstmate'), fmShipNow: $('fm-ship-now'), lamp: $('lamp'), lampLabel: $('lamp-label'), legend: $('legend'),
     areas: $('areas'), cabins: $('cabins'), cabinRow: $('cabin-row'),
     hold: $('hold'), holdSub: $('hold-sub'), crates: $('crates'),
@@ -2405,6 +2406,7 @@
   let failures = 0;
   let countdown = null;
   function showReconnect(delay) {
+    if (updating) return; // the deck is restarting on purpose
     ui.reconnect.hidden = false;
     let left = Math.round(delay / 1000);
     clearInterval(countdown);
@@ -2442,6 +2444,62 @@
     timer = setTimeout(poll, delay);
   }
   ui.reconnectNow.addEventListener('click', () => { ui.reconnectText.textContent = 'Reconnecting…'; poll(); });
+
+  // ---------- update notice: the server checks (installed decks only); updating needs a click ----------
+  let updating = false;
+  let updateInfo = null;
+  function showUpdate(text, sub, { busy = false, actions = true } = {}) {
+    ui.updateText.textContent = text;
+    ui.updateSub.textContent = sub;
+    ui.updateNow.hidden = !actions;
+    ui.updateLater.hidden = busy;
+    ui.updateLater.textContent = actions ? 'Later' : 'Close';
+    ui.updateNote.hidden = false;
+  }
+  async function checkUpdate() {
+    if (updating) return;
+    try {
+      const u = await (await fetch('/api/update', { cache: 'no-store' })).json();
+      updateInfo = u;
+      if (!u.supported || !u.available || store.get('updateLater') === u.latest) { ui.updateNote.hidden = true; return; }
+      showUpdate('A new version of Ship Deck is ready', `${u.current} → ${u.latest}. Updating restarts the deck; your messages and drafts are kept.`);
+    } catch { /* offline: no news */ }
+  }
+  async function healthPid() {
+    try { return (await (await fetch('/api/health', { cache: 'no-store' })).json()).pid || null; } catch { return null; }
+  }
+  ui.updateLater.addEventListener('click', () => {
+    if (!ui.updateNow.hidden && updateInfo && updateInfo.latest) store.set('updateLater', updateInfo.latest);
+    ui.updateNote.hidden = true;
+  });
+  ui.updateNow.addEventListener('click', async () => {
+    const before = await healthPid();
+    showUpdate('Updating Ship Deck…', 'Getting the new version. The deck restarts and this page reloads on its own.', { busy: true, actions: false });
+    const r = await post('/api/update', {});
+    if (!r.ok) { showUpdate('Could not update', r.error || 'Try ship-deck update in a terminal.', { actions: false }); return; }
+    updating = true;
+    const started = Date.now();
+    const watch = async () => {
+      const pid = await healthPid();
+      if (pid && before && pid !== before) { location.reload(); return; } // back on the new version
+      if (pid) {
+        try {
+          const u = await (await fetch('/api/update', { cache: 'no-store' })).json();
+          if (!u.running && u.result) { // still the same server: nothing new, or it stopped with a reason
+            updating = false;
+            updateInfo = u;
+            showUpdate(u.result.ok ? 'Ship Deck is up to date' : 'Update stopped', u.result.message || '', { actions: false });
+            return;
+          }
+        } catch { /* restarting */ }
+      }
+      if (Date.now() - started > 180000) { updating = false; showUpdate('Still updating?', 'See ~/.ship-deck/update.log, or run ship-deck update in a terminal.', { actions: false }); return; }
+      setTimeout(watch, 2000);
+    };
+    setTimeout(watch, 2000);
+  });
+  setTimeout(checkUpdate, 25000); // the server's first check runs 20 s after it starts
+  setInterval(checkUpdate, 10 * 60 * 1000);
 
   let firstHash = (/^#task=(.+)$/.exec(location.hash) || [])[1];
   if (firstHash) firstHash = decodeURIComponent(firstHash);
@@ -2621,7 +2679,7 @@
         onclick: () => openLibraryEntry(e.key),
       }, h('span', { class: 'lib-line' }, h('span', { class: 'lib-name', text: e.title || e.label }), h('span', { class: 'lib-age', text: e.exists ? agoLong(e.mtime) : 'Not created yet' })),
       e.description ? h('span', { class: 'lib-desc', text: e.description }) : h('span', { class: 'lib-desc mono', text: e.where || e.label }))))))) : [h('p', { class: 'empty', text: 'Nothing matches.' })]),
-    ...(libSharing ? [] : [h('p', { class: 'hint' }, 'Sharing is off, so skills teammates share with you do not arrive. Turn it back on with ', h('code', { text: 'sh ~/ship-deck/bin/install.sh --share' }), ' and restart Ship Deck.')]));
+    ...(libSharing ? [] : [h('p', { class: 'hint' }, 'Sharing is off, so skills teammates share with you do not arrive. Turn it back on with ', h('code', { text: 'sh ~/.ship-deck/app/bin/install.sh --share' }), ' and restart Ship Deck.')]));
   }
   async function openLibraryEntry(key) {
     libKey = key;

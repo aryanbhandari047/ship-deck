@@ -136,10 +136,10 @@
       </section>
       <section class="box" aria-labelledby="fr-point">
         <h2 id="fr-point">Point it at your folder</h2>
-        <p class="fine">No firstmate yet? Run <code>sh ~/ship-deck/bin/install.sh</code> again: it sets one up at <code>~/firstmate</code>, then start <code>ship-deck</code>.</p>
+        <p class="fine">No firstmate yet? Run <code>sh ~/.ship-deck/app/bin/install.sh</code> again: it sets one up at <code>~/firstmate</code> and restarts Ship Deck on it.</p>
         <p class="fine">Already have one elsewhere? Stop this server (Ctrl+C) and start it again with your folder:</p>
-        <div class="cmd"><code id="fr-cmd">npx ship-deck --home ~/path/to/firstmate</code><button class="btn sm" id="fr-copy" type="button"><svg><use href="#i-copy"/></svg><span class="lbl">Copy</span></button></div>
-        <p class="fine">Or set <code>FM_HOME=/path/to/firstmate</code>, or run <code>npx ship-deck</code> from inside the folder. Keep it at <code>~/firstmate</code> and Ship Deck finds it on its own. This page reloads when the server comes back.</p>
+        <div class="cmd"><code id="fr-cmd">ship-deck --home ~/path/to/firstmate</code><button class="btn sm" id="fr-copy" type="button"><svg><use href="#i-copy"/></svg><span class="lbl">Copy</span></button></div>
+        <p class="fine">Or set <code>FM_HOME=/path/to/firstmate</code>, or run <code>ship-deck</code> from inside the folder. Keep it at <code>~/firstmate</code> and Ship Deck finds it on its own. This page reloads when the server comes back.</p>
       </section>
       <p class="fine"><svg class="ico" aria-hidden="true"><use href="#i-lock"/></svg>Ship Deck runs only on this computer at 127.0.0.1. Nothing is shared.</p>
     </div>
@@ -149,6 +149,13 @@
     <span id="reconnect-text">Reconnecting to the Ship Deck server…</span>
     <span class="banner-sub">Your drafts are kept and this page reconnects on its own. If you stopped Ship Deck, start it again the same way.</span>
     <button class="btn" id="reconnect-now" type="button">Retry now</button>
+  </div>
+  <div class="banner calm" id="update-note" role="status" hidden>
+    <span class="banner-dot"></span>
+    <span id="update-text">A new version of Ship Deck is ready</span>
+    <span class="banner-sub" id="update-sub"></span>
+    <button class="btn primary" id="update-now" type="button">Update</button>
+    <button class="btn" id="update-later" type="button">Later</button>
   </div>
 
   <main class="layout">

@@ -1,25 +1,33 @@
 #!/bin/sh
-# Installs Ship Deck for one person on their own computer (macOS or Linux), no sudo:
-#   - checks Node >= 18 (required); installs missing git, tmux, gh (Homebrew) and the Claude Code
-#     CLI (its official installer) when that needs no sudo, else prints the one command to run;
+# Installs Ship Deck for one person on their own computer (macOS or Linux), no sudo. One command:
+#   curl -fsSL https://raw.githubusercontent.com/aryanbhandari047/ship-deck/main/bin/install.sh | sh
+#   - needs Node >= 18 (installed with Homebrew when missing and brew is there); installs missing
+#     git, tmux, gh (Homebrew) and the Claude Code CLI (its official installer) when that needs no
+#     sudo, else prints the one command to run;
 #   - finds the firstmate home (--home, else FM_HOME, else ~/firstmate); when there is none it
-#     clones firstmate there ($FIRSTMATE_REPO overrides the URL) and adds its private state/,
-#     data/ and projects/ folders; an existing home is never changed, and a non-empty folder
-#     that is not firstmate stops the install;
+#     clones firstmate there ($FIRSTMATE_REPO overrides the URL), adds its private state/, data/
+#     and projects/ folders and seeds data/learnings.md with docs/FIRST-MATE.md (so the first mate
+#     reads the chat); an existing home is never changed, and a non-empty folder that is not
+#     firstmate stops the install;
 #   - copies the app into ~/.ship-deck/app, from this checkout, or from a git clone of --from
-#     (default: the Ship Deck repo below) when not run from a checkout;
-#   - writes the `ship-deck` launcher into ~/.local/bin (warns when that is not on PATH);
+#     (default: the Ship Deck repo below) when not run from a checkout (e.g. piped from curl);
+#   - writes the `ship-deck` launcher into ~/.local/bin and adds ~/.local/bin to PATH in your
+#     shell rc file when missing (--no-edit-path to skip);
+#   - starts Ship Deck in the background and opens it (--no-start skips; a deck this installer
+#     started before is restarted on the new version);
 #   - only with --autostart: a macOS LaunchAgent or a systemd user unit;
 #   - sharing on by default (the Keychain relay, or --share-relay URL), so teammates' shared skills
 #     reach this computer's agent; --no-share turns it off, and the launcher, autostart and later
 #     installs remember the choice until --share;
-#   - adds ~/.local/bin to PATH in your shell rc file when missing (--no-edit-path to skip);
 #   - macOS, first install only: "stay awake with the lid closed" (pmset disablesleep, via the
 #     `ship-deck awake on` CLI and the terminal's own sudo prompt); asked, on by default,
 #     --no-keep-awake skips it, --keep-awake turns it on without asking (also on a re-run).
-# Safe to re-run: it replaces its own files and nothing else.
-#   sh bin/install.sh [--home DIR] [--from GIT_URL] [--autostart] [--share | --share-relay URL | --no-share] [--keep-awake | --no-keep-awake] [--no-edit-path]
+# Safe to re-run (also how to update): it replaces its own files and nothing else.
+#   sh bin/install.sh [--home DIR] [--from GIT_URL] [--autostart] [--no-start] [--share | --share-relay URL | --no-share] [--keep-awake | --no-keep-awake] [--no-edit-path]
+#   curl ... | sh -s -- [same flags]
 set -eu
+# One group, parsed whole before it runs: safe when piped (`curl | sh`) even if a step reads stdin.
+{
 
 DEFAULT_REPO=https://github.com/aryanbhandari047/ship-deck.git
 DEFAULT_RELAY=https://ship-deck-relay.vercel.app
@@ -31,11 +39,12 @@ warn() { printf 'warning: %s\n' "$*" >&2; }
 die() { printf 'ship-deck install: %s\n' "$*" >&2; exit 1; }
 
 usage() {
-  say "usage: sh bin/install.sh [--home DIR] [--from GIT_URL] [--autostart] [--share | --share-relay URL | --no-share] [--keep-awake | --no-keep-awake] [--no-edit-path]"
+  say "usage: sh bin/install.sh [--home DIR] [--from GIT_URL] [--autostart] [--no-start] [--share | --share-relay URL | --no-share] [--keep-awake | --no-keep-awake] [--no-edit-path]"
   say "  --home DIR      your firstmate home, set up there when missing (default: \$FM_HOME, else ~/firstmate)"
   say "  --from GIT_URL  install from a fresh clone of this repo instead of this checkout"
   say "                  (default when not run from a checkout: $DEFAULT_REPO)"
   say "  --autostart     also start Ship Deck at login (LaunchAgent on macOS, systemd user unit on Linux)"
+  say "  --no-start      do not start Ship Deck now (default: start it in the background and open it)"
   say "  --share         sharing on (the default, $DEFAULT_RELAY): teammates' shared skills reach your agent"
   say "  --share-relay URL  sharing on with another relay"
   say "  --no-share      sharing off; remembered by later installs until --share"
@@ -47,6 +56,8 @@ usage() {
 home_flag=
 from=
 autostart=0
+start=1
+[ -n "${SHIP_DECK_NO_START:-}" ] && start=0
 edit_path=1
 share=keep
 keep_awake=ask
@@ -57,6 +68,7 @@ while [ $# -gt 0 ]; do
     --from) [ $# -ge 2 ] || die "--from needs a git URL"; from=$2; shift ;;
     --from=*) from=${1#--from=} ;;
     --autostart) autostart=1 ;;
+    --no-start) start=0 ;;
     --share) share=$DEFAULT_RELAY ;;
     --share-relay) [ $# -ge 2 ] || die "--share-relay needs a URL"; share=$2; shift ;;
     --share-relay=*) share=${1#--share-relay=} ;;
@@ -85,19 +97,31 @@ esac
 
 # ---------- prerequisites ----------
 say "Checking prerequisites"
+brew_bin=$(command -v brew 2>/dev/null || true)
+node_ok() { [ -n "$node_bin" ] && "$node_bin" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)'; }
 node_bin=$(command -v node 2>/dev/null || true)
-[ -n "$node_bin" ] || die "Node.js 18 or newer is required (https://nodejs.org); install it and run this again"
-"$node_bin" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' \
-  || die "Node.js 18 or newer is required; found $("$node_bin" --version)"
+if ! node_ok && [ -n "$brew_bin" ]; then
+  say "  installing Node.js with Homebrew"
+  "$brew_bin" install node </dev/null || warn "brew install node failed"
+  hash -r 2>/dev/null || true
+  node_bin=$(command -v node 2>/dev/null || true)
+fi
+if ! node_ok; then
+  found=
+  [ -n "$node_bin" ] && found="; found $("$node_bin" --version)"
+  if [ "$os" = macos ]; then
+    die "Node.js 18 or newer is required$found. Install Homebrew (https://brew.sh) and run this again, or get Node from https://nodejs.org"
+  fi
+  die "Node.js 18 or newer is required$found. Get it from https://nodejs.org (or your package manager) and run this again"
+fi
 say "  ok    node $("$node_bin" --version)"
 has() { command -v "$1" >/dev/null 2>&1 || [ -x "$HOME/.local/bin/$1" ]; }
-brew_bin=$(command -v brew 2>/dev/null || true)
 need=
 for c in git tmux gh; do has "$c" || need="$need $c"; done
 if [ -n "$need" ] && [ -n "$brew_bin" ]; then
   say "  installing$need with Homebrew"
   # shellcheck disable=SC2086 # one word per tool
-  "$brew_bin" install $need || warn "brew install$need failed"
+  "$brew_bin" install $need </dev/null || warn "brew install$need failed"
 fi
 if ! has claude && command -v curl >/dev/null 2>&1; then
   say "  installing Claude Code (its official installer, no sudo)"
@@ -121,6 +145,9 @@ check git "to get firstmate and run worker branches"
 check tmux "the workers run in it"
 check claude "the Claude Code CLI"
 check gh "the GitHub CLI; then run gh auth login"
+# Signed in to GitHub? (your first mate opens pull requests with gh)
+gh_login=0
+if command -v gh >/dev/null 2>&1 && ! gh auth status >/dev/null 2>&1 </dev/null; then gh_login=1; fi
 [ "$os" = macos ] && [ -z "$brew_bin" ] && case $missing in *git*|*tmux*|*gh*) say "  (no Homebrew: get it from https://brew.sh first)" ;; esac
 
 # ---------- firstmate home ----------
@@ -141,16 +168,20 @@ if ! is_fm "$home"; then
   git clone --quiet "$FIRSTMATE_REPO" "$home" || die "could not clone $FIRSTMATE_REPO into $home"
 fi
 home=$(cd "$home" && pwd -P)
+seed_learnings=0
 # Same test as lib/home.js looksLikeHome; a fresh clone lacks its private (git-ignored) folders.
 if [ -d "$home/state" ]; then
   say "Firstmate home: $home ($how)"
 else
   (umask 077 && mkdir -p "$home/state" "$home/data" "$home/projects")
+  seed_learnings=1
   say "Firstmate home: $home ($how, ready)"
 fi
 
 # ---------- the app ----------
-here=$(cd "$(dirname "$0")/.." && pwd -P)
+# Piped from curl, $0 is the shell, not this file: there is no checkout to copy from.
+here=
+[ -f "$0" ] && here=$(cd "$(dirname "$0")/.." && pwd -P)
 is_checkout() { [ -f "$1/server.js" ] && [ -f "$1/package.json" ] && grep -q '"name": *"ship-deck"' "$1/package.json"; }
 umask 077
 deck=$HOME/.ship-deck
@@ -160,14 +191,24 @@ chmod 700 "$deck"
 tmp=
 cleanup() { [ -n "$tmp" ] && rm -rf "$tmp"; return 0; }
 trap cleanup EXIT INT TERM
-if [ -z "$from" ] && ! is_checkout "$here"; then from=$DEFAULT_REPO; fi
+if [ -z "$from" ] && { [ -z "$here" ] || ! is_checkout "$here"; }; then from=$DEFAULT_REPO; fi
 if [ -n "$from" ]; then
   command -v git >/dev/null 2>&1 || die "git is needed to install from $from"
-  tmp=$(mktemp -d "$deck/.install.XXXXXX")
-  say "Cloning Ship Deck from $from"
-  git clone --quiet --depth 1 "$from" "$tmp/src" || die "could not clone $from (were you added as a collaborator? is gh auth login done?)"
-  src=$tmp/src
-  source_label=$from
+  # Kept as ~/.ship-deck/src so `ship-deck update` can fast-forward it; never reset or discarded.
+  src=$deck/src
+  if [ -e "$src/.git" ] && [ "$(git -C "$src" remote get-url origin 2>/dev/null)" = "$from" ]; then
+    say "Updating Ship Deck from $from"
+    [ -z "$(git -C "$src" status --porcelain)" ] || die "$src has local changes; it was left as is. Commit or stash them, then run this again"
+    GIT_TERMINAL_PROMPT=0 git -C "$src" fetch --quiet </dev/null || die "could not fetch $from (offline?); nothing was changed"
+    git -C "$src" merge --ff-only --quiet '@{u}' >/dev/null 2>&1 || die "$src has commits that are not on $from; it was left as is"
+  else
+    [ -e "$src" ] && die "$src exists but is not a checkout of $from; move it away and run this again"
+    tmp=$(mktemp -d "$deck/.install.XXXXXX")
+    say "Cloning Ship Deck from $from"
+    GIT_TERMINAL_PROMPT=0 git clone --quiet "$from" "$tmp/src" </dev/null || die "could not clone $from (offline?)"
+    mv "$tmp/src" "$src"
+  fi
+  source_label=$src
 else
   src=$here
   source_label=$here
@@ -197,6 +238,15 @@ rm -rf "$app"
 mv "$stage" "$app"
 say "Installed Ship Deck in $app${rev:+ (revision $rev)}"
 
+# A fresh home learns the chat contract from its first session; an existing one is only told how.
+teach=
+if [ "$seed_learnings" = 1 ] && [ ! -e "$home/data/learnings.md" ]; then
+  (umask 077 && cp "$app/docs/FIRST-MATE.md" "$home/data/learnings.md")
+  say "Taught your first mate to read Ship Deck messages ($home/data/learnings.md)"
+elif ! grep -qis 'ship-deck' "$home/data/learnings.md" "$home/data/captain.md" 2>/dev/null; then
+  teach="Read ~/.ship-deck/app/docs/FIRST-MATE.md and add it to data/learnings.md"
+fi
+
 # ---------- launcher ----------
 bindir=$HOME/.local/bin
 launcher=$bindir/ship-deck
@@ -221,6 +271,9 @@ node='$node_bin'
 [ -x "\$node" ] || node=node
 ${fm_line}
 ${share_line}
+[ "\${1:-}" = update ] && { shift; exec sh '$app/bin/update.sh' "\$@"; }
+# A deck already running on this home is opened instead of starting a second one.
+SHIP_DECK_REUSE=1; export SHIP_DECK_REUSE
 exec "\$node" '$app/server.js' "\$@"
 EOF
 chmod 755 "$launcher.tmp"
@@ -243,7 +296,7 @@ if [ "$on_path" = 0 ]; then
       printf '\n%s  # added by ship-deck install\n' "$path_line" >> "$rc"
       say "Added ~/.local/bin to PATH in $rc (open a new terminal)"
     fi
-  else
+  elif [ -z "${SHIP_DECK_UPDATING:-}" ]; then
     warn "$bindir is not on your PATH. Add this line to your shell rc file (or re-run without --no-edit-path):"
     warn "  $path_line"
   fi
@@ -280,6 +333,21 @@ if [ "$os" = macos ]; then
   else
     awake_note="off (ship-deck awake on keeps the Mac awake with the lid closed)"
   fi
+fi
+
+# ---------- stop decks running from this install, so the new version starts ----------
+# Every node process running $app/server.js: the one start.sh recorded, a foreground one, or
+# one from an install made before start.sh kept a pid file.
+restarted=0
+if [ "$start" = 1 ]; then
+  for old in $(ps -ax -o pid=,command= 2>/dev/null | grep -F "$app/server.js" | grep -v grep | awk '{print $1}'); do
+    [ "$old" = "$$" ] && continue
+    kill "$old" 2>/dev/null || continue
+    i=0
+    while kill -0 "$old" 2>/dev/null && [ $i -lt 30 ]; do sleep 0.1; i=$((i + 1)); done
+    restarted=1
+  done
+  rm -f "$deck/server.pid"
 fi
 
 # ---------- autostart (only when asked) ----------
@@ -349,19 +417,83 @@ EOF
   fi
 fi
 
-# ---------- summary ----------
-say ""
-if [ -n "$missing" ]; then
-  say "Still to install before your agents can run:$missing (commands above)"
+# ---------- start it now ----------
+open_url() {
+  [ -n "${SHIP_DECK_NO_OPEN:-}" ] && return 0
+  if [ "$os" = macos ]; then open "$1" >/dev/null 2>&1 || true
+  elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$1" >/dev/null 2>&1 || true; fi
+}
+# The first deck answering in the port range (start.sh scans the same way).
+probe() {
+  p=${SHIP_DECK_PORT:-4747}
+  while [ "$p" -lt $((${SHIP_DECK_PORT:-4747} + 20)) ]; do
+    if curl -s --max-time 1 "http://127.0.0.1:$p/api/health" 2>/dev/null | grep -q '"app":"ship-deck"'; then
+      echo "http://127.0.0.1:$p/"; return 0
+    fi
+    p=$((p + 1))
+  done
+  return 1
+}
+url=
+running_old=0
+if [ "$start" = 1 ]; then
+  if [ "$autostart" = 1 ]; then
+    # The login service starts it; wait up to 5 s for it to answer.
+    i=0
+    while [ $i -lt 25 ] && ! url=$(probe); do sleep 0.2; i=$((i + 1)); done
+    [ -n "$url" ] && open_url "$url"
+  else
+    out=$(sh "$app/bin/start.sh" --home "$home" 2>&1 || true)
+    url=$(printf '%s\n' "$out" | sed -n 's/.*\(http:\/\/127\.0\.0\.1:[0-9]*\/\).*/\1/p' | head -n 1)
+    case $out in *"already running"*) running_old=1; open_url "$url" ;; esac
+    [ -n "$url" ] || warn "Ship Deck did not answer yet: $out"
+  fi
 fi
-say "Start Ship Deck with:  ship-deck        (opens http://127.0.0.1:4747/; Ctrl+C stops it)"
-say "Your first mate:       cd '$home' && claude   (Ship Deck's chat reaches it while it runs)"
-say "In the background:     sh $app/bin/start.sh"
-if [ "$share" != off ]; then
-  say "Sharing:               on ($share): sign in under Settings > Sharing (--no-share turns it off)"
+
+# ---------- summary ----------
+gt() { case $1 in "$HOME"/*) printf '~/%s' "${1#"$HOME"/}" ;; *) printf '%s' "$1" ;; esac; }
+say ""
+if [ -n "$url" ]; then
+  if [ "$running_old" = 1 ]; then
+    say "Ship Deck is already running at $url (restart it to use this version)."
+  else
+    if [ "$restarted" = 1 ]; then say "Ship Deck is running at $url (restarted on this version)"
+    else say "Ship Deck is running at $url"; fi
+    [ -n "${SHIP_DECK_NO_OPEN:-}" ] || say "  (opened in your browser)"
+  fi
 else
-  say "Sharing:               off (re-run with --share to receive teammates' skills)"
+  say "Ship Deck is installed. Start it with:  ship-deck"
+fi
+if [ -n "${SHIP_DECK_UPDATING:-}" ]; then
+  [ -n "$url" ] || [ "$start" = 0 ] || warn "Ship Deck did not restart; start it with: ship-deck"
+  exit 0
+fi
+say ""
+say "Try these first:"
+say "  1. Start your first mate in a new terminal:  cd $(gt "$home") && claude"
+say "  2. Say hello in the chat on the deck. Your first mate answers there."
+say "  3. Ask it for work in plain words, e.g. \"add github.com/you/app and fix the login bug\"."
+say "     Workers show up on the board; anything that needs you rises to Needs you."
+todo=
+[ -n "$missing" ] && todo="$todo
+  - install$missing (commands above)"
+[ "$gh_login" = 1 ] && todo="$todo
+  - gh auth login   (your first mate opens pull requests with it)"
+[ -n "$teach" ] && todo="$todo
+  - tell your first mate once: \"$teach\""
+[ "$on_path" = 0 ] && todo="$todo
+  - open a new terminal so the ship-deck command is found"
+if [ -n "$todo" ]; then
+  say ""
+  say "Before you start:$todo"
+fi
+say ""
+say "Reopen it any time: ship-deck. Update: ship-deck update (or the Update button in the deck)."
+if [ "$share" != off ]; then
+  say "Sharing: on ($share); nothing is sent until you sign in (More > Share your deck). --no-share turns it off."
+else
+  say "Sharing: off (re-run with --share to receive teammates' skills)."
 fi
 [ -n "$awake_note" ] && say "Lid closed, stay awake: $awake_note"
-say "Guide: $app/docs/TEAMMATE-SETUP.md"
-say "Already running? Restart it to use this version."
+say "Guide: $(gt "$app")/docs/TEAMMATE-SETUP.md"
+}

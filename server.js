@@ -7,7 +7,8 @@
 // Binds to 127.0.0.1 only. Writes to FM_HOME only one wake line per order (lib/wake.js,
 // --no-wake); other file writes go to the orders dir (~/.ship-deck). The only commands run are tmux list-windows,
 // tmux capture-pane and <home>/bin/fm-send.sh (see lib/actions.js), the browser opener at startup,
-// and on macOS pmset (read) or the admin-prompted disablesleep change (lib/awake.js).
+// and on macOS pmset (read) or the admin-prompted disablesleep change (lib/awake.js). An installed
+// deck also checks for updates with read-only git and runs bin/update.sh on a click (lib/update.js).
 // --share (off here; the installed launcher turns it on unless install.sh --no-share) adds one
 // outbound HTTPS client: lib/share.js pushes a redacted snapshot.
 
@@ -29,17 +30,18 @@ const homes = require('./lib/home');
 const share = require('./lib/share');
 const settings = require('./lib/settings');
 const awake = require('./lib/awake');
+const update = require('./lib/update');
 
 const DEFAULT_PORT = 4747;
 const PORT_TRIES = 20;
 const MAX_BODY = 16 * 1024;
 const ORDERS_IN_SNAPSHOT = 60;
 const THREAD_LIMIT = 300;
-const POST_ROUTES = new Set(['/api/send', '/api/orders', '/api/config', '/api/settings', '/api/awake']);
+const POST_ROUTES = new Set(['/api/send', '/api/orders', '/api/config', '/api/settings', '/api/awake', '/api/update']);
 const SHARE_POST = new Set(['/api/share/signin', '/api/share/signout', '/api/share/grant', '/api/share/revoke', '/api/share/invite', '/api/share/pause', '/api/share/knowledge', '/api/share/item', '/api/share/pool', '/api/share/ask', '/api/share/suggestion']);
 // Library files a "notes and memory" grant may carry (plus memory/*).
 const SHARE_NOTES = ['home:data/captain.md', 'home:data/captain-shared.md', 'home:data/learnings.md'];
-const USAGE = 'usage: ship-deck [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--no-open] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR] [--agents-dir DIR] [--cursor-dir DIR] [--captain-name NAME] [--no-wake] [--share --share-relay URL | --no-share] [--verify-days 30]\n       ship-deck awake on|off|status   (macOS: keep the Mac awake with the lid closed)';
+const USAGE = 'usage: ship-deck [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--no-open] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR] [--agents-dir DIR] [--cursor-dir DIR] [--captain-name NAME] [--no-wake] [--share --share-relay URL | --no-share] [--verify-days 30] [--no-update-check]\n       ship-deck update   (installed decks: get the latest version and restart)\n       ship-deck awake on|off|status   (macOS: keep the Mac awake with the lid closed)';
 
 // env and cwd are injectable for tests; the home falls back per lib/home.js detectHome.
 function parseArgs(argv, { env = process.env, cwd = process.cwd() } = {}) {
@@ -57,8 +59,11 @@ function parseArgs(argv, { env = process.env, cwd = process.cwd() } = {}) {
     share: !!env.SHIP_DECK_SHARE,
     shareRelay: env.SHIP_DECK_RELAY || null,
     verifyDays: Number(env.SHIP_DECK_VERIFY_DAYS) || undefined, // shared items unchecked this long are flagged (30)
+    updateCheck: !env.SHIP_DECK_NO_UPDATE_CHECK, // installed decks only (lib/update.js)
     agentsDir: null, // ~/.agents/skills and ~/.cursor/rules unless given (see below)
     cursorDir: null,
+    // The installed launcher: open a deck already running on this home instead of a second one.
+    reuse: !!env.SHIP_DECK_REUSE && !argv.some((a) => /^--(port|orders-dir)(=|$)/.test(a)),
   };
   let homeFlag = null;
   for (let i = 0; i < argv.length; i++) {
@@ -81,6 +86,7 @@ function parseArgs(argv, { env = process.env, cwd = process.cwd() } = {}) {
     else if (flag === '--share-relay') opts.shareRelay = val();
     else if (flag === '--verify-days') opts.verifyDays = Number(val());
     else if (flag === '--no-share') opts.share = false;
+    else if (flag === '--no-update-check') opts.updateCheck = false;
     else if (flag === '--help' || flag === '-h') {
       console.log(USAGE);
       process.exit(0);
@@ -247,7 +253,7 @@ function firstRunServer(opts) {
     if (!hostOk(req)) return send(res, 421, 'misdirected request', 'text/plain');
     const url = new URL(req.url, 'http://127.0.0.1');
     if (req.method !== 'GET' && req.method !== 'HEAD') { req.resume(); return json(res, 503, { ok: false, error: 'no firstmate home configured' }); }
-    if (url.pathname === '/api/health') return json(res, 200, { app: 'ship-deck', ok: true, home: null });
+    if (url.pathname === '/api/health') return json(res, 200, { app: 'ship-deck', ok: true, home: null, pid: process.pid });
     if (url.pathname === '/api/fleet') return json(res, 200, { firstRun: true, checked: opts.homeChecked || [] });
     if (url.pathname.startsWith('/api/')) return json(res, 503, { error: 'no firstmate home configured' });
     serveStatic(url, res);
@@ -268,6 +274,7 @@ function createServer(opts) {
   const libOpts = { captainSkills: path.join(claudeDir, 'skills') };
   const tracker = sessions.createTracker({ home: opts.home, claudeDir, ordersDir });
   const feed = activity.createActivity({ home: opts.home, claudeDir });
+  const updater = opts.updater || null; // set by main for installed decks; tests inject one
 
   // The /api/fleet object (the share agent projects the same object).
   async function fleetSnapshot() {
@@ -470,6 +477,12 @@ function createServer(opts) {
         return json(res, r.ok || r.cancelled ? 200 : 502, { ...r, status: r.status || await awake.status(awakeDeps) });
       } finally { awakeBusy = false; }
     }
+    if (url.pathname === '/api/update') {
+      // Only on a click: runs bin/update.sh, which restarts this server on the new version.
+      if (!updater) return json(res, 409, { ok: false, error: 'this deck was not installed with the installer, so it cannot update itself' });
+      const r = updater.run();
+      return json(res, r.ok ? 202 : 409, { ...r, update: updater.view() });
+    }
     if (url.pathname === '/api/orders') {
       try {
         const ctx = await orderContext(opts.home);
@@ -498,11 +511,12 @@ function createServer(opts) {
       if (req.method === 'POST' && POST_ROUTES.has(url.pathname)) return await handlePost(req, res, url);
       if (req.method === 'POST' && SHARE_POST.has(url.pathname)) return await handleSharePost(req, res, url);
       if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'method not allowed', 'text/plain');
-      if (url.pathname === '/api/health') return json(res, 200, { app: 'ship-deck', ok: true, home: opts.home });
+      if (url.pathname === '/api/health') return json(res, 200, { app: 'ship-deck', ok: true, home: opts.home, pid: process.pid });
       if (url.pathname === '/api/fleet') return json(res, 200, await fleetSnapshot());
       if (url.pathname === '/api/share' || url.pathname.startsWith('/api/share/')) return await handleShareGet(req, res, url);
       if (url.pathname === '/api/settings') return json(res, 200, { ...settings.readSettings(ordersDir), default: settings.DEFAULT_ADDRESS, max: settings.MAX_ADDRESS, suggestions: settings.suggestions(captain) });
       if (url.pathname === '/api/awake') return json(res, 200, await awake.status(awakeDeps));
+      if (url.pathname === '/api/update') return json(res, 200, updater ? updater.view() : { supported: false });
       if (url.pathname === '/api/thread') {
         return json(res, 200, { sig: orders.threadSignature(ordersDir), items: orders.buildThread(ordersDir, { limit: THREAD_LIMIT }) });
       }
@@ -557,6 +571,7 @@ function createServer(opts) {
     }
   });
   server.shareAgent = agent;
+  server.updater = updater;
   return server;
 }
 
@@ -585,6 +600,24 @@ function openBrowser(url) {
   try { execFile(cmd, args, { timeout: 10000 }, () => { /* no browser: the URL is printed */ }).unref(); } catch { /* ignore */ }
 }
 
+// Port of a deck already serving this home in [port, port + tries), else null.
+async function findRunning(home, port, tries = PORT_TRIES) {
+  for (let p = port; p < port + tries && p <= 65535; p++) {
+    const health = await new Promise((resolve) => {
+      const req = http.get({ host: '127.0.0.1', port: p, path: '/api/health', timeout: 500 }, (res) => {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (c) => { if (body.length < 4096) body += c; });
+        res.on('end', () => { try { resolve(JSON.parse(body)); } catch { resolve(null); } });
+      });
+      req.on('timeout', () => req.destroy());
+      req.on('error', () => resolve(null));
+    });
+    if (health && health.app === 'ship-deck' && health.home === home) return p;
+  }
+  return null;
+}
+
 async function main(argv) {
   if (argv[0] === 'awake') process.exit(await awake.cli(argv.slice(1), { exec: actions.defaultExec }));
   const opts = parseArgs(argv);
@@ -594,8 +627,21 @@ async function main(argv) {
   } else if (!fs.existsSync(path.join(opts.home, 'state'))) {
     console.warn(`warning: ${opts.home}/state not found; the deck will be empty`);
   }
+  if (opts.reuse && opts.home) {
+    const running = await findRunning(opts.home, opts.port);
+    if (running) {
+      const url = `http://127.0.0.1:${running}/`;
+      console.log(`Ship Deck is already running: ${url}`);
+      if (opts.open) openBrowser(url);
+      return;
+    }
+  }
   let port;
   let server;
+  // An installed deck (bin/install.sh wrote .ship-deck-install next to this file) can update itself.
+  if (opts.updateCheck && opts.home && update.readInstall(__dirname)) {
+    opts.updater = update.createUpdater({ appDir: __dirname, deckDir: path.dirname(__dirname), home: opts.home });
+  }
   try {
     server = createServer(opts);
     port = await listen(server, opts.port);
@@ -609,6 +655,7 @@ async function main(argv) {
     console.log(`  messages: ${opts.ordersDir}   library memory: ${opts.memoryDir || '(none)'}   claude: ${opts.claudeDir}`);
   }
   if (port !== opts.port) console.log(`  port ${opts.port} is taken; using ${port}`);
+  if (server.updater) server.updater.start();
   if (server.shareAgent) {
     server.shareAgent.start();
     console.log(`  sharing: on (relay ${opts.shareRelay}); manage it at ${'http://127.0.0.1:' + port}/share.html`);
@@ -619,4 +666,4 @@ async function main(argv) {
 
 if (require.main === module) main(process.argv.slice(2));
 
-module.exports = { createServer, parseArgs, postGuard, knownIds, orderContext, listen, main, DEFAULT_PORT };
+module.exports = { createServer, parseArgs, postGuard, knownIds, orderContext, listen, findRunning, main, DEFAULT_PORT };

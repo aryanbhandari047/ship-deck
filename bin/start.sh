@@ -1,19 +1,24 @@
 #!/bin/sh
 # Starts Ship Deck in the background unless it already answers on its port range, and
 # prints its URL (the server takes the next free port if 4747 is busy and opens the browser
-# unless --no-open). For login auto-start too (see README.md). Args go to server.js.
+# unless --no-open). Used by bin/install.sh and login auto-start. Args go to server.js.
 #   sh bin/start.sh [--port 4747] [--no-open] [server.js flags...]
 port=${SHIP_DECK_PORT:-4747}
+home=
 prev=
 for a in "$@"; do
-  case $a in --port=*) port=${a#--port=} ;; esac
+  case $a in --port=*) port=${a#--port=} ;; --home=*) home=${a#--home=} ;; esac
   [ "$prev" = --port ] && port=$a
+  [ "$prev" = --home ] && home=$a
   prev=$a
 done
+# With --home, only a deck serving that home counts as already running.
+want='"app":"ship-deck"'
+[ -n "$home" ] && [ -d "$home" ] && want="\"home\":\"$(cd "$home" && pwd -P)\""
 here=$(cd "$(dirname "$0")/.." && pwd)
 p=$port
 while [ "$p" -lt $((port + 20)) ]; do
-  if curl -s --max-time 1 "http://127.0.0.1:$p/api/health" 2>/dev/null | grep -q '"app":"ship-deck"'; then
+  if curl -s --max-time 1 "http://127.0.0.1:$p/api/health" 2>/dev/null | grep '"app":"ship-deck"' | grep -qF "$want"; then
     echo "ship-deck: already running at http://127.0.0.1:$p/"
     exit 0
   fi
@@ -33,6 +38,8 @@ log=$dir/server.log
 from=$(($(wc -c < "$log" 2>/dev/null || echo 0) + 1))
 nohup node "$here/server.js" "$@" >> "$log" 2>&1 &
 pid=$!
+# For bin/install.sh: a re-run restarts this deck on the new version.
+echo "$pid" > "$dir/server.pid"
 # Wait up to 5 s for the server to print its URL (the port may have moved).
 i=0
 url=

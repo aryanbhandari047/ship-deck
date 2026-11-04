@@ -572,6 +572,9 @@ body.resizing .scene, body.resizing .pane { pointer-events: none; }
 .banner { position: fixed; left: 16px; bottom: 16px; z-index: 75; width: min(620px, calc(100vw - 32px)); display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 10px 14px; border-radius: var(--r-card); background: var(--blocked-bg); color: var(--blocked-fg); border: 1px solid color-mix(in srgb, var(--blocked-edge) 50%, transparent); box-shadow: var(--shadow-pop); font-weight: 600; }
 .banner-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--blocked-edge); }
 .banner-sub { font-weight: 400; color: var(--ink-2); font-size: var(--t-sm); flex: 1 1 260px; }
+.banner.calm { background: var(--surface); color: var(--ink); border-color: var(--line); }
+.banner.calm .banner-dot { background: var(--primary); }
+.banner.calm:not([hidden]) ~ .banner.calm, #reconnect:not([hidden]) ~ #update-note { bottom: 88px; }
 
 /* ---------- first run ---------- */
 .first-run { min-height: 100vh; display: grid; place-items: center; padding: var(--s12) var(--s4);

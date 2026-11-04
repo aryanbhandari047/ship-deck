@@ -58,14 +58,15 @@ function sandbox(t, { firstmate = true, uname = null, brew = false } = {}) {
   const g = (...a) => execFileSync(git, ['-C', repo, ...a], { stdio: 'ignore' });
   g('init', '-q'); g('add', '.'); g('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'init');
   // No terminal to ask on unless a test feeds an answer file (never the developer's /dev/tty).
-  const env = { HOME: home, PATH: `${shims}:/usr/bin:/bin`, SHELL: '/bin/zsh', FIRSTMATE_REPO: repo, SHIP_DECK_TTY: path.join(base, 'no-tty') };
+  // Not started unless a test asks (SHIP_DECK_NO_START), never a real browser.
+  const env = { HOME: home, PATH: `${shims}:/usr/bin:/bin`, SHELL: '/bin/zsh', FIRSTMATE_REPO: repo, SHIP_DECK_TTY: path.join(base, 'no-tty'), SHIP_DECK_NO_START: '1', SHIP_DECK_NO_OPEN: '1' };
   const run = (...args) => {
     const r = spawnSync('/bin/sh', [INSTALL, ...args], { env: { ...env, ...(run.env || {}) }, cwd: base, encoding: 'utf8' });
     return { code: r.status, out: r.stdout + r.stderr };
   };
   const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '');
   const sleepDisabled = () => (fs.existsSync(sleepFile) ? fs.readFileSync(sleepFile, 'utf8').trim() : '0');
-  return { base, home, env, run, calls, sleepDisabled };
+  return { base, home, shims, env, run, calls, sleepDisabled };
 }
 
 // Every path under dir with its size and mtime, for "nothing else changed" checks.
@@ -126,6 +127,8 @@ test('install.sh without a firstmate home sets one up at ~/firstmate, then leave
   for (const d of ['state', 'data', 'projects']) assert.equal(fs.statSync(path.join(fm, d)).mode & 0o777, 0o700, d);
   assert.ok(require('../lib/home').looksLikeHome(fm), 'Ship Deck finds it');
   assert.doesNotMatch(fs.readFileSync(path.join(s.home, '.local', 'bin', 'ship-deck'), 'utf8'), /FM_HOME=/);
+  assert.equal(fs.readFileSync(path.join(fm, 'data', 'learnings.md'), 'utf8'), fs.readFileSync(path.join(ROOT, 'docs', 'FIRST-MATE.md'), 'utf8'), 'a fresh home is taught the chat contract');
+  assert.doesNotMatch(r.out, /tell your first mate once/);
 
   fs.writeFileSync(path.join(fm, 'state', 'w.status'), 'working: x\n');
   const before = fingerprint(fm);
@@ -133,6 +136,85 @@ test('install.sh without a firstmate home sets one up at ~/firstmate, then leave
   assert.equal(again.code, 0, again.out);
   assert.doesNotMatch(again.out, /Setting up firstmate/);
   assert.deepEqual(fingerprint(fm), before, 'an existing home is left exactly as is');
+});
+
+test('install.sh tells an existing home how to learn the chat, without writing to it', (t) => {
+  const s = sandbox(t);
+  const r = s.run('--no-edit-path');
+  assert.equal(r.code, 0, r.out);
+  assert.ok(!fs.existsSync(path.join(s.home, 'firstmate', 'data', 'learnings.md')));
+  assert.match(r.out, /tell your first mate once: "Read ~\/\.ship-deck\/app\/docs\/FIRST-MATE\.md/);
+  assert.match(r.out, /Try these first:\n {2}1\. Start your first mate in a new terminal: {2}cd ~\/firstmate && claude/);
+  fs.writeFileSync(path.join(s.home, 'firstmate', 'data', 'learnings.md'), 'Ship Deck: node ~/.ship-deck/app/bin/orders.js list\n');
+  assert.doesNotMatch(s.run('--no-edit-path').out, /tell your first mate once/, 'already taught');
+});
+
+test('install.sh installs Node with Homebrew when it is missing', (t) => {
+  const s = sandbox(t, { brew: true });
+  fs.rmSync(path.join(s.shims, 'node'));
+  fs.writeFileSync(path.join(s.shims, 'brew'), `#!/bin/sh\necho "brew $*" >> '${path.join(s.base, 'calls.log')}'\ncase "$*" in *node*) ln -s '${process.execPath}' '${path.join(s.shims, 'node')}' ;; esac\n`, { mode: 0o755 });
+  const r = s.run('--no-edit-path');
+  assert.equal(r.code, 0, r.out);
+  assert.match(s.calls(), /^brew install node$/m);
+  assert.match(r.out, /ok {4}node v\d+/);
+  fs.rmSync(path.join(s.shims, 'node'));
+  fs.rmSync(path.join(s.shims, 'brew'));
+  const none = s.run('--no-edit-path');
+  assert.notEqual(none.code, 0);
+  assert.match(none.out, /Node\.js 18 or newer is required/);
+});
+
+test('install.sh piped into sh (curl | sh) installs from --from, not from the current folder', (t) => {
+  const s = sandbox(t);
+  const src = path.join(s.base, 'src');
+  const git = (...a) => execFileSync('git', a, { stdio: 'ignore' });
+  fs.mkdirSync(src);
+  for (const f of ['server.js', 'package.json', 'README.md', 'lib', 'public', 'bin', 'docs']) fs.cpSync(path.join(ROOT, f), path.join(src, f), { recursive: true });
+  git('-C', src, 'init', '-q'); git('-C', src, 'add', '.'); git('-C', src, '-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'init');
+  const r = spawnSync('/bin/sh', ['-s', '--', '--from', src, '--no-edit-path'], { input: fs.readFileSync(INSTALL), env: s.env, cwd: s.home, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, new RegExp(`Cloning Ship Deck from ${src}`));
+  assert.ok(fs.existsSync(path.join(s.home, '.ship-deck', 'app', 'server.js')));
+});
+
+test('install.sh starts the deck, then a re-run restarts it on the new version', async (t) => {
+  const s = sandbox(t);
+  const port = 21000 + Math.floor(Math.random() * 8000);
+  s.run.env = { SHIP_DECK_NO_START: '', SHIP_DECK_PORT: String(port) };
+  const pidOf = () => Number(fs.readFileSync(path.join(s.home, '.ship-deck', 'server.pid'), 'utf8'));
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  t.after(() => { try { process.kill(pidOf()); } catch { /* gone */ } });
+  const r = s.run('--no-edit-path');
+  assert.equal(r.code, 0, r.out);
+  const m = /Ship Deck is running at (http:\/\/127\.0\.0\.1:(\d+)\/)/.exec(r.out);
+  assert.ok(m, r.out);
+  const health = await (await fetch(m[1] + 'api/health')).json();
+  assert.equal(health.home, path.join(s.home, 'firstmate'));
+  const first = pidOf();
+  const again = s.run('--no-edit-path');
+  assert.equal(again.code, 0, again.out);
+  assert.match(again.out, /restarted on this version/);
+  assert.ok(!alive(first), 'the old deck is stopped');
+  assert.notEqual(pidOf(), first);
+  assert.ok(alive(pidOf()), 'a new one runs');
+});
+
+test('install.sh restarts a deck from an older install that kept no pid file', async (t) => {
+  const s = sandbox(t);
+  assert.equal(s.run('--no-edit-path').code, 0);
+  const app = path.join(s.home, '.ship-deck', 'app');
+  // Stand-in for a deck started before start.sh kept a pid file (or in a terminal).
+  const old = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', path.join(app, 'server.js')], { stdio: 'ignore' });
+  t.after(() => { try { old.kill(); } catch { /* gone */ } });
+  const exited = new Promise((res) => old.on('exit', res));
+  const port = 21000 + Math.floor(Math.random() * 8000);
+  s.run.env = { SHIP_DECK_NO_START: '', SHIP_DECK_PORT: String(port) };
+  const r = s.run('--no-edit-path');
+  const pidFile = path.join(s.home, '.ship-deck', 'server.pid');
+  t.after(() => { try { process.kill(Number(fs.readFileSync(pidFile, 'utf8'))); } catch { /* gone */ } });
+  assert.equal(r.code, 0, r.out);
+  await exited;
+  assert.match(r.out, /Ship Deck is running at http:\/\/127\.0\.0\.1:\d+\/ \(restarted on this version\)/);
 });
 
 test('install.sh refuses a non-empty folder that is not firstmate and installs nothing', (t) => {
@@ -315,4 +397,111 @@ test('install.sh on Linux skips keep-awake', (t) => {
   assert.equal(r.code, 0, r.out);
   assert.doesNotMatch(r.out, /stay awake/i);
   assert.doesNotMatch(s.calls(), /osascript|sudo/);
+});
+
+// ---------- ship-deck update ----------
+// A bare "remote" holding this checkout's app files, and a work clone to push new commits from.
+function deckRemote(s) {
+  const bare = path.join(s.base, 'remote.git');
+  const work = path.join(s.base, 'work');
+  const git = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...a], { stdio: 'pipe', encoding: 'utf8' }).trim();
+  git('init', '-q', '--bare', '-b', 'main', bare);
+  fs.mkdirSync(work);
+  for (const f of ['server.js', 'package.json', 'README.md', 'lib', 'public', 'bin', 'docs']) fs.cpSync(path.join(ROOT, f), path.join(work, f), { recursive: true });
+  git('-C', work, 'init', '-q', '-b', 'main');
+  git('-C', work, 'add', '.');
+  git('-C', work, 'commit', '-qm', 'first');
+  git('-C', work, 'remote', 'add', 'origin', bare);
+  git('-C', work, 'push', '-q', '-u', 'origin', 'main');
+  const commit = (msg) => {
+    fs.writeFileSync(path.join(work, 'docs', 'NEW.md'), msg + '\n');
+    git('-C', work, 'add', '.');
+    git('-C', work, 'commit', '-qm', msg);
+    git('-C', work, 'push', '-q');
+    return git('-C', work, 'rev-parse', '--short', 'HEAD');
+  };
+  return { bare, work, git, commit };
+}
+
+test('ship-deck update fast-forwards, reinstalls with the same choices and shows what changed', (t) => {
+  const s = sandbox(t);
+  const r = deckRemote(s);
+  const first = s.run('--from', r.bare, '--no-share', '--no-edit-path', '--no-keep-awake');
+  assert.equal(first.code, 0, first.out);
+  const src = path.join(s.home, '.ship-deck', 'src');
+  const app = path.join(s.home, '.ship-deck', 'app');
+  assert.match(fs.readFileSync(path.join(app, '.ship-deck-install'), 'utf8'), new RegExp(`^source=${src}$`, 'm'), 'updates come from a kept checkout');
+  const launcher = path.join(s.home, '.local', 'bin', 'ship-deck');
+  const update = () => spawnSync(launcher, ['update'], { env: s.env, cwd: s.home, encoding: 'utf8' });
+
+  let u = update();
+  assert.equal(u.status, 0, u.stdout + u.stderr);
+  assert.match(u.stdout, /Already up to date/);
+
+  const to = r.commit('Add the tide chart');
+  u = update();
+  assert.equal(u.status, 0, u.stdout + u.stderr);
+  assert.match(u.stdout, new RegExp(`Updated Ship Deck 0\\.1\\.0 \\([0-9a-f]+\\) -> 0\\.1\\.0 \\(${to}\\)`));
+  assert.match(u.stdout, /What changed:\n {2}[0-9a-f]+ Add the tide chart\n/);
+  assert.doesNotMatch(u.stdout, /Try these first/, 'no first-run tips on an update');
+  assert.ok(fs.existsSync(path.join(app, 'docs', 'NEW.md')), 'the new version is installed');
+  assert.match(fs.readFileSync(path.join(app, '.ship-deck-install'), 'utf8'), /^share_relay=off$/m, 'sharing choice kept');
+  assert.ok(!fs.existsSync(path.join(s.home, '.zshrc')), 'PATH choice kept (no rc edit)');
+  assert.doesNotMatch(s.calls(), /osascript|sudo/, 'no questions, no keep-awake change');
+
+  // Re-running the curl install command is the same fast-forward.
+  r.commit('Second change');
+  const again = s.run('--from', r.bare, '--no-edit-path');
+  assert.equal(again.code, 0, again.out);
+  assert.match(again.out, /Updating Ship Deck from/);
+  assert.match(fs.readFileSync(path.join(app, 'docs', 'NEW.md'), 'utf8'), /Second change/);
+});
+
+test('ship-deck update refuses local changes and a diverged branch, and changes nothing', (t) => {
+  const s = sandbox(t);
+  const r = deckRemote(s);
+  assert.equal(s.run('--from', r.bare, '--no-edit-path').code, 0);
+  const src = path.join(s.home, '.ship-deck', 'src');
+  const app = path.join(s.home, '.ship-deck', 'app');
+  const record = () => fs.readFileSync(path.join(app, '.ship-deck-install'), 'utf8');
+  const before = record();
+  const update = () => spawnSync('/bin/sh', [path.join(app, 'bin', 'update.sh')], { env: s.env, cwd: s.home, encoding: 'utf8' });
+  r.commit('Upstream change');
+
+  fs.appendFileSync(path.join(src, 'README.md'), 'my edit\n');
+  let u = update();
+  assert.notEqual(u.status, 0);
+  assert.match(u.stderr, /has local changes\. Nothing was changed/);
+  assert.match(fs.readFileSync(path.join(src, 'README.md'), 'utf8'), /my edit/, 'the edit is kept');
+  assert.equal(record(), before);
+
+  r.git('-C', src, 'commit', '-qam', 'local commit');
+  u = update();
+  assert.notEqual(u.status, 0);
+  assert.match(u.stderr, /cannot fast-forward\. It was left as is/);
+  assert.match(r.git('-C', src, 'log', '-1', '--format=%s'), /local commit/, 'never reset');
+  assert.equal(record(), before);
+});
+
+test('ship-deck update restarts the deck that was running from this install', async (t) => {
+  const s = sandbox(t);
+  const r = deckRemote(s);
+  assert.equal(s.run('--from', r.bare, '--no-edit-path').code, 0);
+  const deck = path.join(s.home, '.ship-deck');
+  // Stand-in for the running deck: its command line names this install's server.js.
+  const fake = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', path.join(deck, 'app', 'server.js')], { stdio: 'ignore' });
+  t.after(() => { try { fake.kill(); } catch { /* gone */ } });
+  fs.writeFileSync(path.join(deck, 'server.pid'), String(fake.pid));
+  const exited = new Promise((res) => fake.on('exit', res));
+  r.commit('Restart me');
+  const port = 21000 + Math.floor(Math.random() * 8000);
+  const u = spawnSync('/bin/sh', [path.join(deck, 'app', 'bin', 'update.sh')], { env: { ...s.env, SHIP_DECK_NO_START: '', SHIP_DECK_PORT: String(port) }, cwd: s.home, encoding: 'utf8' });
+  const pid = Number(fs.readFileSync(path.join(deck, 'server.pid'), 'utf8'));
+  t.after(() => { try { process.kill(pid); } catch { /* gone */ } });
+  assert.equal(u.status, 0, u.stdout + u.stderr);
+  await exited;
+  assert.notEqual(pid, fake.pid);
+  assert.match(u.stdout, /Ship Deck is running at http:\/\/127\.0\.0\.1:\d+\//);
+  const health = await (await fetch(/(http:\/\/127\.0\.0\.1:\d+\/)/.exec(u.stdout)[1] + 'api/health')).json();
+  assert.equal(health.pid, pid, 'the new deck runs');
 });

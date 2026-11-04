@@ -13,7 +13,7 @@ const { execFileSync } = require('node:child_process');
 const homes = require('../lib/home');
 const fleet = require('../lib/fleet');
 const labels = require('../public/labels');
-const { createServer, parseArgs, listen } = require('../server');
+const { createServer, parseArgs, listen, findRunning } = require('../server');
 
 const FIX = path.join(__dirname, 'fixtures');
 const ROOT = path.join(__dirname, '..');
@@ -229,7 +229,7 @@ test('no home: the first-run server explains itself and refuses the fleet APIs',
   assert.equal(post.status, 503);
   const page = await (await fetch(base + '/')).text();
   assert.match(page, /id="first-run"/);
-  assert.match(page, /Run <code>sh ~\/ship-deck\/bin\/install\.sh<\/code> again/, 'points to the installer, not a manual clone');
+  assert.match(page, /Run <code>sh ~\/\.ship-deck\/app\/bin\/install\.sh<\/code> again/, 'points to the installer, not a manual clone');
   assert.doesNotMatch(page, /git clone/);
   assert.match(page, /labels\.js/);
   const status = await new Promise((r) => http.get({ host: '127.0.0.1', port: server.address().port, path: '/', headers: { Host: 'evil.example' } }, (res) => { res.resume(); r(res.statusCode); }));
@@ -244,6 +244,45 @@ test('/api/fleet carries the captain name and task titles', async (t) => {
   const snap = await (await fetch(`http://127.0.0.1:${server.address().port}/api/fleet`)).json();
   assert.deepEqual(snap.captain, { name: 'Sample Captain' });
   assert.equal(snap.tasks.find((x) => x.id === 'gamma-decision').title, 'Migrate beacon endpoints');
+});
+
+test('the launcher opens a deck already running on the same home instead of starting another', async (t) => {
+  const home = fixtureHome(tempDir(t));
+  const server = createServer({ home, tmux: false, ordersDir: tempDir(t), claudeDir: tempDir(t), memoryDir: null, exec: async () => ({ code: 1 }) });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  t.after(() => server.close());
+  const port = server.address().port;
+  assert.equal(await findRunning(home, port, 1), port);
+  assert.equal(await findRunning(path.join(home, 'other'), port, 1), null, 'another home is not reused');
+  assert.equal(parseArgs(['--home', home], { env: { SHIP_DECK_REUSE: '1' } }).reuse, true);
+  assert.equal(parseArgs(['--home', home, '--orders-dir', '/tmp/x'], { env: { SHIP_DECK_REUSE: '1' } }).reuse, false, 'scratch runs never reuse');
+  assert.equal(parseArgs(['--home', home], { env: {} }).reuse, false, 'only the installed launcher reuses');
+  const out = await new Promise((resolve, reject) => {
+    require('node:child_process').execFile(process.execPath, [path.join(ROOT, 'server.js'), '--home', home, '--no-open'],
+      { env: { PATH: process.env.PATH, HOME: tempDir(t), SHIP_DECK_REUSE: '1', SHIP_DECK_PORT: String(port) }, encoding: 'utf8', timeout: 10000 }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
+  });
+  assert.equal(out.trim(), `Ship Deck is already running: http://127.0.0.1:${port}/`);
+});
+
+test('start.sh with --home skips a deck that serves another home', async (t) => {
+  const mine = fixtureHome(tempDir(t));
+  const other = fixtureHome(tempDir(t));
+  const server = createServer({ home: other, tmux: false, ordersDir: tempDir(t), claudeDir: tempDir(t), memoryDir: null, exec: async () => ({ code: 1 }) });
+  server.on('error', () => server.listen(20000 + Math.floor(Math.random() * 9000), '127.0.0.1'));
+  await new Promise((r) => { server.once('listening', r); server.listen(20000 + Math.floor(Math.random() * 9000), '127.0.0.1'); });
+  t.after(() => server.close());
+  const port = server.address().port;
+  const user = tempDir(t);
+  const run = (home) => new Promise((resolve, reject) => {
+    require('node:child_process').execFile('/bin/sh', [path.join(ROOT, 'bin/start.sh'), '--port', String(port), '--home', home, '--no-open', '--no-tmux'],
+      { env: { PATH: process.env.PATH, HOME: user, SHIP_DECK_NO_OPEN: '1' }, cwd: user, encoding: 'utf8' }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
+  });
+  assert.match(await run(other), new RegExp(`already running at http://127.0.0.1:${port}/`), 'same home: reused');
+  const out = await run(mine);
+  const pid = Number((/pid (\d+)/.exec(out) || [])[1]);
+  if (pid) t.after(() => { try { process.kill(pid); } catch { /* gone */ } });
+  assert.match(out, /started at http:\/\/127\.0\.0\.1:(\d+)\//, 'another home: a deck of its own');
+  assert.equal(fs.readFileSync(path.join(user, '.ship-deck', 'server.pid'), 'utf8').trim(), String(pid));
 });
 
 test('start.sh starts the server on the next port when another app holds it', async (t) => {
@@ -265,7 +304,8 @@ test('start.sh starts the server on the next port when another app holds it', as
   assert.ok(m, out);
   assert.ok(Number(m[1]) > port, 'moved to a free port');
   const health = await (await fetch(`http://127.0.0.1:${m[1]}/api/health`)).json();
-  assert.deepEqual(health, { app: 'ship-deck', ok: true, home: null }, 'no home under the temp HOME: first run');
+  assert.equal(health.app, 'ship-deck');
+  assert.equal(health.home, null, 'no home under the temp HOME: first run');
   assert.match(execFileSync('/bin/sh', [path.join(ROOT, 'bin/start.sh'), '--port', String(port), '--no-open'], { env: { PATH: process.env.PATH, HOME: user, SHIP_DECK_NO_OPEN: '1' }, cwd: user, encoding: 'utf8' }),
     new RegExp(`already running at http://127.0.0.1:${m[1]}/`), 'found in the port range');
 });
