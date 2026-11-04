@@ -75,6 +75,14 @@ one pipeline, a rate counter, the write, version and audit), a deck list 2 only 
 moved, a used/dismissed report 4; the version read itself is free (deck-auth MGET). At 50 a day,
 well under 1% of the free tier.
 
+Answer for me (`answer`): the captain's deck asks `GET /v1/answers?since=<version>` (1 command,
+the deck-auth MGET, while nothing changed) every 60 s, only while something in Needs you is
+shared with a teammate who may answer (every 20 s while a help request is open). A deck that has
+2 hours of that a day is about 120 commands (10 such decks ≈ 1,200/day, 7%). An answer is about
+12 commands, a send/cancel report 4, a help request 7. A teammate who may answer reads one more
+key per board poll, and while their tab is hidden or idle checks help every 2 minutes (2
+commands; ≈ 600/day for a tab left open 10 hours). Grant `answer` sparingly on a busy team.
+
 Team pool: the deck auth MGET also reads `pool:ver`, so it costs nothing until the first
 approval; after that a knowledge list adds one HGET, and a member's pool read is 3-4 commands
 (the read, an approver lookup, an audit row) only when the pool changed. Approver actions are
@@ -222,6 +230,10 @@ fails when they drift.
 | `GET /v1/agent/library`, `GET /v1/agent/library/<captainSub>/<key>` | agent key | the library list (JSON) and one item (markdown) |
 | `GET`, `POST /v1/decks/<captainSub>/suggestions` | viewer session | live pairing (scope `suggest`): the viewer's own suggestions with their states; `POST { ref, letter, note? }` for a visible worker waiting on a decision, a current option letter, note ≤ 300 characters; same-origin check; 5 waiting per viewer, 20 per deck, 10 an hour; 24 h |
 | `GET /v1/suggestions`, `POST /v1/suggestions/<id>` | deck token | the captain's deck lists pending suggestions (grant re-checked per viewer) and reports `{ state: used \| dismissed }`; the version (`sugv:<sub>`) rides in the deck-auth MGET and on grant and push answers as `suggest` |
+| `GET`, `POST /v1/decks/<captainSub>/answers` | viewer session | Answer for me (scope `answer`): the viewer's own answers with their states (`pending`, `sent`, `cancelled`, `refused`); `POST { ref, letter?, text? }` for a visible Needs-you worker or queued question that is not guarded, a current option, reply ≤ 1,000 characters (tags and control characters removed); refused unless the deck's snapshot has `features: ['answer']`; same-origin check; 20 waiting per deck, 20 an hour per viewer; 24 h; `asked` when the captain asked this viewer for help with that item |
+| `GET /v1/answers?since=`, `POST /v1/answers/<id>` | deck token | the captain's deck lists pending answers (grant re-checked per viewer; `{ same: true }` when the version is unchanged) and reports `{ state: sent \| cancelled \| refused, reason? }`; the version (`ansv:<sub>`) rides in the deck-auth MGET and on grant and push answers as `answers` |
+| `POST /v1/help` | deck token | Ask for help: `{ ref, email }` for a teammate whose live grant has `answer` and covers the item; at most 30 open per deck, 24 h; bumps `hlpv:<email>` |
+| `GET /v1/me/help?since=` | viewer session | the viewer's open help requests across captains who grant them `answer`; the version also rides on their board reads as `help` |
 | `GET /v1/pool`, `POST /v1/pool/offers`, `POST /v1/pool/offers/<id>/approve`, `DELETE /v1/pool/offers/<id>`, `DELETE /v1/pool/items/<id>` | deck token | the team pool: approved items for every account, pending offers (with text) for approvers and their author; anyone offers, approvers approve or remove, an author may withdraw. Members' decks get approved items through `/v1/knowledge` as the deck `team-pool` |
 | `POST /v1/ask` | deck token | a teammate's deck asks `{ question, captain? }` of captains whose grant to this account has `ask`: up to 3 passages (≤ 600 characters, `lines`, title, dates) ranked by BM25 over the term summary stored as `lib:<sub>` field `x` at library push; 30 an hour / 200 a day per grant (`askh:`/`askd:`); one audit row per captain with the question (redacted by the deck) and what was quoted |
 | `POST /v1/usage`, `GET /v1/usage` | deck token | a teammate's deck reports how often its agent used what captains share with it (counts and times only; items not in the captain's library or not granted to this account are dropped; one audit row per captain); the captain reads their counts (`use:<sub>`, 90 days) |

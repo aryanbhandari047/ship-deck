@@ -31,6 +31,8 @@ const share = require('./lib/share');
 const settings = require('./lib/settings');
 const awake = require('./lib/awake');
 const update = require('./lib/update');
+const delegate = require('./lib/delegate');
+const board = require('./public/board');
 
 const DEFAULT_PORT = 4747;
 const PORT_TRIES = 20;
@@ -38,7 +40,7 @@ const MAX_BODY = 16 * 1024;
 const ORDERS_IN_SNAPSHOT = 60;
 const THREAD_LIMIT = 300;
 const POST_ROUTES = new Set(['/api/send', '/api/orders', '/api/config', '/api/settings', '/api/awake', '/api/update']);
-const SHARE_POST = new Set(['/api/share/signin', '/api/share/signout', '/api/share/grant', '/api/share/revoke', '/api/share/invite', '/api/share/pause', '/api/share/knowledge', '/api/share/item', '/api/share/pool', '/api/share/ask', '/api/share/suggestion']);
+const SHARE_POST = new Set(['/api/share/signin', '/api/share/signout', '/api/share/grant', '/api/share/revoke', '/api/share/invite', '/api/share/pause', '/api/share/knowledge', '/api/share/item', '/api/share/pool', '/api/share/ask', '/api/share/suggestion', '/api/share/help', '/api/share/answer']);
 // Library files a "notes and memory" grant may carry (plus memory/*).
 const SHARE_NOTES = ['home:data/captain.md', 'home:data/captain-shared.md', 'home:data/learnings.md'];
 const USAGE = 'usage: ship-deck [--home FM_HOME] [--port 4747] [--stale-days 7] [--no-tmux] [--no-open] [--orders-dir DIR] [--memory-dir DIR] [--claude-dir DIR] [--agents-dir DIR] [--cursor-dir DIR] [--captain-name NAME] [--no-wake] [--share --share-relay URL | --no-share] [--verify-days 30] [--no-update-check]\n       ship-deck update   (installed decks: get the latest version and restart)\n       ship-deck awake on|off|status   (macOS: keep the Mac awake with the lid closed)';
@@ -295,6 +297,7 @@ function createServer(opts) {
     snap.firstmate = { session: sessionView(known[sessions.FIRST_MATE_KEY], 'claude') };
     // Teammates' suggested answers (live pairing), shown on the decision; never sent by themselves.
     snap.suggestions = agent ? agent.suggestions(snap.tasks) : [];
+    snap.delegation = delegationView(list);
     return snap;
   }
 
@@ -303,8 +306,11 @@ function createServer(opts) {
   const isSkill = (e) => e.exists && e.key.startsWith('skill:') && !e.key.startsWith('skill:teammate:');
   const isNote = (e) => e.exists && (SHARE_NOTES.includes(e.key) || e.key.startsWith('memory:'));
   const readEntryText = (e) => { const r = library.readLibraryEntry(opts.home, memoryDir, e.key, libOpts); return (r && r.text) || ''; };
+  let delegation = null;
   const agent = opts.share ? share.createShareAgent({
     relayUrl: opts.shareRelay,
+    // Teammates' answers (scope answer) arrived: lib/delegate.js checks and sends or schedules them.
+    onAnswers: () => { if (delegation) delegation.check().catch((e) => console.warn('delegate: ' + e.message)); },
     dir: ordersDir,
     home: os.homedir(),
     fetchImpl: opts.shareFetch,
@@ -344,6 +350,52 @@ function createServer(opts) {
       .filter((e) => (skills && isSkill(e)) || (notes && isNote(e)))
       .map((e) => ({ key: e.key, title: e.title, description: e.description || '', text: readEntryText(e), updatedAt: e.mtime })),
   }) : null;
+  const readTargets = async () => {
+    const s = await buildSnapshot(opts.home, { tmux: false, staleDays: opts.staleDays });
+    return { tasks: s.tasks, calls: (s.backlog && s.backlog.calls) || [] };
+  };
+  // A teammate's checked answer becomes the captain's usual answer order, with who answered.
+  delegation = agent ? delegate.createDelegation({
+    agent, readTargets, delayMs: opts.answerDelayMs, log: (m) => console.warn(m),
+    send: async (body, by) => {
+      const ctx = await orderContext(opts.home);
+      ctx.answeredBy = by;
+      const order = orders.createOrder(ordersDir, body, ctx);
+      if (opts.wake !== false) wake.wake(opts.home, order);
+      return order;
+    },
+  }) : null;
+  // What the board shows for delegation: who may answer, open help requests (with whether the
+  // first mate declined the Slack DM), answers counting down and recent outcomes.
+  function delegationView(list) {
+    if (!agent) return null;
+    const st = agent.answersStatus();
+    const byId = new Map(list.map((o) => [o.id, o]));
+    const help = agent.helpRequests().map((x) => ({ ...x, slack: x.orderId && byId.get(x.orderId) ? byId.get(x.orderId).status : null }));
+    return { mates: st.mates, problem: st.problem, help, ...delegation.view() };
+  }
+
+  // "Ask <mate> for help": recorded on the relay (their page notifies them), then one order asks
+  // the first mate to DM them on Slack. body: { target } (crew id) or { item } (queue id), email.
+  async function askForHelp(body) {
+    const { tasks, calls } = await readTargets();
+    const target = typeof body.target === 'string' ? body.target : null;
+    const item = !target && typeof body.item === 'string' ? body.item : null;
+    const rec = await agent.askForHelp({ taskId: target, itemId: item, email: body.email }, tasks, calls);
+    const t = target ? tasks.find((x) => x.id === target) : null;
+    const b = item ? calls.find((x) => x.id === item) : null;
+    const about = t ? board.cardSummary(t, 300) : b && b.tags && b.tags.hold ? b.tags.hold : '';
+    const link = agent.deckLink();
+    const text = `Please DM ${rec.email} on Slack: ${captain || 'the captain'} asked them for help with "${rec.title}"${about ? ` (${about.replace(/\s+/g, ' ')})` : ''}. `
+      + `They can answer it on the shared board: ${link}. If you cannot reach Slack, decline this message.`;
+    let order = null;
+    try {
+      order = orders.createOrder(ordersDir, { kind: 'help', target, item, mate: rec.email, link, text }, { ...(await orderContext(opts.home)), internal: true });
+      if (opts.wake !== false) wake.wake(opts.home, order);
+      agent.noteHelpOrder(rec.id, order.id);
+    } catch (e) { console.warn('help: ' + e.message); }
+    return { help: rec, order };
+  }
 
   // Relay errors come back as plain messages; 401/4xx keep their status, the rest are 502.
   function shareError(res, e) {
@@ -387,6 +439,11 @@ function createServer(opts) {
       if (url.pathname === '/api/share/item') return json(res, 200, { ok: true, items: await agent.setItem({ key: body.key, verified: body.verified, tag: body.tag }) });
       if (url.pathname === '/api/share/invite') return json(res, 200, { ok: true, invite: await agent.invite(body.email) });
       if (url.pathname === '/api/share/pause') return json(res, 200, { ok: true, status: agent.setPaused(!!body.paused) });
+      if (url.pathname === '/api/share/answer') {
+        if (body.action !== 'cancel' || typeof body.id !== 'string') throw new Error('only cancel is possible');
+        return json(res, 200, { ok: true, done: await delegation.cancel(body.id) });
+      }
+      if (url.pathname === '/api/share/help') return json(res, 200, { ok: true, ...(await askForHelp(body)) });
       if (url.pathname === '/api/share/suggestion') {
         if (body.action === 'stop') return json(res, 200, { ok: true, grants: await agent.stopSuggestions(body.id) });
         return json(res, 200, { ok: true, done: await agent.resolveSuggestion(body.id, 'dismissed') });

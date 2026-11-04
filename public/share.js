@@ -15,11 +15,12 @@
     { key: 'chat', name: 'First mate chat and activity', desc: 'Your conversation and its tool calls', on: false, col: 1 },
     { key: 'ask', name: 'Questions about skills and notes', desc: 'Their agent can ask questions and gets up to 3 short quoted passages each, without copying your skills and notes to them. Each question (redacted) shows in your log. Many questions can piece the text together, so share only what you would let them read.', on: false, col: 0 },
     { key: 'suggest', name: 'Suggest answers', desc: 'They can suggest an option on a waiting decision, with a note. You see it on the decision; nothing reaches your agent unless you answer with it yourself. Needs the Board.', on: false, col: 1 },
+    { key: 'answer', name: 'Answer for me', desc: 'They can answer anything in Needs you (decisions, blocked or failed workers, queued questions) and see your queued questions. Answers you asked them for go to the worker at once; others wait 5 seconds so you can cancel. Never merges, clean-ups, new jobs, chat or settings, and never items marked destructive, irreversible or security-sensitive. Needs the Board.', on: false, col: 1 },
   ];
   const NAME = Object.fromEntries(SCOPES.map((s) => [s.key, s.name]));
   const NEVER = [
     { name: 'Attachments, file paths, session ids', desc: 'Screenshots, recordings, folders, resume commands', word: 'Never shared' },
-    { name: 'Sending anything', desc: 'Answers, messages, merges, clean-ups, settings', word: 'Never allowed' },
+    { name: 'Sending anything else', desc: 'Messages, merges, clean-ups, new jobs, settings (answers only with Answer for me)', word: 'Never allowed' },
   ];
 
   let status = null;

@@ -3,9 +3,12 @@
 // the two in step). Pushed snapshots are rebuilt field by field, so a deck bug or a forged push
 // can never store anything outside the list, and each viewer gets only their scopes and projects.
 
-const SCOPES = ['board', 'updates', 'model', 'skills', 'terminal', 'notes', 'chat', 'ask', 'suggest'];
-const WORKER_KEYS = ['ref', 'id', 'title', 'project', 'state', 'quietDays', 'summary', 'updatedAt', 'options', 'pr', 'model', 'effort'];
-const SNAPSHOT_KEYS = ['v', 'at', 'scopes', 'projects', 'hiddenProjects', 'fleet', 'workers', 'updates', 'terminal', 'skills', 'notes', 'chat', 'activity', 'trimmed'];
+const SCOPES = ['board', 'updates', 'model', 'skills', 'terminal', 'notes', 'chat', 'ask', 'suggest', 'answer'];
+const WORKER_KEYS = ['ref', 'id', 'title', 'project', 'state', 'quietDays', 'summary', 'updatedAt', 'options', 'pr', 'model', 'effort', 'guarded'];
+const SNAPSHOT_KEYS = ['v', 'at', 'scopes', 'projects', 'hiddenProjects', 'fleet', 'workers', 'updates', 'terminal', 'skills', 'notes', 'chat', 'activity', 'trimmed', 'calls', 'features'];
+// calls: the captain's queued questions (sent only while a grant has `answer`); features: what this deck can take.
+const CALL_KEYS = ['ref', 'id', 'title', 'project', 'summary', 'options', 'guarded'];
+const FEATURES = ['answer'];
 const STATES = ['needs-decision', 'blocked', 'failed', 'working', 'resolved', 'paused', 'unknown', 'done'];
 const MAX_BYTES = 64 * 1024;
 const REF_RE = /^[A-Za-z0-9_-]{8,32}$/;
@@ -14,6 +17,8 @@ const s = (v, max) => (typeof v === 'string' ? v.slice(0, max) : null);
 const n = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const arr = (v, max) => (Array.isArray(v) ? v.slice(0, max) : []);
 const lower = (x) => String(x || '').toLowerCase();
+
+const cleanOptions = (v) => arr(v, 8).filter((o) => o && typeof o === 'object').map((o) => ({ letter: /^[A-Z?]$/.test(o.letter) ? o.letter : '?', text: s(o.text, 200) }));
 
 function cleanWorker(w) {
   if (!w || typeof w !== 'object' || !REF_RE.test(w.ref)) return null;
@@ -31,11 +36,16 @@ function cleanWorker(w) {
     quietDays: n(w.quietDays),
     summary: s(w.summary, 200),
     updatedAt: n(w.updatedAt),
-    options: arr(w.options, 8).filter((o) => o && typeof o === 'object').map((o) => ({ letter: /^[A-Z?]$/.test(o.letter) ? o.letter : '?', text: s(o.text, 200) })),
+    options: cleanOptions(w.options),
     pr,
     model: s(w.model, 60),
     effort: s(w.effort, 60),
+    guarded: w.guarded === true,
   };
+}
+function cleanCall(c) {
+  if (!c || typeof c !== 'object' || !REF_RE.test(c.ref)) return null;
+  return { ref: c.ref, id: s(c.id, 128), title: s(c.title, 120), project: s(c.project, 100), summary: s(c.summary, 200), options: cleanOptions(c.options), guarded: c.guarded === true };
 }
 
 const byRef = (v, refs, clean) => {
@@ -63,6 +73,11 @@ function sanitizeSnapshot(body, now = Date.now()) {
     fleet: { counts, firstMate: fm, monitoring: fleet.monitoring === 'ok' ? 'ok' : 'late' },
     workers,
   };
+  if (body.calls) {
+    const calls = arr(body.calls, 30).map(cleanCall).filter((c) => c && !refs.has(c.ref));
+    if (calls.length) out.calls = calls;
+  }
+  if (body.features) out.features = arr(body.features, 10).filter((x) => FEATURES.includes(x));
   if (body.updates) {
     out.updates = byRef(body.updates, refs, (list) => arr(list, 5).filter((e) => e && typeof e === 'object').map((e) => ({ ts: s(e.ts, 25), state: STATES.includes(e.state) ? e.state : 'unknown', note: s(e.note, 200) })));
   }
@@ -110,6 +125,9 @@ function viewFor(snap, grant, scope, ref) {
           hiddenProjects: snap.hiddenProjects + hiddenHere.size,
           workers: visible.map((w) => (withModel ? w : { ...w, model: undefined, effort: undefined })),
           trimmed: snap.trimmed || undefined,
+          // Only a teammate who may answer sees the queued questions, and whether the deck takes answers.
+          calls: grant.scopes.includes('answer') ? (snap.calls || []).filter((c) => sharedProject(c.project, grant.projects)) : undefined,
+          features: snap.features || [],
         },
       };
     }
@@ -123,4 +141,15 @@ function viewFor(snap, grant, scope, ref) {
   }
 }
 
-module.exports = { SCOPES, WORKER_KEYS, SNAPSHOT_KEYS, MAX_BYTES, REF_RE, sanitizeSnapshot, viewFor, sharedProject, cleanWorker };
+// The Needs-you item a teammate with `answer` may answer: a visible worker or queued question.
+// -> { target: { kind, ref, title, state, options, guarded } } or { refused }.
+function targetFor(snap, grant, ref) {
+  const w = snap.workers.find((x) => x.ref === ref);
+  const c = !w && grant.scopes.includes('answer') ? (snap.calls || []).find((x) => x.ref === ref) : null;
+  const item = w || c;
+  if (!item) return { refused: 'not found' };
+  if (!sharedProject(item.project, grant.projects)) return { refused: 'project not shared' };
+  return { target: { kind: w ? 'worker' : 'call', ref, title: item.title, state: w ? w.state : 'needs-decision', options: item.options || [], guarded: !!item.guarded, project: item.project } };
+}
+
+module.exports = { CALL_KEYS, FEATURES, targetFor, SCOPES, WORKER_KEYS, SNAPSHOT_KEYS, MAX_BYTES, REF_RE, sanitizeSnapshot, viewFor, sharedProject, cleanWorker };

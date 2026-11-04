@@ -207,6 +207,18 @@
     return s.length > max ? s.slice(0, max - 1).trimEnd() + '…' : s;
   }
 
+  // Items only the captain may answer (delegation never sends to these): the latest note, the
+  // options or a queued question's title/hold say destructive, irreversible, security-sensitive
+  // or captain-only, or the backlog line carries a (guard: ...) tag.
+  const GUARD_RE = /\b(?:destructive|irreversible|security[- ]sensitive|captain[- ]only)\b/i;
+  function guardedOf(x) {
+    if (!x) return false;
+    const last = x.lastStatus && x.lastStatus.length ? x.lastStatus[x.lastStatus.length - 1] : null;
+    const tags = x.tags || {};
+    if (tags.guard !== undefined) return true;
+    return [last && last.note, x.title, tags.hold, ...(x.options || []).map((o) => o && o.text)].some((v) => GUARD_RE.test(String(v || '')));
+  }
+
   // "Claude · opus · high": the tool, a non-default model and the effort.
   function toolText(t) {
     const c = (t && t.config) || {};
@@ -217,7 +229,7 @@
     return [name, model && model !== 'default' ? model : null, effort && effort !== 'auto' ? effort : null].filter(Boolean).join(' · ');
   }
 
-  const api = { TONES, TONE_ORDER, STATE_TONE, COLUMNS, PATHS, toneOf, flagOf, statusOf, callStatus, quietDays, columnOf, groupBoard, cardSummary, toolText, projectKey, deliveryOf, tidyTitle };
+  const api = { TONES, TONE_ORDER, STATE_TONE, COLUMNS, PATHS, toneOf, flagOf, statusOf, callStatus, quietDays, columnOf, groupBoard, cardSummary, guardedOf, toolText, projectKey, deliveryOf, tidyTitle };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.ShipDeckBoard = api;
 })(typeof window !== 'undefined' ? window : globalThis);

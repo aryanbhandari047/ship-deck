@@ -26,6 +26,7 @@ function validateGrant(viewer, body, { domain, captainEmail, now = Date.now(), p
   const scopes = SCOPES.filter((x) => asked.includes(x));
   if (!scopes.length) throw new GrantError('Choose at least one thing to share.');
   if (scopes.includes('suggest') && !scopes.includes('board')) throw new GrantError('Suggesting answers needs the Board.');
+  if (scopes.includes('answer') && !scopes.includes('board')) throw new GrantError('Answering for you needs the Board.');
   const projects = (Array.isArray(b.projects) ? b.projects : []).filter((p) => typeof p === 'string' && p.trim()).map((p) => p.trim().slice(0, 100)).slice(0, 50);
   if (!projects.length) throw new GrantError('Choose at least one project.');
   const max = now + MAX_DAYS * DAY;

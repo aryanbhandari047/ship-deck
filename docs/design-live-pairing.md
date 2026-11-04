@@ -6,7 +6,9 @@ letters plus a note that is shown and never sent; `suggestedBy` on the order) an
 `suggestions`/`takeSuggestion`/`resolveSuggestion`/`stopSuggestions`, `server.js` `/api/orders`,
 the decision panel in `public/app.js`, the relay viewer form, `test/pairing.test.js`. As built,
 "Answer with B" opens the usual confirm, the same step as clicking B, instead of pre-filling a
-form. Free-text reply suggestions are not built.
+form. Free-text reply suggestions are not built. A later captain decision added delegation instead: the `answer`
+scope ("Answer for me") and "Ask <mate> for help" (`relay/lib/delegate.js`, `lib/delegate.js`,
+REFERENCE "Sharing" items 10-11); `suggest` is unchanged.
 
 ## Goal
 

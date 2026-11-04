@@ -430,7 +430,7 @@ the backstop. `--no-wake` turns it off.
 | kind | target | payload | meaning |
 | --- | --- | --- | --- |
 | `chat` | - | `text` (multi-line, max 4000; may be empty when there are attachments), optional `attachments` | Free-text message from the Bridge. Answer with `reply`. |
-| `decision` | crew id | `option` (`A`-`H` or `null`), `text`, optional `suggestedBy` | Answer to a needs-decision/blocked worker; `text` is `(B) <option text>` plus any note, or a free answer. `suggestedBy` (an email) is present when the captain answered with a teammate's suggestion; the server sets it after checking the suggestion (`suggestion: <id>` in the request), never from the request itself. |
+| `decision` | crew id | `option` (`A`-`H` or `null`), `text`, optional `suggestedBy` or `answeredBy` | Answer to a needs-decision/blocked/failed worker; `text` is `(B) <option text>` plus any note, or a free answer. `suggestedBy` (an email) is present when the captain answered with a teammate's suggestion; the server sets it after checking the suggestion (`suggestion: <id>` in the request), never from the request itself. `answeredBy` (an email) means a teammate with "Answer for me" answered and the deck sent it (`lib/delegate.js`); treat it as the captain's answer. |
 | `answer` | crew id | `text` | Legacy free-text answer (older UI). |
 | `status` | crew id | - | Ask the worker for a status update. |
 | `merge` | crew id | - | Merge its PR. Irreversible: confirm with the captain first. |
@@ -438,7 +438,8 @@ the backstop. `--no-wake` turns it off.
 | `cleanup-done` | - | `targets`: crew ids that were done when queued | Clean up all finished workers. Irreversible: confirm first. |
 | `new-task` | - | `project` (from `data/projects.md`), `taskKind` (`ship` or `scout`), optional `harness`, `model` (absent = first mate default), `effort` (`auto` = first mate decides), `text` | Dispatch a new task. |
 | `backlog-start` | - | `item` (backlog id), `text` | Start this queued backlog item. |
-| `backlog-answer` | - | `item` (backlog id), `option`, `text` | The captain's answer to a Captain's Call item. |
+| `backlog-answer` | - | `item` (backlog id), `option`, `text`, optional `answeredBy` | The captain's answer to a Captain's Call item (`answeredBy`: as for `decision`). |
+| `help` | crew id or - | `mate` (email), optional `item` (backlog id), `link` (the relay board), `text` | The captain asked a teammate for help with that item (Ask for help). DM `mate` on Slack with the text and link, then ack `done`; if you cannot reach Slack, ack `declined` (the deck then tells the captain to connect Slack). Only created by `POST /api/share/help`. |
 | `config` | crew id | `field` (`effort` or `model`), `value`, `applied` | Record of a config change. `applied:true` = already sent live (`/effort`/`/model` via fm-send; takes effect from the worker's next turn); `applied:false` = apply it when relaunching the worker. Only created by `POST /api/config`. |
 | `address` | - | `address` (the new form of address; `""` = no title), `text` (the request in words) | The captain changed what to call them in Settings > You. Use it when addressing them; record it where you keep the captain's preferences if you want it to last. Only created by `POST /api/settings` with `tell`. |
 | `order` | optional | `text` | Legacy free-text order. |
@@ -693,6 +694,40 @@ Share your deck** in the top bar opens **Settings > Sharing** (`/share.html`):
    suggestions last 24 hours. Revoking or narrowing the grant hides theirs at once (the relay
    re-checks the grant on every read). Each suggestion, refusal, use and dismissal is a row in
    your log, and the viewer sees whether theirs was used.
+10. **Answer for me** (scope `answer`, off by default, only with Board, time-limited like every
+    grant): the teammate answers anything in your Needs you on the relay page (needs-decision
+    with or without options, blocked, failed, and your queued questions, which they then also
+    see): an option, a reply of up to 1,000 characters (tags and control characters removed),
+    or both. That is all they can do: no merges, clean-ups, new jobs, chat or settings, and
+    never an item marked **guarded**: its latest note, options or (for a queued question) title
+    or hold say destructive, irreversible, security-sensitive or captain-only, or its backlog
+    line has a `(guard: ...)` tag (`public/board.js` `guardedOf`). Their card then says "Only
+    <you> can answer this". The relay checks the grant, the item (visible under their projects,
+    still asking, not guarded, the option on offer) and that your deck takes answers
+    (`features: ['answer']` in the snapshot; an older deck is refused with "needs an update").
+    Your deck lists pending answers (`GET /v1/answers?since=`) every 60 s while something in
+    Needs you is shared with such a teammate, every 20 s while a help request is open, and at
+    once when a push or grant check shows the version moved. `lib/delegate.js` checks each one
+    again against your own fleet and grants, then sends it as your usual `decision` (worker) or
+    `backlog-answer` (queued question) order with `answeredBy`: **at once** when you asked that
+    teammate for help with that item, otherwise after **5 seconds** in which the card shows
+    "<who> answered: …, Sending in 4 s" with **Cancel**. The window runs in the server, so it
+    works with the page closed. Cancelled, sent and refused (no longer current, guarded, access
+    changed) answers are reported back and shown on their page. Limits: 20 waiting per deck, 20
+    an hour per teammate; answers last 24 hours. What this deck did with each answer is kept in
+    `share.json` (`answered`), so a restart never sends one twice.
+11. **Ask <mate> for help**: on every Needs-you card (not guarded ones) **Ask for help** lists
+    the teammates whose `answer` grant covers that project. Asking records a help request on the
+    relay (`POST /v1/help`, deck token; at most 30 open, 24 hours) and queues one `help` order:
+    the first mate is asked to DM them on Slack with the item and a link to your board on the
+    relay. Ship Deck has no Slack token; this needs your agent's own Slack connection, and when
+    the first mate declines that order the card says "Connect Slack to your agent to also DM
+    <mate>". Their relay page learns of it on its next board read (the help version rides there,
+    one more read for `answer` grants) or, while that tab is hidden or idle, from a check every 2
+    minutes (`GET /v1/me/help?since=`): a "<you> needs your help" list, the tab title count and a
+    browser notification once they allow it (Notification API; only while the page is open).
+    Their answer to an item you asked about goes to the worker at once. Every answer, refusal,
+    send, cancel and help request is a row in your log.
 
 ![Settings > Sharing: people with access, what they can see, and the audit log](share-settings.png)
 ![A teammate's read-only view of the sample fleet on the relay](share-viewer.png)
@@ -717,14 +752,17 @@ dropped; their full text still travels in the library). Workers are keyed by an 
 | First mate chat and activity (labels only) | off | |
 | Questions about skills and notes (`ask`: 3 short quoted passages per question, nothing synced) | off | the question shows in your log |
 | Suggest answers (`suggest`: an option letter + a note you see; only you can send it) | off | needs Board |
+| Answer for me (`answer`: answers to Needs-you items, sent by your deck; also shares your queued questions) | off | needs Board; guarded items never |
 | Attachments, paths, worktrees, windows, session ids, orders | never | not in the allow-list |
-| Sending anything | never | viewers can only make and revoke their own agent keys and, with `suggest`, suggest an option you may use; `/v1/knowledge` and `/v1/agent` are GET only |
+| Sending anything else | never | viewers can only make and revoke their own agent keys, suggest (`suggest`) and answer Needs-you items (`answer`); never merge, clean up, start jobs, chat or change settings; `/v1/knowledge` and `/v1/agent` are GET only |
 
 Nothing is pushed until someone has an active grant. The share agent pushes only when the
 redacted snapshot changes, at most every 30 s, plus a keep-alive every 10 minutes; on quota,
 rate-limit or network errors it backs off (30 s doubling to 15 min) and Settings shows
 "Sharing paused". Nothing listens for the relay: everything it returns is shown as data,
-and `lib/share.js` cannot reach orders or fm-send (a test checks its imports). The relay
+and `lib/share.js` cannot reach orders or fm-send (a test checks its imports). The one
+exception is an `answer` grant: `lib/delegate.js` (in the server) turns a teammate's answer
+into your answer order only after its own checks, as described above. The relay
 itself (Vercel + Upstash free tiers, deploy steps, cost estimate) is in
 [`relay/README.md`](../relay/README.md).
 

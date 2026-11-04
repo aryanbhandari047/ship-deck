@@ -790,6 +790,18 @@ button.cond:hover { color: var(--ink); text-decoration: underline; text-underlin
 .reply-row { display: flex; gap: 6px; margin-top: 2px; }
 .reply-row .input { flex: 1; min-width: 0; height: 34px; }
 .reply-row .btn { height: 34px; }
+/* delegation: a teammate's answer counting down, help requests, "Ask for help" (deck and viewer) */
+.bcard .deleg, .qrow .deleg { position: relative; z-index: 1; }
+.deleg { display: grid; gap: 6px; margin-top: 6px; min-width: 0; }
+.deleg-row { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.deleg-row.hint { font-size: var(--t-sm); color: var(--ink-2); }
+.deleg-row.waiting { display: grid; gap: 6px; padding: 8px 10px; border: 1px solid var(--needs-edge); border-radius: var(--r-ctl); background: var(--needs-bg); color: var(--ink); }
+.deleg-row.waiting p { margin: 0; }
+.deleg .btn-row { align-items: center; }
+.countdown { font-size: var(--t-sm); font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.ask-help > summary { list-style: none; display: inline-flex; width: max-content; cursor: pointer; }
+.ask-help > summary::-webkit-details-marker { display: none; }
+.ask-menu { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 
 /* lane rows: compact, flat, the flag and word without a wash */
 .bcard.compact { gap: 4px; padding: var(--s3) var(--s3) var(--s3) 14px; border: 0; border-radius: 0; box-shadow: none; }

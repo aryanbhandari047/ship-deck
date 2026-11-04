@@ -1,6 +1,7 @@
 'use strict';
-// The teammate's read-only view of a shared deck. Deck data is GET only from /v1/decks; the only
-// writes are sign-in/out and the viewer's own agent keys. All deck text is set with textContent; redaction markers become grey chips.
+// The teammate's view of a shared deck. Deck data is GET only from /v1/decks; the only writes are
+// sign-in/out, the viewer's own agent keys, a suggestion (suggest) and an answer (answer: the
+// captain's deck checks it and sends it). All deck text is set with textContent; redaction markers become grey chips.
 // Polls at most every 30 s while the tab is visible, pauses after 10 idle minutes and backs off
 // when the relay is over its free limit, so the free tiers are never pushed.
 
@@ -28,6 +29,13 @@
   let paused = false;
   let lastSig = '';
   let opener = null;
+  // Help requests (scope answer): the version seen on board reads, the open list, what was notified.
+  let helpVer = null;
+  let helpList = [];
+  let helpTimer = null;
+  const HELP_IDLE_MS = 120e3;
+  const notified = new Set();
+  try { for (const id of JSON.parse(localStorage.getItem('sd.helpNotified') || '[]')) notified.add(id); } catch { /* none */ }
 
   // ---------- dom ----------
   function h(tag, attrs, ...kids) {
@@ -127,6 +135,8 @@
     if (board.offline) note.textContent = `${possessive(first(board.captain.name))} deck is offline: no update in the last hour. You will see it again when their Ship Deck is running.`;
     renderBoard();
     renderAside();
+    if (typeof board.help === 'string' && board.help !== helpVer) loadHelp();
+    if (openAfterLoad) { const ref = openAfterLoad; openAfterLoad = null; openHelp({ captainSub: current, ref }); }
     if (++polls % 60 === 0) refreshDecks(); // the deck list changes rarely: every 30 minutes
     schedule(POLL_MS);
   }
@@ -147,10 +157,70 @@
   }
   function schedule(ms) {
     clearTimeout(timer);
+    idleHelp();
     if (document.hidden) return; // resumes on visibilitychange
     if (Date.now() - lastInput > IDLE_MS) { paused = true; renderAge(); return; }
     timer = setTimeout(loadBoard, ms);
   }
+
+  // ---------- help requests (Answer for me) ----------
+  const answerer = () => decks.some((d) => d.grant && d.grant.scopes.includes('answer'));
+  const canAnswer = () => !!(board && board.grant && board.grant.scopes.includes('answer'));
+  const takesAnswers = () => !!(board && (board.features || []).includes('answer'));
+  // While the board poll sleeps (hidden tab or idle), someone who may answer still hears about
+  // help requests: one cheap check every 2 minutes.
+  function idleHelp() {
+    clearTimeout(helpTimer);
+    if (!answerer()) return;
+    helpTimer = setTimeout(async () => {
+      if (document.hidden || paused) await loadHelp(true);
+      idleHelp();
+    }, HELP_IDLE_MS);
+  }
+  async function loadHelp(since) {
+    const r = await get('/v1/me/help' + (since && helpVer ? '?since=' + encodeURIComponent(helpVer) : ''));
+    if (r.status !== 200 || r.data.same) return;
+    helpVer = r.data.version;
+    helpList = r.data.help || [];
+    for (const x of helpList) notify(x);
+    renderHelp();
+    if (board) { lastSig = ''; renderBoard(); }
+  }
+  function notify(x) {
+    if (notified.has(x.id)) return;
+    notified.add(x.id);
+    try { localStorage.setItem('sd.helpNotified', JSON.stringify([...notified].slice(-100))); } catch { /* private window */ }
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    try {
+      const n = new Notification(`${first(x.captainName)} needs your help`, { body: x.title || 'Something in their Needs you', tag: 'sd-help-' + x.id });
+      n.onclick = () => { window.focus(); openHelp(x); n.close(); };
+    } catch { /* some browsers only notify from a service worker */ }
+  }
+  function renderHelp() {
+    const box = $('help');
+    const btn = $('notify-btn');
+    document.title = helpList.length ? `(${helpList.length}) Ship Deck` : 'Ship Deck';
+    box.hidden = !helpList.length;
+    btn.hidden = !('Notification' in window) || Notification.permission !== 'default' || !answerer();
+    if (!helpList.length) return;
+    const names = [...new Set(helpList.map((x) => first(x.captainName)))];
+    $('help-title').textContent = `${names.join(' and ')} need${names.length === 1 ? 's' : ''} your help`;
+    $('help-list').replaceChildren(...helpList.map((x) => h('li', null,
+      h('div', null, h('b', null, rtext(x.title)), h('span', { class: 'when', text: ` ${first(x.captainName)} asked ${ago(x.at)} ago` })),
+      h('button', { class: 'btn sm primary', type: 'button', text: 'Answer', onclick: (e) => openHelp(x, e.currentTarget) }))));
+  }
+  $('notify-btn').addEventListener('click', async () => {
+    try { await Notification.requestPermission(); } catch { /* ignored */ }
+    renderHelp();
+  });
+  // Opens the item a captain asked about (switching decks first when needed).
+  let openAfterLoad = null;
+  function openHelp(x, from) {
+    if (x.captainSub !== current) { openAfterLoad = x.ref; switchDeck(x.captainSub); return; }
+    const item = board && [...(board.workers || []), ...(board.calls || []).map((c) => ({ ...c, call: true }))].find((w) => w.ref === x.ref);
+    if (item) openWorker(item, from);
+  }
+  const askedMe = (ref) => helpList.some((x) => x.captainSub === current && x.ref === ref);
   function wake() {
     lastInput = Date.now();
     if (paused && current && !document.hidden) { paused = false; loadBoard(); }
@@ -180,7 +250,25 @@
     return !q || [w.title, w.id, w.project, w.summary].some((x) => String(x || '').toLowerCase().includes(q));
   }
 
+  // The card's answer line for someone with Answer for me.
+  function answerAct(w) {
+    if (!canAnswer() || !(w.call || ['needs-decision', 'blocked', 'failed'].includes(w.state))) return null;
+    const name = first(board.captain.name);
+    if (w.guarded) return h('div', { class: 'v-card-act' }, icon('i-lock'), `Only ${name} can answer this`);
+    return h('div', { class: 'v-card-act' },
+      h('button', { class: 'btn sm' + (askedMe(w.ref) ? ' primary' : ''), type: 'button', text: 'Answer for ' + name, onclick: (e) => openWorker(w, e.currentTarget) }),
+      askedMe(w.ref) ? h('span', { text: `${name} asked for your help` }) : null);
+  }
   function card(w) {
+    if (w.call) {
+      const st = B.callStatus();
+      return h('article', { class: 'bcard tone-needs hoist' },
+        h('div', { class: 'card-top' }, pill(st), w.project ? h('span', { class: 'muted', text: w.project }) : null),
+        h('h3', { class: 'card-title' }, h('button', { class: 'card-link', type: 'button', onclick: (e) => openWorker(w, e.currentTarget) }, rtext(w.title))),
+        w.summary ? h('p', { class: 'card-summary' }, rtext(w.summary)) : null,
+        (w.options || []).map((o) => h('div', { class: 'opt-ro' }, h('b', { text: o.letter }), rtext(o.text))),
+        answerAct(w));
+    }
     const { st } = workerStatus(w);
     const tool = [w.model && w.model !== 'default' ? w.model : null, w.effort && w.effort !== 'auto' ? w.effort : null].filter(Boolean).join(' · ');
     return h('article', { class: `bcard tone-${st.tone}${st.tone === 'needs' ? ' hoist' : ''}` },
@@ -189,6 +277,7 @@
       h('div', { class: 'card-meta' }, h('code', { text: w.id || '' }), w.project ? h('span', { text: w.project }) : null),
       w.summary ? h('p', { class: 'card-summary' }, rtext(w.summary)) : null,
       (w.options || []).map((o) => h('div', { class: 'opt-ro' }, h('b', { text: o.letter }), rtext(o.text))),
+      answerAct(w),
       h('div', { class: 'card-foot' }, prChip(w.pr), tool ? h('span', { class: 'tool', text: tool }) : null));
   }
   function prChip(pr) {
@@ -214,13 +303,14 @@
       }
     }
     $('hidden-note').textContent = board.hiddenProjects ? `${board.hiddenProjects} private project${board.hiddenProjects === 1 ? '' : 's'} hidden` : '';
-    const sig = JSON.stringify([workers, project, $('search').value]);
+    const calls = (board.calls || []).map((c) => ({ ...c, call: true }));
+    const sig = JSON.stringify([workers, calls, project, $('search').value, helpList.filter((x) => x.captainSub === current).map((x) => x.ref), canAnswer()]);
     if (sig === lastSig) return;
     lastSig = sig;
     const cols = $('cols');
     cols.textContent = '';
     for (const c of B.COLUMNS) {
-      const list = workers.filter((w) => matches(w) && workerStatus(w).col === c.key);
+      const list = workers.filter((w) => matches(w) && workerStatus(w).col === c.key).concat(c.key === 'needs' ? calls.filter(matches) : []);
       cols.append(h('div', { class: 'col' },
         h('div', { class: 'col-head' }, flagEl(c.flag), h('h2', { text: c.key === 'needs' ? `Needs ${first(name)}` : c.title }), h('span', { class: 'count' + (c.key === 'needs' && list.length ? ' needs' : ''), text: String(list.length) })),
         h('div', { class: 'col-body' }, list.length ? list.map(card) : h('p', { class: 'empty', text: 'Nothing here' }))));
@@ -246,6 +336,7 @@
         [has('chat'), 'Chat and activity'],
         [has('ask'), 'Answers to your agent\'s questions (short quotes; they see each question)'],
         [has('suggest'), 'Suggest answers to decisions (they decide)'],
+        [has('answer'), 'Answer for them: anything in Needs you, never merges, clean-ups, jobs or chat'],
       ];
       for (const [yes, text] of rows) list.append(h('li', { class: yes ? 'yes' : 'no' }, icon(yes ? 'i-check' : 'i-dash'), text));
       list.append(h('li', { class: 'no' }, icon('i-lock'), 'Attachments, paths, sessions'));
@@ -257,9 +348,13 @@
       // Ship Deck syncs skills and notes into the viewer's agent on its own; keys are for agents without it.
       if (has('skills') || has('notes')) extras.append(h('button', { class: 'btn sm', type: 'button', onclick: (e) => openKeys(e.currentTarget) }, icon('i-lock'), 'Agent keys'));
     }
-    $('aside-ask').textContent = g && g.scopes.includes('suggest')
-      ? `You can look and suggest answers to decisions; ${first(name)} decides and sends. To ask something else, message them directly.`
-      : `You can look but not act. To ask ${first(name)} something, message them directly.`;
+    $('aside-ask').textContent = g && g.scopes.includes('answer')
+      ? `You can answer what needs ${first(name)}. Answers they asked you for go to the worker at once; others wait 5 seconds so they can cancel. Items marked destructive, irreversible or security-sensitive stay theirs.`
+      : g && g.scopes.includes('suggest')
+        ? `You can look and suggest answers to decisions; ${first(name)} decides and sends. To ask something else, message them directly.`
+        : `You can look but not act. To ask ${first(name)} something, message them directly.`;
+    $('vb-ro').textContent = g && g.scopes.includes('answer') ? 'Can answer for them' : 'Read-only';
+    renderHelp();
     const box = $('decks');
     box.textContent = '';
     for (const x of decks) {
@@ -304,13 +399,22 @@
     return r.status === 200 ? r.data : null;
   }
   async function openWorker(w, from) {
+    if (w.call) {
+      const body = openSheet(w.title, from);
+      body.append(h('div', { class: 'card-top' }, pill(B.callStatus()), w.project ? h('span', { class: 'muted', text: w.project }) : null));
+      if (w.summary) body.append(h('p', { class: 'card-summary' }, rtext(w.summary)));
+      for (const o of w.options || []) body.append(h('div', { class: 'opt-ro' }, h('b', { text: o.letter }), rtext(o.text)));
+      if (canAnswer()) body.append(await answerForm(w));
+      return;
+    }
     const body = openSheet(w.title, from);
     const { st } = workerStatus(w);
     body.append(h('div', { class: 'card-top' }, pill(st), w.project ? h('span', { class: 'muted', text: w.project }) : null, prChip(w.pr)));
     if (w.summary) body.append(h('p', { class: 'card-summary' }, rtext(w.summary)));
     for (const o of w.options || []) body.append(h('div', { class: 'opt-ro' }, h('b', { text: o.letter }), rtext(o.text)));
     const g = board.grant;
-    if (g.scopes.includes('suggest') && ['needs-decision', 'blocked'].includes(w.state) && (w.options || []).length) body.append(await suggestForm(w));
+    if (canAnswer() && ['needs-decision', 'blocked', 'failed'].includes(w.state)) body.append(await answerForm(w));
+    else if (g.scopes.includes('suggest') && ['needs-decision', 'blocked'].includes(w.state) && (w.options || []).length) body.append(await suggestForm(w));
     if (g.scopes.includes('updates')) {
       const d = await scope('updates', w.ref);
       const list = (d && d.updates && d.updates[w.ref]) || [];
@@ -346,6 +450,51 @@
     return h('section', null, h('h3', { text: 'Suggest an answer' }),
       list.length ? h('ul', { class: 'v-list' }, list.map((s) => h('li', null, h('span', { class: 'when', text: `You suggested ${s.letter} · ${STATE[s.state] || s.state}` }), s.note ? h('span', null, rtext(s.note)) : null))) : null,
       h('div', { class: 'btn-row' }, pick, note, btn), out);
+  }
+  // Answer for me: an option and/or a reply. The captain's deck checks it again and sends it, at
+  // once when they asked for this help, else after 5 seconds in which they can cancel.
+  const ANSWER_STATE = { pending: 'Waiting to be sent', sent: 'Sent to the worker', cancelled: 'Cancelled by them', refused: 'Not sent' };
+  async function answerForm(w) {
+    const name = first(board.captain.name);
+    if (w.guarded) return h('section', null, h('h3', { text: 'Answer' }), h('p', { class: 'hint', text: `Only ${name} can answer this one: it is marked destructive, irreversible or security-sensitive.` }));
+    if (!takesAnswers()) return h('section', null, h('h3', { text: 'Answer' }), h('p', { class: 'hint', text: `${possessive(name)} Ship Deck needs an update before you can answer here.` }));
+    const listEl = h('ul', { class: 'v-list' });
+    const out = h('p', { class: 'muted', role: 'status' });
+    const deck = current;
+    async function refresh() {
+      const r = await get(`/v1/decks/${encodeURIComponent(deck)}/answers`);
+      const mine = ((r.data && r.data.answers) || []).filter((a) => a.ref === w.ref).slice(-5).reverse();
+      listEl.replaceChildren(...mine.map((a) => h('li', null,
+        h('span', { class: 'when', text: `You answered ${ago(a.at)} ago · ${ANSWER_STATE[a.state] || a.state}${a.reason ? ` (${a.reason})` : ''}` }),
+        h('span', null, rtext([a.letter ? `(${a.letter})` : null, a.text].filter(Boolean).join(' '))))));
+      return mine;
+    }
+    // Follow one answer until the deck has sent or cancelled it (about a minute at most).
+    async function follow(id, tries = 0) {
+      const mine = await refresh();
+      const a = mine.find((x) => x.id === id);
+      if (a && a.state === 'pending' && tries < 30) { setTimeout(() => follow(id, tries + 1), 3000); return; }
+      if (a && a.state !== 'pending') out.textContent = a.state === 'sent' ? 'Sent to the worker.' : a.state === 'cancelled' ? `${name} cancelled it; it was not sent.` : `Not sent: ${a.reason || 'it was no longer current'}.`;
+    }
+    const opts = w.options || [];
+    const pick = opts.length ? h('select', { class: 'input', 'aria-label': 'Option' }, h('option', { value: '', text: 'No option' }), opts.map((o) => h('option', { value: o.letter, text: `${o.letter}: ${o.text}` }))) : null;
+    const text = h('textarea', { class: 'input', maxlength: '1000', rows: '3', placeholder: opts.length ? 'Reply (optional with an option)' : 'Your reply to the worker', 'aria-label': 'Reply' });
+    const btn = h('button', { class: 'btn sm primary', type: 'button', text: 'Send answer' });
+    btn.addEventListener('click', async () => {
+      if (!(pick && pick.value) && !text.value.trim()) { text.focus(); return; }
+      btn.disabled = true;
+      const r = await post(`/v1/decks/${encodeURIComponent(deck)}/answers`, { ref: w.ref, letter: pick ? pick.value : '', text: text.value });
+      btn.disabled = false;
+      if (r.status !== 200) { out.textContent = (r.data && r.data.error) || 'Could not send right now'; return; }
+      text.value = '';
+      if (pick) pick.value = '';
+      out.textContent = r.data.answer.asked ? `Sent to ${name}'s deck; it goes to the worker now.` : `Sent to ${name}'s deck. They have 5 seconds to cancel, then it goes to the worker.`;
+      follow(r.data.answer.id);
+    });
+    refresh();
+    return h('section', { class: 'v-answer' }, h('h3', { text: `Answer for ${name}` }),
+      h('p', { class: 'hint', text: askedMe(w.ref) ? `${name} asked for your help: your answer goes to the worker as soon as you send it.` : `${name} did not ask; they get 5 seconds to cancel before it goes to the worker.` }),
+      pick, text, h('div', { class: 'btn-row' }, btn), out, listEl);
   }
   async function openScope(k, from) {
     const body = openSheet(SCOPE_NAME[k], from);

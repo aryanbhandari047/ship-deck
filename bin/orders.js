@@ -34,6 +34,10 @@ function payloadLine(o) {
   if (o.address !== undefined) parts.push(`address=${JSON.stringify(o.address)}`);
   if (o.applied !== undefined) parts.push(`applied=${o.applied}`);
   if (o.targets) parts.push(`targets=${o.targets.join(',')}`);
+  if (o.mate) parts.push(`mate=${o.mate}`);
+  if (o.link) parts.push(`link=${o.link}`);
+  if (o.answeredBy) parts.push(`answeredBy=${o.answeredBy}`);
+  if (o.suggestedBy) parts.push(`suggestedBy=${o.suggestedBy}`);
   return parts.join(' ');
 }
 
