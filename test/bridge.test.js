@@ -207,6 +207,11 @@ test('parseOptions reads lettered choices in the shapes the fleet writes', () =>
   assert.deepEqual(p('(A) only one option'), [], 'needs at least A and B');
   assert.deepEqual(p('see (B) then (A)'), [], 'letters must run in order');
   assert.deepEqual(p('a plan) and b) without the word'), [], 'bare letters need an "options" cue');
+  assert.deepEqual(p('Which name? A) Launch B) Set sail C) Go'), [['A', 'Launch', false], ['B', 'Set sail', false], ['C', 'Go', false]]);
+  assert.deepEqual(p('A) keep it B) drop it'), [['A', 'keep it', false], ['B', 'drop it', false]], 'bare form may open the note');
+  assert.deepEqual(p('Our plan A) failed and B) is untested.'), [], 'bare letters mid-prose stay plain');
+  assert.deepEqual(p('Which name? A) Launch'), [], 'a single bare A) is not a choice');
+  assert.deepEqual(p('Pick one: a) lowercase b) list'), [], 'bare lowercase letters are not choices');
   assert.deepEqual(p(''), []);
   assert.deepEqual(p(undefined), []);
 });
