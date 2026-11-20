@@ -1,11 +1,13 @@
 # Ship Deck
 
-**Run a crew of coding agents from one browser tab.**
+**You give the orders. Your first mate runs the crew.**
 
-Running one coding agent is easy. Running five means five terminals, and the
-one that needs your answer is always the one you are not looking at. Ship
-Deck puts the whole crew on one live board. What needs you comes first, and
-you answer it right there.
+Running several coding agents usually means you run them: a terminal each,
+instructions for each, and checking on each. With Ship Deck you talk to one
+agent, your first mate. Tell it what you want; it splits the work, starts a
+worker per task, writes each worker's instructions and watches them all. You
+hear from it only when a decision is yours, and the board shows the whole
+crew, with what needs you on top.
 
 ![The Board: what needs you on top, the rest in quiet lanes, the chat with your lead agent on the right](docs/screenshot.png)
 
@@ -33,22 +35,25 @@ password prompt (see [Stay awake](#stay-awake-with-the-lid-closed-macos)).
 
 ## Why you'd want it
 
-- **No more terminal hopping.** Every agent, on every project, sits on one
-  live board. One tab replaces the stack of terminals.
-- **Run many agents in parallel; see who needs you first.** Each task gets its
-  own agent and clean git worktree. Anything blocked or waiting on your call
-  rises to **Needs you**; the rest stay quiet.
-- **Answer in place.** Pick an option or type a reply on the card. Open a
+- **You talk to one agent, not five.** Tell your first mate what you want. It
+  splits the work, starts a worker per task, each in its own clean git
+  worktree, and writes every worker's instructions.
+- **It supervises so you don't.** It nudges stuck workers, restarts crashed
+  ones, keeps tasks that touch the same code from colliding, and tracks
+  everything in a backlog that survives restarts.
+- **It interrupts you only for real decisions.** A PR ready for review, a
+  question only you can answer, a merge, a credential. Everything else stays
+  quiet.
+- **One board, what needs you on top.** Every worker on every project sits on
+  one live board. Pick an option or type a reply right on the card, or open a
   worker for its question, its delivery track and its live terminal.
-- **Your teammates' know-how works for you.** When a teammate shares, their
-  skills and notes install for your agent automatically, and it can ask their
-  library questions and get cited answers.
-- **Build your own library, and share it.** Keep your skills and notes in one
-  place. Share them with your team by email, read-only, with private notes
-  never leaving your machine.
-- **Stay in the terminal if you like.** You never need the UI. Work with your
-  lead agent in its terminal and the board keeps itself in sync.
-- **Close the lid; the work goes on.** On macOS, keep-awake keeps your agents
+- **Your teammates' know-how works for you.** Share skills and notes with your
+  team by email, read-only; private notes never leave your machine. What a
+  teammate shares installs for your agent, and it can ask their library for
+  cited answers.
+- **Stay in the terminal if you like.** Talk to your first mate in its
+  terminal and the board keeps itself in sync.
+- **Close the lid; the work goes on.** On macOS, keep-awake keeps your crew
   running with the lid closed. One switch turns it off.
 - **One command to set up, one to update.** The installer brings everything
   you need; `ship-deck update` (or the **Update** button) keeps you current
