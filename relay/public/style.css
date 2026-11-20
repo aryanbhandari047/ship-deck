@@ -490,6 +490,9 @@ body.resizing .scene, body.resizing .pane { pointer-events: none; }
 .resume-row .btn { background: transparent; color: #B1C0CF; border-color: #2C4560; }
 .resume-row .btn:hover { color: #E3EBF2; }
 .resume-meta { margin: 4px 0 0; }
+.term-attach { display: grid; gap: 8px; }
+.term-attach-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.term-attach-row .hint { margin: 0; }
 
 /* sessions */
 .list.sessions li { padding: 10px 2px; }

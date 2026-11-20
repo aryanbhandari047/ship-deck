@@ -278,11 +278,11 @@ replace the path with your clone, save it as
   button in the header jumps to it.
 - **Worker drawer**: click a card or berth; `#task=<id>` deep-links. The
   status and last update, the title, id, project, pull request and tool, then
-  Ask for status, Merge PR, **Open in terminal** (the resume command) and
+  Ask for status, Merge PR, **Resume command** (the session resume command) and
   Clean up, with its delivery track in words under the facts (each step, and
   who merges). A worker that needs you shows its question and answer box on top.
   Tabs: **Terminal** (the latest update, the live terminal with Wrap, Follow,
-  Pause and Copy, and Message the worker), **Updates** (every status line,
+  Pause and Copy, Open in terminal and Copy command, and Message the worker), **Updates** (every status line,
   one timestamp format), **Details** (brief, data files, facts in words,
   messages about it, its delivery path, who merges and whether it came from
   X) and **Model and effort**.
@@ -380,13 +380,26 @@ checked by `test/contrast.test.js` against the tokens in `public/style.css`.
 - **Terminal peek**: a worker's details show the last 80 lines of its
   terminal (`tmux capture-pane -p -e -J -t <window> -S -80`), refreshed every 2 s,
   with its colours (parsed into class names, never HTML) and Wrap/Follow toggles.
+- **Open in terminal**: under the peek, for a tmux-backed worker whose window
+  exists (hidden for other `backend=` values, disabled with a reason when the
+  window is gone). `POST /api/attach {id, open}` (loopback only, the usual POST
+  guards) reads the window from `state/<id>.meta`, checks it against
+  `tmux list-windows -a` and builds `tmux new-session -t '=<session>' -s
+  deck-<id>-<hex> \; set-option -t <that> destroy-unattached on \;
+  select-window -t <that>:@<window id>`: a throwaway session grouped with the
+  worker's, so other attached clients keep their view, and Ctrl-b d removes only
+  it. With `open` on macOS it opens a window in iTerm (when running) or
+  Terminal (`osascript` with a constant script; the command is its argv, never
+  script text). **Copy command** copies the same command; elsewhere that is the
+  only option ("paste in a terminal; detach with Ctrl-b d"). It never sends keys
+  to, kills or renames the worker's window.
 - **Message a worker directly**: one line (max 2000 chars, confirmed first)
   sent with exactly `FM_HOME=<home> <home>/bin/fm-send.sh <window> <message>`.
 - **Live settings** (claude workers only): `/effort <level>` or
   `/model <model>` through the same fm-send call, from an allow-list.
 
-Those fm-send calls (plus `tmux capture-pane` and `tmux list-windows`) are the
-only commands it runs while serving, always via `execFile` with a fixed argv;
+Those fm-send calls (plus `tmux capture-pane`, `tmux list-windows` and, on an
+Open in terminal click, `osascript`) are the only commands it runs while serving, always via `execFile` with a fixed argv;
 at startup it may also run the platform's browser opener (`open`,
 `xdg-open` or `start`) with its own URL (`--no-open` skips it). On macOS it
 also reads `pmset -g` / `pmset -g batt`, and only on the captain's Settings
@@ -564,7 +577,7 @@ spawned (meta birth time) most recently before the session started. The first
 mate is the newest verified session in FM_HOME. Matches are merged into
 `~/.ship-deck/sessions.json` (0600) as `{id: {sessionId, cwd, harness,
 firstSeen, lastSeen}}` (the first mate under `_firstmate`) and kept after the
-crew member leaves. A worker's **Open in terminal** and the first mate drawer's
+crew member leaves. A worker's **Resume command** and the first mate drawer's
 **Past sessions** show the folder (home as `~`) and `claude --resume
 <sessionId>`; Copy copies the full `cd '<cwd>' && claude --resume <sessionId>`.
 Other harnesses show "Resume id unknown (<harness>)".
@@ -800,13 +813,15 @@ also prevents lid-close sleep and needs admin rights (`lib/awake.js`).
 
 - Binds `127.0.0.1` only; every request must carry `Host: 127.0.0.1:<port>` or
   `localhost:<port>` (blocks DNS rebinding).
-- `POST /api/send`, `POST /api/orders`, `POST /api/config`, `POST /api/settings`, `POST /api/awake` and `POST /api/update` also require `X-Ship-Deck: 1`,
+- `POST /api/send`, `POST /api/attach`, `POST /api/orders`, `POST /api/config`, `POST /api/settings`, `POST /api/awake` and `POST /api/update` also require `X-Ship-Deck: 1`,
   `Content-Type: application/json`, a same-origin `Origin` when one is sent, and
   no cross-site `Sec-Fetch-Site`. Bodies are capped at 16 KB.
 - `POST /api/attachments` has the same header, Origin and Sec-Fetch-Site checks,
   refuses form content types and non-loopback peers, and streams the raw body
   to disk with the per-type cap applied as bytes arrive. Attachment ids must be
   UUIDs; frame names must be `frame-NNNN.jpg` or `index.json`.
+- `POST /api/attach` also refuses non-loopback peers. Share viewers live on the
+  relay and never see windows, backends or this route.
 - Action ids must match `^[a-z0-9][a-z0-9-]*$` and have a `state/<id>.meta`;
   the window recorded there must look like `session:window`.
 - File views only serve regular files directly under `data/<id>/` (symlinks out
@@ -851,6 +866,11 @@ wake check on chat orders, decision option parsing, Captain's Call against the
 real backlog format (`test/fixtures/backlog/real-format.md`), session discovery
 and `sessions.json`, skills, the markdown renderer, the config allow-list and
 the exact fm-send argv, and `bin/start.sh`.
+`test/terminal.test.js` covers Open in terminal: target resolution (bad id,
+missing meta or window, gone window, other backends), the exact tmux argv and
+quoting, the constant AppleScript with the command as argv, iTerm/Terminal/Linux
+paths, the route's guards (cross-site, share-viewer origin, non-loopback) and the
+drawer states.
 `test/peek.test.js` covers the terminal peek's SGR parser (`public/ansi.js`:
 colour classes, unclosed codes, malicious and truncated sequences) and the
 settings picker preselecting the current value.
@@ -934,6 +954,7 @@ All paths are relative to the fleet home. Missing files are fine.
 | `~/.claude/skills/*/SKILL.md`, `<home>/.agents/skills/*/SKILL.md` | Skills in the Ship's Library (name and description from the frontmatter); `teammate-*` skills synced from a teammate (with `--share`) are grouped as "Shared by <name>" and never shared on |
 | `pmset -g`, `pmset -g batt` (macOS) | Stay awake with the lid closed: its real state, the power source and battery level |
 | `tmux list-windows -a` | Optional: marks whether a crew member's window is open. Skipped if tmux is missing. |
+| `state/<id>.meta` `backend=` | Absent or `tmux`: Open in terminal is offered; any other runtime backend hides it |
 
 ## Layout
 
@@ -941,7 +962,8 @@ All paths are relative to the fleet home. Missing files are fine.
 server.js          HTTP server: static files, /api/*, POST guards, port fallback, startup
 lib/home.js        Firstmate home detection, Claude dirs for a home, captain name
 lib/fleet.js       Parsers and the read-only snapshot builder
-lib/actions.js     Window lookup, pane peek, fm-send, data files (the only exec)
+lib/actions.js     Window lookup, pane peek, fm-send, data files
+lib/terminal.js    Open in terminal: attach command for a live tmux window, osascript launch (macOS)
 lib/orders.js      Orders queue in ~/.ship-deck
 lib/attachments.js Bridge attachments: magic bytes, storage, stills, Range serving
 lib/library.js     Ship's Library allow-list (home files, memory, skills)

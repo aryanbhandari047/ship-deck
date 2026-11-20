@@ -7,6 +7,7 @@
 // Binds to 127.0.0.1 only. Writes to FM_HOME only one wake line per order (lib/wake.js,
 // --no-wake); other file writes go to the orders dir (~/.ship-deck). The only commands run are tmux list-windows,
 // tmux capture-pane and <home>/bin/fm-send.sh (see lib/actions.js), the browser opener at startup,
+// osascript to open the captain's terminal on a worker's window (lib/terminal.js, a click only),
 // and on macOS pmset (read) or the admin-prompted disablesleep change (lib/awake.js). An installed
 // deck also checks for updates with read-only git and runs bin/update.sh on a click (lib/update.js).
 // --share (off here; the installed launcher turns it on unless install.sh --no-share) adds one
@@ -32,6 +33,7 @@ const settings = require('./lib/settings');
 const awake = require('./lib/awake');
 const update = require('./lib/update');
 const delegate = require('./lib/delegate');
+const terminal = require('./lib/terminal');
 const board = require('./public/board');
 
 const DEFAULT_PORT = 4747;
@@ -39,7 +41,7 @@ const PORT_TRIES = 20;
 const MAX_BODY = 16 * 1024;
 const ORDERS_IN_SNAPSHOT = 60;
 const THREAD_LIMIT = 300;
-const POST_ROUTES = new Set(['/api/send', '/api/orders', '/api/config', '/api/settings', '/api/awake', '/api/update']);
+const POST_ROUTES = new Set(['/api/send', '/api/attach', '/api/orders', '/api/config', '/api/settings', '/api/awake', '/api/update']);
 const SHARE_POST = new Set(['/api/share/signin', '/api/share/signout', '/api/share/grant', '/api/share/revoke', '/api/share/invite', '/api/share/pause', '/api/share/knowledge', '/api/share/item', '/api/share/pool', '/api/share/ask', '/api/share/suggestion', '/api/share/help', '/api/share/answer']);
 // Library files a "notes and memory" grant may carry (plus memory/*).
 const SHARE_NOTES = ['home:data/captain.md', 'home:data/captain-shared.md', 'home:data/learnings.md'];
@@ -266,6 +268,7 @@ function createServer(opts) {
   const exec = opts.exec || actions.defaultExec;
   // pmset/osascript, injectable separately so tests never touch real sleep settings.
   const awakeDeps = { exec: opts.awakeExec || actions.defaultExec, platform: opts.platform };
+  const platform = opts.platform || process.platform;
   let awakeBusy = false;
   const ordersDir = opts.ordersDir || orders.defaultDir();
   const claudeDir = opts.claudeDir || sessions.defaultClaudeDir();
@@ -294,6 +297,7 @@ function createServer(opts) {
     snap.captain = { name: captain };
     snap.settings = settings.readSettings(ordersDir);
     snap.homeLabel = tildePath(opts.home);
+    snap.terminal = { open: platform === 'darwin' }; // "Open in terminal" can launch one here
     snap.firstmate = { session: sessionView(known[sessions.FIRST_MATE_KEY], 'claude') };
     // Teammates' suggested answers (live pairing), shown on the decision; never sent by themselves.
     snap.suggestions = agent ? agent.suggestions(snap.tasks) : [];
@@ -479,7 +483,13 @@ function createServer(opts) {
   async function handlePost(req, res, url) {
     const why = postGuard(req);
     if (why) return json(res, 403, { ok: false, error: why });
+    if (url.pathname === '/api/attach' && !loopback(req)) { req.resume(); return json(res, 403, { ok: false, error: 'only from this computer' }); }
     const body = await readBody(req);
+    if (url.pathname === '/api/attach') {
+      // { id, open }: the attach command for a worker's live tmux window; open (macOS) launches it.
+      if (!actions.validId(body.id)) return json(res, 400, { ok: false, error: 'invalid id' });
+      return json(res, 200, await terminal.attach(opts.home, body.id, { open: body.open === true, exec, platform }));
+    }
     if (url.pathname === '/api/send') {
       const id = body.id;
       if (!actions.validId(id)) return json(res, 400, { ok: false, error: 'invalid id' });
