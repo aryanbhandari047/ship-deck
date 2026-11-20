@@ -56,6 +56,12 @@ password prompt (see [Stay awake](#stay-awake-with-the-lid-closed-macos)).
 
 ![A worker that needs you: the question, the answer buttons and its live terminal](docs/decision.png)
 
+**Jump into a worker's terminal.** Under a worker's live terminal, **Open in
+terminal** opens its real tmux window in iTerm or Terminal (macOS) through a
+throwaway session, so your other views stay where they are. Detach with
+Ctrl-b d and the worker keeps running. **Copy command** copies the same attach
+command for any terminal (the only option on Linux).
+
 The **Ship** view shows the same crew as a nautical chart, grouped by project.
 Status is always a flag, a colour and a word, so it reads without colour too.
 Light and dark themes pass WCAG AA, and the layout works on a phone.

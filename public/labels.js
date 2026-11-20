@@ -70,7 +70,18 @@
     return { selected: '', options: [['', label], ...(list || []).filter((v) => v !== cur && v !== pending).map((v) => [v, v])] };
   }
 
-  const api = { configChoices, KIND_LABEL, STATE_LABEL, MESSAGE_STATUS, kindLabel, stateLabel, messageStatus, firstClause, quietDays, quietText, summary };
+  // "Open in terminal" for a worker t ({ window, backend, alive }). canOpen: the deck can launch a
+  // terminal (macOS); otherwise only Copy command. Hidden off tmux; disabled when its window is not there.
+  function attachState(t, canOpen) {
+    if (!t || !t.window || (t.backend && t.backend !== 'tmux')) return { show: false };
+    const s = { show: true, open: !!canOpen, enabled: true, reason: null,
+      hint: canOpen ? 'Opens its live window in your terminal; detach with Ctrl-b d.' : 'Paste in a terminal; detach with Ctrl-b d.' };
+    if (t.alive === false) return { ...s, enabled: false, reason: 'Its tmux window is gone.' };
+    if (t.alive !== true) return { ...s, enabled: false, reason: 'Ship Deck cannot see tmux right now.' };
+    return s;
+  }
+
+  const api = { attachState, configChoices, KIND_LABEL, STATE_LABEL, MESSAGE_STATUS, kindLabel, stateLabel, messageStatus, firstClause, quietDays, quietText, summary };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.ShipDeckLabels = api;
 })(typeof window !== 'undefined' ? window : globalThis);

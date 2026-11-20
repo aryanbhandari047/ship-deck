@@ -1180,6 +1180,8 @@
     ui.drawerTitle.textContent = titleOf(t.id);
     const dv = B.deliveryOf(t);
     if (!unchanged('drawer-head', t.id, t.title, t.project, t.pr, B.toolText(t), t.window, t.alive, t.kind, t.fromX, dv)) renderTaskHead(t, dv);
+    const as = L.attachState(t, snap.terminal && snap.terminal.open);
+    if (!unchanged('drawer-attach', t.id, as)) renderAttach(as);
     if (!unchanged('drawer-resume', t.id, t.session)) td.termOpen.replaceChildren(h('p', { class: 'hint', text: 'Copy into a terminal to pick up this worker’s Claude Code session.' }), resumeBlock(t.session));
     if (!unchanged('drawer-decision', t.id, t.state, t.stale, lastNote(t), t.options, suggestionsFor(t), delegationSig({ taskId: t.id }, t.project))) renderDecision(t);
     if (!unchanged('drawer-updates', t.id, t.lastStatus)) renderUpdates(t);
@@ -1188,6 +1190,15 @@
     renderTaskOrders(t);
     td.tabBtns.terminal.hidden = !t.window;
     if (!t.window && td.tab === 'terminal') showDrawerTab('updates');
+  }
+
+  function renderAttach(as) {
+    const d = td;
+    d.attach.hidden = !as.show;
+    if (!as.show) return;
+    d.attachOpen.hidden = !as.open;
+    d.attachOpen.disabled = d.attachCopy.disabled = !as.enabled;
+    d.attachNote.textContent = as.reason || as.hint;
   }
 
   function renderTaskHead(t, dv) {
@@ -1379,7 +1390,7 @@
     const d = { id };
     const name = () => titleOf(id);
 
-    // Header: meta chips, the asks, the "Open in terminal" panel and the tabs.
+    // Header: meta chips, the asks, the "Resume command" panel and the tabs.
     d.meta = h('div', { class: 'd-meta' });
     d.track = h('div', { class: 'd-track', hidden: true });
     d.mergeBtn = h('button', { class: 'btn sm', type: 'button', text: 'Merge PR…', onclick: () => queueOrder({ kind: 'merge', target: id }, { title: `Ask the first mate to merge the pull request of “${name()}”?`, body: (td && td.task && td.task.pr) || null }) });
@@ -1388,7 +1399,7 @@
       d.termOpen.hidden = !d.termOpen.hidden;
       d.termBtn.setAttribute('aria-expanded', String(!d.termOpen.hidden));
       if (!d.termOpen.hidden) { const b = d.termOpen.querySelector('.btn'); if (b) b.focus(); }
-    } }, icon('i-term'), 'Open in terminal');
+    } }, icon('i-term'), 'Resume command');
     const actions = h('div', { class: 'd-actions' },
       h('button', { class: 'btn sm', type: 'button', text: 'Ask for status', title: 'Asks the first mate for a status update', onclick: () => queueOrder({ kind: 'status', target: id }) }),
       d.mergeBtn, d.termBtn,
@@ -1454,6 +1465,26 @@
       d.peekText,
       h('div', { class: 'term-foot' }, h('span', { text: 'Last lines of its terminal, colours kept' }), h('span', { class: 'spacer' }), h('span', { text: 'Read-only. To type into it, use Message the worker.' })));
 
+    // Open in terminal: the captain's own terminal on its live tmux window (POST /api/attach).
+    d.attachOpen = h('button', { class: 'btn sm', type: 'button', title: 'Open this worker’s live tmux window in your terminal', onclick: () => attachTo(true) }, icon('i-term'), h('span', { class: 'lbl', text: 'Open in terminal' }));
+    d.attachCopy = h('button', { class: 'btn sm', type: 'button', title: 'Copy the command that attaches to its live tmux window', onclick: () => attachTo(false) }, icon('i-copy'), h('span', { class: 'lbl', text: 'Copy command' }));
+    d.attachCmd = h('code', { class: 'resume-cmd' });
+    d.attachCmdRow = h('div', { class: 'resume-row', hidden: true }, d.attachCmd);
+    d.attachNote = h('span', { class: 'hint' });
+    d.attach = h('div', { class: 'term-attach', hidden: true }, h('div', { class: 'term-attach-row' }, d.attachOpen, d.attachCopy, d.attachNote), d.attachCmdRow);
+    const attachTo = async (open) => {
+      const btn = open ? d.attachOpen : d.attachCopy;
+      btn.disabled = true;
+      const r = await post('/api/attach', { id, open });
+      btn.disabled = false;
+      if (!r.ok) { toast(`Cannot open ${name()}: ${r.error || 'unknown error'}`, 'err'); return; }
+      d.attachCmd.textContent = r.command;
+      d.attachCmdRow.hidden = false;
+      if (!open) return copyText(r.command, btn);
+      if (r.opened) toast(`Opened ${name()} in ${r.app === 'iterm' ? 'iTerm' : 'Terminal'}; detach with Ctrl-b d`, 'ok');
+      else { d.attachNote.textContent = `Could not open a terminal (${r.error || 'unknown error'}). Copy the command: ${r.hint}.`; toast('Could not open a terminal; copy the command instead', 'err'); }
+    };
+
     d.msg = persist(h('input', { class: 'input', type: 'text', maxlength: '2000', placeholder: 'One line, sent straight to this worker', 'aria-label': `Message to ${name()}`, autocomplete: 'off' }), 'msg.' + id);
     const sendBtn = h('button', { class: 'btn', type: 'submit', text: 'Send…' });
     const form = h('form', { class: 'msg-form' }, d.msg, sendBtn);
@@ -1469,7 +1500,7 @@
       else toast(`Send to ${name()} failed: ${r.error || 'unknown error'}`, 'err');
     });
     d.panels.terminal = h('section', { class: 'd-panel', id: 'dpanel-terminal', role: 'tabpanel', 'aria-labelledby': 'dtab-terminal' },
-      d.latest, term,
+      d.latest, d.attach, term,
       h('div', { class: 'msg-wrap' }, h('h3', { class: 'h-sec', text: 'Message the worker' }), form,
         h('p', { class: 'hint', text: 'Goes straight into its terminal and skips the first mate. Use it for quick nudges.' })));
     d.updates = h('div');
@@ -1483,7 +1514,7 @@
     d.root = h('div', { class: 'task-drawer' }, d.file, d.decision, ...DRAWER_TABS.map(([k]) => d.panels[k]));
     ui.drawerBody.replaceChildren(d.root);
     ui.drawerBody.scrollTop = 0;
-    for (const k of ['drawer-head', 'drawer-details', 'drawer-orders', 'drawer-decision', 'drawer-updates', 'drawer-resume', 'drawer-config']) sigs.delete(k);
+    for (const k of ['drawer-head', 'drawer-attach', 'drawer-details', 'drawer-orders', 'drawer-decision', 'drawer-updates', 'drawer-resume', 'drawer-config']) sigs.delete(k);
     td = d;
     d.tabBtns.terminal.hidden = !t.window;
     showDrawerTab(store.get('drawerTab', 'terminal'));
